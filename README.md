@@ -1,6 +1,5 @@
 <div align="center">
 
-<img src="Screenshots/banner.png" alt="DoseBuddy Banner" width="100%" />
 
 <br/>
 
