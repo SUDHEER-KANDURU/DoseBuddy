@@ -1,6 +1,5 @@
 <div align="center">
 
-<img src="Screenshots/banner.png" alt="DoseBuddy Banner" width="100%" />
 
 <br/>
 
@@ -26,15 +25,13 @@
 
 <br/>
 
-[🚀 Features](#-features) &nbsp;•&nbsp; [🤖 AI Features](#-ai-features) &nbsp;•&nbsp; [🛠 Tech Stack](#-tech-stack) &nbsp;•&nbsp; [⚙️ Setup](#️-installation--setup) &nbsp;•&nbsp; [📸 Screenshots](#-screenshots) &nbsp;•&nbsp; [👨‍💻 Author](#-author)
-
 <br/>
 
 </div>
 
 ---
 
-## 📖 About the Project
+##  About the Project
 
 > *"Nearly 50% of patients with chronic conditions don't take their medications as prescribed — leading to preventable hospitalizations and worsening health outcomes."*
 
@@ -54,15 +51,15 @@ Built as a **portfolio-grade, production-style full-stack project**, DoseBuddy d
 
 ---
 
-## ⚡ Key Highlights
+##  Key Highlights
 
 <div align="center">
 
-| 🔐 JWT Auth | 📄 Prescription OCR | 🤖 AI Medicine Assistant | 🩺 Symptom Checker |
+|  JWT Auth |  Prescription OCR |  AI Medicine Assistant |  Symptom Checker |
 |:---:|:---:|:---:|:---:|
 | Secure login & registration with token-based auth | Scan prescriptions via Gemini Vision API | Ask anything about medicines & interactions | AI-powered symptom analysis & guidance |
 
-| 📊 Health Analytics | 🔥 Streak Tracking | 💉 Vitals Monitor | 🌙 Dark Mode |
+|  Health Analytics |  Streak Tracking |  Vitals Monitor |  Dark Mode |
 |:---:|:---:|:---:|:---:|
 | Adherence reports & dose history charts | Gamified daily dose consistency | Blood pressure, sugar, heart rate logs | Full light/dark theme support |
 
@@ -70,73 +67,72 @@ Built as a **portfolio-grade, production-style full-stack project**, DoseBuddy d
 
 ---
 
-## ✨ Features
+##  Features
 
 <details>
-<summary><b>🏥 Core Healthcare Features</b></summary>
+<summary><b> Core Healthcare Features</b></summary>
 <br/>
 
-- 💊 **Medication Management** — Add, edit, and delete medications with fully custom schedules
-- ⏰ **Dose Reminders** — Time-based browser notifications for upcoming and missed doses
-- ✅ **Dose Tracking** — Mark doses as taken, missed, or skipped with complete history
-- 🔥 **Adherence Streaks** — Gamified streak system to build consistent habits
-- 📊 **Health Reports** — Visual adherence statistics, dose history charts, and summaries
+-  **Medication Management** — Add, edit, and delete medications with fully custom schedules
+-  **Dose Reminders** — Time-based browser notifications for upcoming and missed doses
+-  **Dose Tracking** — Mark doses as taken, missed, or skipped with complete history
+-  **Adherence Streaks** — Gamified streak system to build consistent habits
+-  **Health Reports** — Visual adherence statistics, dose history charts, and summaries
 
 </details>
 
 <details>
-<summary><b>🤖 AI-Powered Features</b></summary>
+<summary><b> AI-Powered Features</b></summary>
 <br/>
 
-- 🧠 **Medicine Assistant** — Natural language queries about medicines, dosages, and drug interactions
-- 🩺 **Symptom Checker** — Describe symptoms, receive structured differential diagnosis and guidance
-- 📄 **Prescription OCR** — Upload prescription images or PDFs for automatic medicine extraction and scheduling
+-  **Medicine Assistant** — Natural language queries about medicines, dosages, and drug interactions
+-  **Symptom Checker** — Describe symptoms, receive structured differential diagnosis and guidance
+-  **Prescription OCR** — Upload prescription images or PDFs for automatic medicine extraction and scheduling
 
 </details>
 
 <details>
-<summary><b>📋 Health Monitoring</b></summary>
+<summary><b> Health Monitoring</b></summary>
 <br/>
 
-- ⚖️ **BMI Calculator** — Calculate and track Body Mass Index with health category classification
-- 🩸 **Vitals Tracker** — Log blood pressure, heart rate, blood sugar, temperature, and more
-- 📅 **Activity Feed** — Chronological log of all health-related actions and AI queries
+-  **BMI Calculator** — Calculate and track Body Mass Index with health category classification
+-  **Vitals Tracker** — Log blood pressure, heart rate, blood sugar, temperature, and more
+-  **Activity Feed** — Chronological log of all health-related actions and AI queries
 
 </details>
 
 <details>
-<summary><b>👤 User & App Features</b></summary>
+<summary><b> User & App Features</b></summary>
 <br/>
 
-- 🔐 **JWT Authentication** — Secure login, registration, and session management
-- 👤 **Profile Management** — Update personal health details, preferences, and password
-- 🌙 **Dark / Light Mode** — Full theme support across every view
-- 📱 **Responsive Design** — Mobile, tablet, and desktop friendly
+-  **JWT Authentication** — Secure login, registration, and session management
+-  **Profile Management** — Update personal health details, preferences, and password
+-  **Dark / Light Mode** — Full theme support across every view
+-  **Responsive Design** — Mobile, tablet, and desktop friendly
 
 </details>
 
 ---
 
-## 🤖 AI Features
+##  AI Features
 
-### 💊 Medicine Assistant
-> Powered by **Groq API — LLaMA 3.3 70B Versatile**
+###  Medicine Assistant
 
 Ask any question about a medicine in plain language. The AI returns a professionally structured, healthcare-style response:
 
 ```
-💊  MEDICINE OVERVIEW        →  Drug class, mechanism, and what it is
-📋  DOSAGE INFORMATION       →  Standard dosing guidelines and frequency
-✅  COMMON USES              →  Approved indications and common applications
-⚠️  WARNINGS & PRECAUTIONS  →  Contraindications, interactions, and safety notes
-🔍  SIDE EFFECTS             →  Common and serious adverse effects
-🩺  WHEN TO CONSULT A DOCTOR →  Red-flag symptoms and escalation guidance
+  MEDICINE OVERVIEW        →  Drug class, mechanism, and what it is
+  DOSAGE INFORMATION       →  Standard dosing guidelines and frequency
+  COMMON USES              →  Approved indications and common applications
+  WARNINGS & PRECAUTIONS  →  Contraindications, interactions, and safety notes
+  SIDE EFFECTS             →  Common and serious adverse effects
+  WHEN TO CONSULT A DOCTOR →  Red-flag symptoms and escalation guidance
 ```
 
 ---
 
-### 🩺 Symptom Checker
-> Powered by **Groq API — LLaMA 3.3 70B Versatile**
+###  Symptom Checker
+
 
 Describe symptoms in plain language and receive structured, safe health guidance:
 
@@ -148,8 +144,8 @@ When to See a Doctor   →  Urgency indicators and red flags
 
 ---
 
-### 📄 Prescription OCR Scanner
-> Image OCR powered by **Google Gemini Vision API** · Text parsing by **Groq LLaMA**
+###  Prescription OCR Scanner
+
 
 | Upload Type | Processing Engine | Output |
 |---|---|---|
@@ -162,7 +158,7 @@ Automatically populates the medication schedule with **name, dosage, timing, and
 
 ---
 
-## 🛠 Tech Stack
+##  Tech Stack
 
 ### Frontend
 | Technology | Role |
@@ -195,7 +191,7 @@ Automatically populates the medication schedule with **name, dosage, timing, and
 
 ---
 
-## 🏗 System Architecture
+##  System Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -229,37 +225,37 @@ Automatically populates the medication schedule with **name, dosage, timing, and
 
 ---
 
-## 📸 Screenshots
+##  Screenshots
 
-### 🏠 Dashboard
+###  Dashboard
 ![Dashboard](Screenshots/Dashboard.png)
 
-### 💊 Add Medicines
+###  Add Medicines
 ![Add Medicines](Screenshots/Add%20Medicines.png)
 
-### 🤖 AI Assistant & Symptom Checker
+###  AI Assistant & Symptom Checker
 ![AI](Screenshots/AI.png)
 
-### ⚖️ BMI Calculator
+###  BMI Calculator
 ![BMI Calculator](Screenshots/BMI%20calculator.png)
 
-### 📜 Medication History
+###  Medication History
 ![History](Screenshots/History.png)
 
-### 📊 Reports & Analytics
+###  Reports & Analytics
 ![Reports](Screenshots/Reports.png)
 
-### ❤️ Vitals Log
+###  Vitals Log
 ![Vitals Log](Screenshots/vitals%20log.png)
 
 ---
 
-## 📁 Project Structure
+##  Project Structure
 
 ```
 DoseBuddy/
 │
-├── 📁 dosebuddy-backend/                    # Spring Boot REST API
+├──  dosebuddy-backend/                    # Spring Boot REST API
 │   ├── src/main/java/com/example/dosebuddy/
 │   │   ├── config/                          # Security, CORS, startup config
 │   │   ├── controller/                      # REST API endpoint controllers
@@ -285,20 +281,20 @@ DoseBuddy/
 │   │   └── application-local.properties     # Local secrets (gitignored)
 │   └── pom.xml                              # Maven dependencies
 │
-├── 📁 dosebuddy-frontend/                   # Static SPA (no build step)
+├──  dosebuddy-frontend/                   # Static SPA (no build step)
 │   ├── index.html                           # Single-page app shell
 │   ├── app.js                               # All JS logic (~4000+ lines)
 │   ├── style.css                            # Design system & components
 │   ├── responsive.css                       # Media query overrides
 │   └── notify-sound.mp3                     # Notification audio
 │
-├── 📁 Screenshots/                          # README screenshots
+├──  Screenshots/                          # README screenshots
 └── README.md
 ```
 
 ---
 
-## 🔌 API Endpoints
+##  API Endpoints
 
 ### Authentication
 | Method | Endpoint | Description |
@@ -338,7 +334,7 @@ DoseBuddy/
 
 ---
 
-## ⚙️ Installation & Setup
+##  Installation & Setup
 
 ### Prerequisites
 
@@ -429,7 +425,7 @@ cd dosebuddy-backend
 mvnw.cmd spring-boot:run -Dspring-boot.run.profiles=local
 ```
 
-✅ Backend running at: `http://localhost:8080/api`
+ Backend running at: `http://localhost:8080/api`
 
 ---
 
@@ -449,7 +445,7 @@ npx serve .
 # Option 3: VS Code → Install "Live Server" → Click "Go Live"
 ```
 
-✅ Frontend running at: `http://localhost:5500`
+ Frontend running at: `http://localhost:5500`
 
 > Ensure `API_BASE` in `app.js` points to your backend:
 > ```javascript
@@ -458,21 +454,21 @@ npx serve .
 
 ---
 
-## 🌍 Environment Variables
+##  Environment Variables
 
 | Variable | Required | Description | Example |
 |---|---|---|---|
-| `spring.datasource.url` | ✅ | MySQL JDBC connection URL | `jdbc:mysql://localhost:3306/dosebuddy` |
-| `spring.datasource.username` | ✅ | Database username | `dosebuddy_user` |
-| `spring.datasource.password` | ✅ | Database password | `your_password` |
-| `GROQ_API_KEY` | ✅ | Groq API key for LLM features | `gsk_...` |
-| `GEMINI_API_KEY` | ✅ | Google Gemini key for OCR | `AIza...` |
-| `jwt.secret` | ✅ | JWT signing secret (min 32 chars) | `my_super_secret_key_32chars_min` |
-| `groq.model` | ⬜ | Groq model override (optional) | `llama-3.3-70b-versatile` |
+| `spring.datasource.url` |  | MySQL JDBC connection URL | `jdbc:mysql://localhost:3306/dosebuddy` |
+| `spring.datasource.username` |  | Database username | `dosebuddy_user` |
+| `spring.datasource.password` |  | Database password | `your_password` |
+| `GROQ_API_KEY` |  | Groq API key for LLM features | `gsk_...` |
+| `GEMINI_API_KEY` |  | Google Gemini key for OCR | `AIza...` |
+| `jwt.secret` |  | JWT signing secret (min 32 chars) | `my_super_secret_key_32chars_min` |
+| `groq.model` |  | Groq model override (optional) | `llama-3.3-70b-versatile` |
 
 ---
 
-## 🚀 How to Run
+##  How to Run
 
 ### Development Mode
 
@@ -504,7 +500,7 @@ java -jar target/dosebuddy-*.jar \
 
 ---
 
-## ☁️ Deployment
+##  Deployment
 
 | Layer | Recommended Platforms |
 |---|---|
@@ -524,153 +520,21 @@ java -jar target/dosebuddy-*.jar \
 
 ---
 
-## 🔧 Troubleshooting
+##  Future Scope
 
-<details>
-<summary><b>❌ Groq API Rate Limit (429 Too Many Requests)</b></summary>
-<br/>
-
-The backend automatically retries with exponential backoff. If you still hit limits:
-
-- Wait 30–60 seconds before retrying
-- Check your usage at [console.groq.com/usage](https://console.groq.com/usage)
-- The free tier allows ~30 requests/minute on LLaMA 3.3 70B
-- Consider upgrading to a paid Groq plan for production use
-
-</details>
-
-<details>
-<summary><b>❌ Gemini API Errors</b></summary>
-<br/>
-
-- Verify `GEMINI_API_KEY` is correctly set in `application-local.properties`
-- Ensure uploaded images are clear, well-lit, and under 4MB
-- Supported formats: JPG, PNG, WEBP
-- Base64 encoding is handled automatically by `GeminiOcrService`
-
-</details>
-
-<details>
-<summary><b>❌ MySQL Connection Refused</b></summary>
-<br/>
-
-```
-CommunicationsException: Communications link failure
-```
-
-- Start MySQL: `net start mysql` (Windows) or `sudo systemctl start mysql` (Linux/macOS)
-- Verify database name, username, and password in your properties file
-- Confirm MySQL is running on port `3306`
-- Check firewall rules aren't blocking the port
-
-</details>
-
-<details>
-<summary><b>❌ JWT Token / 401 Unauthorized</b></summary>
-<br/>
-
-- Ensure `jwt.secret` is at least **32 characters** long
-- Clear browser `localStorage` and log in again
-- Check that the `Authorization: Bearer <token>` header is being sent correctly
-
-</details>
-
-<details>
-<summary><b>❌ Frontend Can't Reach Backend (CORS / Network Error)</b></summary>
-<br/>
-
-- Confirm the backend is running on port `8080`
-- Verify `API_BASE` in `app.js` exactly matches your backend URL (no trailing slash)
-- The backend has `@CrossOrigin("*")` enabled for development
-- For production, update CORS config to allow only your frontend domain
-
-</details>
-
-<details>
-<summary><b>❌ Frontend API URL Mismatch</b></summary>
-<br/>
-
-If the frontend shows "Error connecting to server" after deployment:
-
-```javascript
-// app.js — update this line to your deployed backend URL
-const API_BASE = "https://your-backend.railway.app/api";
-```
-
-</details>
+- [ ]  **Progressive Web App (PWA)** — Installable on mobile with offline support and push notifications
+- [ ]  **Wearable Integration** — Sync with smartwatches for real-time health data
+- [ ]  **Cloud Prescription Storage** — Secure cloud storage for all uploaded prescriptions
+- [ ]  **Doctor Dashboard** — Share adherence reports and vitals with healthcare providers
+- [ ]  **AI Drug Interaction Checker** — Cross-reference multiple medications for dangerous interactions
+- [ ]  **Smart Health Analytics** — Weekly/monthly trend analysis with predictive insights
+- [ ]  **React Native Mobile App** — Native iOS/Android app using the existing Spring Boot API
+- [ ]  **Two-Factor Authentication** — Enhanced account security with 2FA
+- [ ]  **Multi-language Support** — i18n for regional language accessibility
 
 ---
 
-## 🔮 Future Scope
-
-- [ ] 📱 **Progressive Web App (PWA)** — Installable on mobile with offline support and push notifications
-- [ ] ⌚ **Wearable Integration** — Sync with smartwatches for real-time health data
-- [ ] ☁️ **Cloud Prescription Storage** — Secure cloud storage for all uploaded prescriptions
-- [ ] 🏥 **Doctor Dashboard** — Share adherence reports and vitals with healthcare providers
-- [ ] 💊 **AI Drug Interaction Checker** — Cross-reference multiple medications for dangerous interactions
-- [ ] 📊 **Smart Health Analytics** — Weekly/monthly trend analysis with predictive insights
-- [ ] 📲 **React Native Mobile App** — Native iOS/Android app using the existing Spring Boot API
-- [ ] 🔒 **Two-Factor Authentication** — Enhanced account security with 2FA
-- [ ] 🌐 **Multi-language Support** — i18n for regional language accessibility
-- [ ] 👨‍👩‍👧 **Caregiver Mode** — Allow family members to monitor a patient's medication adherence
-
----
-
-## 🤝 Contributing
-
-Contributions are welcome and appreciated! Here's how to get involved:
-
-1. **Fork** the repository
-2. **Create** a feature branch
-   ```bash
-   git checkout -b feature/your-feature-name
-   ```
-3. **Commit** your changes with a descriptive message
-   ```bash
-   git commit -m "feat: add your feature description"
-   ```
-4. **Push** to your fork
-   ```bash
-   git push origin feature/your-feature-name
-   ```
-5. **Open a Pull Request** against the `main` branch
-
-### Commit Convention
-
-| Prefix | Use for |
-|---|---|
-| `feat:` | New features |
-| `fix:` | Bug fixes |
-| `style:` | UI / CSS changes |
-| `refactor:` | Code restructuring without behavior change |
-| `docs:` | Documentation updates |
-| `chore:` | Build, config, or tooling changes |
-
-Please ensure the backend builds cleanly with `mvnw clean package` before submitting a PR.
-
----
-
-## 📄 License
-
-This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for full details.
-
-```
-MIT License  ©  2025  Sudheer Kanduru
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-```
-
----
-
-## 👨‍💻 Author
+##  Author
 
 <div align="center">
 
@@ -686,7 +550,7 @@ copies or substantial portions of the Software.
 
 <br/>
 
-*Built with ❤️ to make healthcare more accessible through technology.*
+*Built with love to make healthcare more accessible through technology.*
 
 <br/>
 
@@ -696,10 +560,5 @@ copies or substantial portions of the Software.
 
 <div align="center">
 
-**⭐ If DoseBuddy impressed you or helped you, please give it a star — it means a lot! ⭐**
-
-<br/>
-
-*Made with Java ☕ · JavaScript 🟨 · Spring Boot 🍃 · and a lot of ❤️*
-
 </div>
+
