@@ -1,0 +1,1972 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>DoseBuddy – Medicine Reminder</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="DoseBuddy – Your personal medicine reminder and health companion">
+
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%232563eb'/><path d='M10 16a6 6 0 0 1 6-6h0a6 6 0 0 1 6 6v0a6 6 0 0 1-6 6h0a6 6 0 0 1-6-6z' fill='none' stroke='white' stroke-width='2'/><line x1='16' y1='10' x2='16' y2='22' stroke='white' stroke-width='2'/></svg>">
+    <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%232563eb'/><path d='M10 16a6 6 0 0 1 6-6h0a6 6 0 0 1 6 6v0a6 6 0 0 1-6 6h0a6 6 0 0 1-6-6z' fill='none' stroke='white' stroke-width='2'/><line x1='16' y1='10' x2='16' y2='22' stroke='white' stroke-width='2'/></svg>">
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <!-- jsPDF + AutoTable for PDF export -->
+    <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
+
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="responsive.css">
+</head>
+<body>
+
+<a href="#main-content" class="skip-link">Skip to main content</a>
+
+<section id="auth-view" class="view active">
+    <div class="auth-page">
+        <div class="auth-brand">
+            <div class="auth-logo">💊</div>
+            <h1 class="auth-brand-name">DoseBuddy</h1>
+            <p class="auth-tagline">Your personal medicine reminder & health companion</p>
+        </div>
+
+        <div class="auth-card">
+            <div class="tabs">
+                <button class="tab-btn active" data-mode="login">Login</button>
+                <button class="tab-btn" data-mode="signup">Sign Up</button>
+            </div>
+
+            <div id="login-header">
+                <h2 id="auth-title">Welcome back</h2>
+                <p class="auth-subtitle">Sign in to manage your medications</p>
+            </div>
+            <div id="signup-header" style="display:none;">
+                <div class="signup-header-row">
+                    <div class="signup-header-icon">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+                    </div>
+                    <div>
+                        <h2 class="signup-main-title">Create your account</h2>
+                        <p class="signup-main-sub">Join DoseBuddy — your personal health companion</p>
+                    </div>
+                </div>
+
+                <div class="signup-steps" id="signup-steps">
+                    <div class="signup-step active" data-step="1">
+                        <div class="step-circle">1</div>
+                        <span class="step-label">Account</span>
+                    </div>
+                    <div class="step-connector"></div>
+                    <div class="signup-step" data-step="2">
+                        <div class="step-circle">2</div>
+                        <span class="step-label">Profile</span>
+                    </div>
+                    <div class="step-connector"></div>
+                    <div class="signup-step" data-step="3">
+                        <div class="step-circle">3</div>
+                        <span class="step-label">Role</span>
+                    </div>
+                </div>
+            </div>
+
+            <form id="login-form">
+                <div class="form-group">
+                    <label for="auth-email">Email Address</label>
+                    <div class="input-icon-wrap">
+                        <svg class="input-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+                        <input type="email" id="auth-email" placeholder="you@example.com" autocomplete="email">
+                    </div>
+                    <span class="field-error" id="login-email-error"></span>
+                </div>
+
+                <div class="form-group">
+                    <label for="auth-password">Password</label>
+                    <div class="input-icon-wrap">
+                        <svg class="input-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+                        <input type="password" id="auth-password" placeholder="Your password" autocomplete="current-password">
+                    </div>
+                    <span class="field-error" id="login-pw-error"></span>
+                </div>
+
+                <button type="submit" class="primary-btn full-width auth-submit-btn" id="auth-submit-btn">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9"/></svg>
+                    Sign In
+                </button>
+                <p class="small-text center-text auth-switch-text">Don't have an account? <button type="button" class="auth-link-btn" id="go-signup-btn">Sign Up</button></p>
+                <p class="error-text" id="auth-error"></p>
+            </form>
+
+            <form id="signup-form" style="display:none;" novalidate>
+
+                <div class="signup-step-panel active" id="signup-step-1">
+                    <div class="step-section-label">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+                        Basic Information
+                    </div>
+
+                    <div class="form-group">
+                        <label for="su-name">Full Name <span class="req-star">*</span></label>
+                        <div class="input-icon-wrap">
+                            <svg class="input-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+                            <input type="text" id="su-name" placeholder="Your full name" autocomplete="name">
+                        </div>
+                        <span class="field-error" id="su-name-error"></span>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="su-email">Email Address <span class="req-star">*</span></label>
+                        <div class="input-icon-wrap">
+                            <svg class="input-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+                            <input type="email" id="su-email" placeholder="you@example.com" autocomplete="email">
+                        </div>
+                        <span class="field-error" id="su-email-error"></span>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="su-password">Password <span class="req-star">*</span></label>
+                        <div class="input-icon-wrap">
+                            <svg class="input-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+                            <input type="password" id="su-password" placeholder="At least 8 characters" autocomplete="new-password">
+                        </div>
+                        <div class="pw-strength-bar" id="su-pw-strength" style="display:none;">
+                            <div class="pw-strength-fill" id="su-pw-fill"></div>
+                        </div>
+                        <span class="pw-strength-label" id="su-pw-label"></span>
+                        <span class="field-error" id="su-pw-error"></span>
+                    </div>
+
+                    <button type="button" class="primary-btn full-width step-next-btn" id="step1-next-btn">
+                        Continue
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" width="15" height="15"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3"/></svg>
+                    </button>
+                </div>
+
+                <div class="signup-step-panel" id="signup-step-2" style="display:none;">
+                    <div class="step-section-label">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/></svg>
+                        Health Profile
+                    </div>
+
+                    <div class="form-row-2col">
+                        <div class="form-group">
+                            <label for="su-phone">Phone Number</label>
+                            <div class="phone-input-wrap">
+                                <select id="su-phone-code" class="phone-code-select" aria-label="Country code">
+                                    <option value="+1">🇺🇸 +1</option>
+                                    <option value="+44">🇬🇧 +44</option>
+                                    <option value="+91" selected>🇮🇳 +91</option>
+                                    <option value="+61">🇦🇺 +61</option>
+                                    <option value="+81">🇯🇵 +81</option>
+                                    <option value="+49">🇩🇪 +49</option>
+                                    <option value="+33">🇫🇷 +33</option>
+                                    <option value="+86">🇨🇳 +86</option>
+                                    <option value="+55">🇧🇷 +55</option>
+                                    <option value="+27">🇿🇦 +27</option>
+                                    <option value="+971">🇦🇪 +971</option>
+                                    <option value="+65">🇸🇬 +65</option>
+                                    <option value="+60">🇲🇾 +60</option>
+                                    <option value="+92">🇵🇰 +92</option>
+                                    <option value="+880">🇧🇩 +880</option>
+                                </select>
+                                <input type="tel" id="su-phone" placeholder="10-digit number" autocomplete="tel">
+                            </div>
+                            <span class="field-error" id="su-phone-error"></span>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="su-dob">Date of Birth</label>
+                            <div class="input-icon-wrap">
+                                <svg class="input-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                                <input type="date" id="su-dob" autocomplete="bday">
+                            </div>
+                            <span class="field-error" id="su-dob-error"></span>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Gender</label>
+                        <div class="gender-cards" id="gender-cards">
+                            <button type="button" class="gender-card" data-value="Male">
+                                <span class="gender-card-icon">♂</span>
+                                <span class="gender-card-label">Male</span>
+                            </button>
+                            <button type="button" class="gender-card" data-value="Female">
+                                <span class="gender-card-icon">♀</span>
+                                <span class="gender-card-label">Female</span>
+                            </button>
+                            <button type="button" class="gender-card" data-value="Other">
+                                <span class="gender-card-icon">⚧</span>
+                                <span class="gender-card-label">Other</span>
+                            </button>
+                            <button type="button" class="gender-card" data-value="Prefer not to say">
+                                <span class="gender-card-icon">🔒</span>
+                                <span class="gender-card-label">Prefer not to say</span>
+                            </button>
+                        </div>
+                        <input type="hidden" id="su-gender" value="">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="su-emergency">
+                            Emergency Contact
+                            <span class="label-hint">For caregiver alerts</span>
+                        </label>
+                        <div class="phone-input-wrap">
+                            <select id="su-emergency-code" class="phone-code-select" aria-label="Emergency contact country code">
+                                <option value="+1">🇺🇸 +1</option>
+                                <option value="+44">🇬🇧 +44</option>
+                                <option value="+91" selected>🇮🇳 +91</option>
+                                <option value="+61">🇦🇺 +61</option>
+                                <option value="+81">🇯🇵 +81</option>
+                                <option value="+49">🇩🇪 +49</option>
+                                <option value="+33">🇫🇷 +33</option>
+                                <option value="+86">🇨🇳 +86</option>
+                                <option value="+55">🇧🇷 +55</option>
+                                <option value="+27">🇿🇦 +27</option>
+                                <option value="+971">🇦🇪 +971</option>
+                                <option value="+65">🇸🇬 +65</option>
+                                <option value="+60">🇲🇾 +60</option>
+                                <option value="+92">🇵🇰 +92</option>
+                                <option value="+880">🇧🇩 +880</option>
+                            </select>
+                            <input type="tel" id="su-emergency" placeholder="Emergency contact number" autocomplete="off">
+                        </div>
+                        <span class="field-error" id="su-emergency-error"></span>
+                    </div>
+
+                    <div class="step-nav-row">
+                        <button type="button" class="secondary-btn step-back-btn" id="step2-back-btn">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" width="15" height="15"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18"/></svg>
+                            Back
+                        </button>
+                        <button type="button" class="primary-btn step-next-btn" id="step2-next-btn">
+                            Continue
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" width="15" height="15"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3"/></svg>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="signup-step-panel" id="signup-step-3" style="display:none;">
+                    <div class="step-section-label">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+                        Account Role
+                    </div>
+
+                    <div class="role-cards" id="role-cards">
+                        <button type="button" class="role-card active" data-role="PATIENT" id="role-card-patient">
+                            <div class="role-card-icon">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+                            </div>
+                            <div class="role-card-body">
+                                <div class="role-card-title">Patient</div>
+                                <div class="role-card-desc">Manage your own medicines, reminders, and health reports.</div>
+                            </div>
+                            <div class="role-card-check">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="3" stroke="currentColor" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+                            </div>
+                        </button>
+
+                        <button type="button" class="role-card" data-role="CAREGIVER" id="role-card-caregiver">
+                            <div class="role-card-icon">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                            </div>
+                            <div class="role-card-body">
+                                <div class="role-card-title">Caregiver</div>
+                                <div class="role-card-desc">Track and manage medicines for someone else in your care.</div>
+                            </div>
+                            <div class="role-card-check">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="3" stroke="currentColor" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+                            </div>
+                        </button>
+                    </div>
+                    <input type="hidden" id="su-role" value="PATIENT">
+
+                    <div class="form-group" id="su-patient-email-group" style="display:none;">
+                        <label for="su-patient-email">Patient's Email <span class="req-star">*</span></label>
+                        <div class="input-icon-wrap">
+                            <svg class="input-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+                            <input type="email" id="su-patient-email" placeholder="patient@example.com">
+                        </div>
+                        <span class="field-error" id="su-patient-email-error"></span>
+                    </div>
+
+                    <div class="terms-section">
+                        <label class="terms-checkbox-label" id="terms-label">
+                            <input type="checkbox" id="su-terms" class="terms-checkbox">
+                            <span class="terms-custom-check">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="3" stroke="currentColor" width="11" height="11"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+                            </span>
+                            <span class="terms-text">
+                                I agree to the
+                                <button type="button" class="terms-link" id="open-terms-btn">Terms &amp; Conditions</button>
+                                and
+                                <button type="button" class="terms-link" id="open-privacy-signup-btn">Privacy Policy</button>
+                            </span>
+                        </label>
+                        <span class="field-error" id="su-terms-error"></span>
+                    </div>
+
+                    <div class="step-nav-row">
+                        <button type="button" class="secondary-btn step-back-btn" id="step3-back-btn">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" width="15" height="15"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18"/></svg>
+                            Back
+                        </button>
+                        <button type="submit" class="primary-btn signup-submit-btn" id="signup-submit-btn">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" width="15" height="15"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                            Create Account
+                        </button>
+                    </div>
+                    <p class="error-text" id="signup-error"></p>
+                </div>
+
+            </form>
+
+            <p class="small-text center-text auth-switch-text" id="signup-switch-text" style="display:none;">
+                Already have an account? <button type="button" class="auth-link-btn" id="go-login-btn">Sign In</button>
+            </p>
+
+            <div class="auth-disclaimer">
+                <span class="disclaimer-icon">⚠️</span>
+                DoseBuddy is a reminder tool only. Always follow your doctor's advice.
+            </div>
+        </div>
+    </div>
+</section>
+
+<div id="terms-modal" class="legal-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="terms-modal-title" style="display:none;">
+    <div class="legal-modal">
+        <div class="legal-modal-header">
+            <div class="legal-modal-title-row">
+                <div class="legal-modal-icon">📋</div>
+                <div>
+                    <h3 id="terms-modal-title" class="legal-modal-title">Terms &amp; Conditions</h3>
+                    <p class="legal-modal-sub">DoseBuddy Health Management Platform</p>
+                </div>
+            </div>
+            <button class="legal-modal-close" id="terms-modal-close" aria-label="Close">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+        </div>
+        <div class="legal-modal-body">
+            <div class="legal-section">
+                <div class="legal-section-header">
+                    <span class="legal-section-icon">💊</span>
+                    <h4>Reminder Disclaimer</h4>
+                </div>
+                <p>DoseBuddy is a medicine reminder and health management assistant only. It does <strong>not</strong> replace professional medical advice, diagnosis, or treatment. Always seek the advice of your physician or other qualified health provider with any questions you may have regarding a medical condition.</p>
+            </div>
+            <div class="legal-section">
+                <div class="legal-section-header">
+                    <span class="legal-section-icon">🩺</span>
+                    <h4>Medical Responsibility</h4>
+                </div>
+                <p>Users must consult their doctors or licensed healthcare professionals before changing, stopping, or starting any medication routine. DoseBuddy does not provide medical diagnoses or prescriptions. The app is a tool to help you remember your existing prescribed medications.</p>
+            </div>
+            <div class="legal-section">
+                <div class="legal-section-header">
+                    <span class="legal-section-icon">👤</span>
+                    <h4>User Responsibility</h4>
+                </div>
+                <p>Users are solely responsible for keeping their medication information accurate and up to date within the application. DoseBuddy is not liable for any harm resulting from incorrect medication data entered by the user. Always verify medication details with your healthcare provider.</p>
+            </div>
+            <div class="legal-section">
+                <div class="legal-section-header">
+                    <span class="legal-section-icon">🔔</span>
+                    <h4>Notification Disclaimer</h4>
+                </div>
+                <p>Reminder notifications may depend on your device settings, internet connectivity, and browser permissions. DoseBuddy cannot guarantee delivery of all notifications. Users should not rely solely on app notifications for critical medication timing. Always maintain a backup reminder system.</p>
+            </div>
+            <div class="legal-section">
+                <div class="legal-section-header">
+                    <span class="legal-section-icon">🚨</span>
+                    <h4>Emergency Disclaimer</h4>
+                </div>
+                <p>DoseBuddy is <strong>not</strong> an emergency medical service. In case of a medical emergency, call your local emergency services immediately (e.g., 911, 112, or 999). The emergency contact feature is for informational purposes only and does not guarantee emergency response.</p>
+            </div>
+            <div class="legal-section">
+                <div class="legal-section-header">
+                    <span class="legal-section-icon">⚖️</span>
+                    <h4>Acceptance of Terms</h4>
+                </div>
+                <p>By creating an account and using DoseBuddy, you acknowledge that you have read, understood, and agree to be bound by these Terms &amp; Conditions. These terms may be updated periodically. Continued use of the application constitutes acceptance of any revised terms.</p>
+            </div>
+        </div>
+        <div class="legal-modal-footer">
+            <button class="primary-btn" id="terms-modal-accept-btn">I Understand &amp; Accept</button>
+        </div>
+    </div>
+</div>
+
+<div id="privacy-signup-modal" class="legal-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="privacy-modal-title" style="display:none;">
+    <div class="legal-modal">
+        <div class="legal-modal-header">
+            <div class="legal-modal-title-row">
+                <div class="legal-modal-icon">🔒</div>
+                <div>
+                    <h3 id="privacy-modal-title" class="legal-modal-title">Privacy Policy</h3>
+                    <p class="legal-modal-sub">How DoseBuddy handles your data</p>
+                </div>
+            </div>
+            <button class="legal-modal-close" id="privacy-signup-modal-close" aria-label="Close">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+        </div>
+        <div class="legal-modal-body">
+            <div class="legal-section">
+                <div class="legal-section-header">
+                    <span class="legal-section-icon">🗄️</span>
+                    <h4>Data Privacy &amp; Storage</h4>
+                </div>
+                <p>Your user profile and medicine data are stored securely in our database for the sole purpose of providing app functionality. We do not sell, rent, or share your personal health information with third parties without your explicit consent.</p>
+            </div>
+            <div class="legal-section">
+                <div class="legal-section-header">
+                    <span class="legal-section-icon">📊</span>
+                    <h4>Data We Collect</h4>
+                </div>
+                <p>We collect the information you provide during registration (name, email, phone, date of birth, gender, emergency contact) and your medication data (medicine names, dosages, schedules, intake logs). This data is used exclusively to power your personal health dashboard.</p>
+            </div>
+            <div class="legal-section">
+                <div class="legal-section-header">
+                    <span class="legal-section-icon">🤖</span>
+                    <h4>AI Features &amp; Data Usage</h4>
+                </div>
+                <p>When you use AI-powered features (Medicine Assistant, Symptom Checker), your queries may be processed by third-party AI services. We do not send personally identifiable information to AI services — only the specific query text you enter.</p>
+            </div>
+            <div class="legal-section">
+                <div class="legal-section-header">
+                    <span class="legal-section-icon">🔐</span>
+                    <h4>Data Security</h4>
+                </div>
+                <p>We implement reasonable technical and organizational measures to protect your data. However, no method of transmission over the internet is 100% secure. You are responsible for maintaining the confidentiality of your account credentials.</p>
+            </div>
+            <div class="legal-section">
+                <div class="legal-section-header">
+                    <span class="legal-section-icon">🗑️</span>
+                    <h4>Your Rights</h4>
+                </div>
+                <p>You have the right to access, correct, or delete your personal data at any time through your profile settings. You may also request complete account deletion by contacting our support team at dosebuddySupport@gmail.com.</p>
+            </div>
+        </div>
+        <div class="legal-modal-footer">
+            <button class="primary-btn" id="privacy-signup-modal-accept-btn">I Understand</button>
+        </div>
+    </div>
+</div>
+
+<div id="app-shell" class="app-shell" style="display:none;">
+
+    <header class="topnav">
+        <div class="topnav-left">
+            <button id="hamburger-btn" class="hamburger-fab" aria-label="Toggle menu">
+                <span></span><span></span><span></span>
+            </button>
+            <div class="nav-brand">
+                <div class="brand-logo-circle">💊</div>
+                <span class="brand-title">DoseBuddy</span>
+            </div>
+        </div>
+
+        <div class="topnav-right">
+            <div class="notification-wrapper">
+                <button id="notification-bell" class="icon-btn" aria-label="Notifications">
+                    <svg class="bell-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 10-12 0v3.2c0 .5-.2 1-.6 1.4L4 17h5m6 0a3 3 0 11-6 0m6 0H9"/>
+                    </svg>
+                    <span id="notification-count" class="notif-badge">0</span>
+                </button>
+                <div id="notification-panel" class="notif-panel">
+                    <div class="notif-panel-header">
+                        <div class="notif-panel-title-row">
+                            <span class="notif-panel-title">Notifications</span>
+                            <span class="notif-unread-badge" id="notif-unread-badge" style="display:none;">0</span>
+                        </div>
+                        <div class="notif-panel-actions">
+                            <button class="notif-action-btn" id="notif-mark-all-btn">Mark all read</button>
+                            <button class="notif-action-btn notif-clear-btn" id="notif-clear-btn">Clear</button>
+                        </div>
+                    </div>
+                    <div class="notif-items-list" id="notification-list">
+                    </div>
+                    <div class="notif-empty" id="notif-empty-state" style="display:none;">
+                        <div class="notif-empty-icon">🔔</div>
+                        <p class="notif-empty-text">You're all caught up!</p>
+                        <p class="notif-empty-sub">No new notifications</p>
+                    </div>
+                </div>
+            </div>
+            <div class="user-avatar-btn" id="nav-user-avatar">U</div>
+        </div>
+    </header>
+
+    <aside id="user-menu" class="sidebar">
+
+        <nav class="sidebar-nav">
+            <button class="nav-btn menu-link sidebar-link active" data-view="dashboard-view">
+                <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
+                </svg>
+                Dashboard
+            </button>
+
+            <button class="nav-btn menu-link sidebar-link" data-view="add-medicine-view">
+                <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/>
+                </svg>
+                Add Medicine
+            </button>
+
+            <button class="nav-btn menu-link sidebar-link" data-view="reports-view">
+                <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                </svg>
+                Reports
+            </button>
+
+            <button class="nav-btn menu-link sidebar-link" data-view="history-view">
+                <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+                History
+            </button>
+
+            <button class="nav-btn menu-link sidebar-link" data-view="bmi-view">
+                <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/>
+                </svg>
+                BMI Calculator
+            </button>
+
+            <button class="nav-btn menu-link sidebar-link" data-view="vitals-view">
+                <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M3 12h2l2-7 3 14 3-10 2 3h6"/>
+                </svg>
+                Vitals Log
+            </button>
+
+            <button class="nav-btn menu-link sidebar-link" data-view="ai-tools-view">
+                <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+                </svg>
+                AI Tools
+            </button>
+
+        </nav>
+
+        <div class="sidebar-footer">
+            <button id="menu-theme-toggle" class="sidebar-link sidebar-theme-row">
+                <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
+                </svg>
+                <span class="sidebar-theme-label">Dark Mode</span>
+                <span class="sidebar-theme-pill" aria-hidden="true">
+                    <span class="sidebar-theme-knob"></span>
+                </span>
+            </button>
+
+            <button id="menu-logout-btn" class="sidebar-link logout-btn">
+                <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
+                </svg>
+                Logout
+            </button>
+        </div>
+    </aside>
+
+    <div id="menu-overlay" class="menu-overlay"></div>
+
+    <main class="main-content" id="main-content">
+        <section id="dashboard-view" class="view app-view active">
+
+            <div class="greeting-row">
+                <div class="greeting-left">
+                    <h1 class="greeting-title" id="greeting-text">Good Morning 👋</h1>
+                    <p class="greeting-sub" id="dashboard-date">Stay on track with your medications today.</p>
+                </div>
+                <div class="greeting-right">
+                    <div class="greeting-summary-pill">
+                        <span class="summary-dot dot-blue"></span>
+                        <p id="today-stats" class="today-stats-text"></p>
+                    </div>
+                </div>
+            </div>
+            <div class="stats-row">
+                <div class="stat-card stat-blue">
+                    <div class="stat-icon-wrap blue-bg">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/>
+                        </svg>
+                    </div>
+                    <div class="stat-info">
+                        <p class="stat-label">Total Medicines</p>
+                        <h2 class="stat-value" id="totalDoses">0</h2>
+                    </div>
+                </div>
+
+                <div class="stat-card stat-green">
+                    <div class="stat-icon-wrap green-bg">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                    </div>
+                    <div class="stat-info">
+                        <p class="stat-label">Taken Today</p>
+                        <h2 class="stat-value" id="takenDoses">0</h2>
+                    </div>
+                </div>
+
+                <div class="stat-card stat-orange">
+                    <div class="stat-icon-wrap orange-bg">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                    </div>
+                    <div class="stat-info">
+                        <p class="stat-label">Pending</p>
+                        <h2 class="stat-value" id="pendingDoses">0</h2>
+                    </div>
+                </div>
+
+                <div class="stat-card stat-purple">
+                    <div class="stat-icon-wrap purple-bg">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                        </svg>
+                    </div>
+                    <div class="stat-info">
+                        <p class="stat-label">Adherence</p>
+                        <h2 class="stat-value" id="adherence">0%</h2>
+                    </div>
+                </div>
+            </div>
+
+            <div class="two-col-grid dashboard-main-grid">
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <h3 class="card-title">Today's Medicines</h3>
+                            <p class="card-subtitle">Your scheduled doses for today</p>
+                        </div>
+                        <span class="card-badge">Today</span>
+                    </div>
+
+                    <div class="table-wrapper">
+                        <table id="schedule-table" class="schedule-table">
+                            <thead>
+                                <tr>
+                                    <th>Time</th>
+                                    <th>Medicine</th>
+                                    <th>Dosage</th>
+                                    <th>Instructions</th>
+                                    <th>Status</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="schedule-body"></tbody>
+                        </table>
+                    </div>
+                    <p id="no-meds-message" class="empty-state" style="display:none;">
+                        <span class="empty-icon">💊</span>
+                        No medicines scheduled for today.
+                    </p>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <div>
+                            <h3 class="card-title">Weekly Adherence</h3>
+                            <p class="card-subtitle">Doses taken in the last 7 days</p>
+                        </div>
+                        <span class="card-badge">7 Days</span>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="weekly-chart"></canvas>
+                    </div>
+                    <p class="small-text" id="reports-empty" style="margin-top:0.5rem; display:none;">
+                        Chart will appear after you mark some doses as taken.
+                    </p>
+                </div>
+            </div>
+
+            <div class="streak-gamification-row" id="streak-panel">
+
+                <div class="card streak-card" id="streak-main-card">
+                    <div class="streak-card-inner">
+                        <div class="streak-fire-wrap">
+                            <span class="streak-fire-icon" id="streak-fire-icon">🔥</span>
+                            <div class="streak-fire-glow" id="streak-fire-glow"></div>
+                        </div>
+                        <div class="streak-info">
+                            <p class="streak-label">Current Streak</p>
+                            <div class="streak-count-row">
+                                <span class="streak-count" id="streak-current">0</span>
+                                <span class="streak-unit">days</span>
+                            </div>
+                            <p class="streak-sub" id="streak-sub-text">Start taking doses to build your streak</p>
+                        </div>
+                        <div class="streak-best-wrap">
+                            <p class="streak-best-label">Best</p>
+                            <p class="streak-best-val" id="streak-longest">0</p>
+                        </div>
+                    </div>
+                    <div class="streak-week-dots" id="streak-week-dots">
+                        <span class="streak-dot-label">This week</span>
+                        <div class="streak-dots-row" id="streak-dots-row">
+                            <span class="streak-dot" title="Mon"></span>
+                            <span class="streak-dot" title="Tue"></span>
+                            <span class="streak-dot" title="Wed"></span>
+                            <span class="streak-dot" title="Thu"></span>
+                            <span class="streak-dot" title="Fri"></span>
+                            <span class="streak-dot" title="Sat"></span>
+                            <span class="streak-dot" title="Sun"></span>
+                        </div>
+                        <span class="streak-week-count" id="streak-week-count">0/7 perfect days</span>
+                    </div>
+                </div>
+
+                <div class="card streak-progress-card">
+                    <div class="card-header" style="padding-bottom:12px;">
+                        <div>
+                            <h3 class="card-title">Milestone Progress</h3>
+                            <p class="card-subtitle">Track your consistency goals</p>
+                        </div>
+                    </div>
+                    <div class="milestone-list" id="milestone-list">
+                        <div class="milestone-item">
+                            <div class="milestone-meta">
+                                <span class="milestone-icon">🔥</span>
+                                <span class="milestone-name">3-Day Streak</span>
+                                <span class="milestone-pct" id="ms-3day-pct">0%</span>
+                            </div>
+                            <div class="milestone-bar-track">
+                                <div class="milestone-bar-fill" id="ms-3day-bar" style="width:0%"></div>
+                            </div>
+                        </div>
+                        <div class="milestone-item">
+                            <div class="milestone-meta">
+                                <span class="milestone-icon">⚡</span>
+                                <span class="milestone-name">7-Day Streak</span>
+                                <span class="milestone-pct" id="ms-7day-pct">0%</span>
+                            </div>
+                            <div class="milestone-bar-track">
+                                <div class="milestone-bar-fill ms-bar-amber" id="ms-7day-bar" style="width:0%"></div>
+                            </div>
+                        </div>
+                        <div class="milestone-item">
+                            <div class="milestone-meta">
+                                <span class="milestone-icon">🏆</span>
+                                <span class="milestone-name">30-Day Streak</span>
+                                <span class="milestone-pct" id="ms-30day-pct">0%</span>
+                            </div>
+                            <div class="milestone-bar-track">
+                                <div class="milestone-bar-fill ms-bar-purple" id="ms-30day-bar" style="width:0%"></div>
+                            </div>
+                        </div>
+                        <div class="milestone-item">
+                            <div class="milestone-meta">
+                                <span class="milestone-icon">🌟</span>
+                                <span class="milestone-name">Perfect Week</span>
+                                <span class="milestone-pct" id="ms-week-pct">0%</span>
+                            </div>
+                            <div class="milestone-bar-track">
+                                <div class="milestone-bar-fill ms-bar-teal" id="ms-week-bar" style="width:0%"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card streak-badges-card">
+                    <div class="card-header" style="padding-bottom:12px;">
+                        <div>
+                            <h3 class="card-title">Achievements</h3>
+                            <p class="card-subtitle" id="badges-unlocked-count">0 badges earned</p>
+                        </div>
+                    </div>
+                    <div class="badges-grid" id="badges-grid">
+                    </div>
+                </div>
+
+            </div>
+
+            <div class="card activity-card">
+                <div class="card-header">
+                    <div>
+                        <h3 class="card-title">Recent Activity</h3>
+                        <p class="card-subtitle">Your latest dose history</p>
+                    </div>
+                    <button class="text-btn nav-btn menu-link" data-view="history-view">View All →</button>
+                </div>
+                <div id="recent-activity-list" class="activity-list">
+                    <p class="empty-state"><span class="empty-icon">📋</span> No recent activity yet.</p>
+                </div>
+            </div>
+
+        </section>
+
+        <section id="add-medicine-view" class="view app-view">
+
+            <div class="addmed-page-header">
+                <div class="addmed-header-left">
+                    <div class="addmed-header-icon">💊</div>
+                    <div>
+                        <h2 class="page-title">Add Medicine</h2>
+                        <p class="page-subtitle">Fill in the form manually or upload a prescription to auto-fill.</p>
+                    </div>
+                </div>
+                <div class="addmed-header-tip">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="14" height="14">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    At least one time slot is required
+                </div>
+            </div>
+
+            <div class="addmed-layout">
+
+                <div class="addmed-upload-col">
+                    <div class="card addmed-upload-card">
+                        <div class="card-header">
+                            <div>
+                                <h3 class="card-title">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="card-title-icon">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                                    </svg>
+                                    Upload Prescription
+                                </h3>
+                                <p class="card-subtitle">Supports image, PDF, DOCX, or TXT</p>
+                            </div>
+                            <span class="card-badge badge-ai">✨ AI</span>
+                        </div>
+
+                        <div class="upload-dropzone" id="prescription-drop-zone">
+                            <input type="file" id="prescription-file-input"
+                                   accept="image/*,.pdf,.docx,.txt"
+                                   style="display:none;">
+
+                            <div class="upload-dropzone-icon">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/>
+                                </svg>
+                            </div>
+                            <p class="upload-dropzone-title">Drop your file here</p>
+                            <p class="upload-dropzone-sub">or click to browse from your device</p>
+
+                            <button type="button" class="upload-browse-btn" id="prescription-browse-btn">
+                                Browse File
+                            </button>
+
+                            <p id="prescription-file-name" class="upload-file-selected"></p>
+                        </div>
+
+                        <div class="upload-formats">
+                            <span class="format-tag">Image</span>
+                            <span class="format-tag">PDF</span>
+                            <span class="format-tag">DOCX</span>
+                            <span class="format-tag">TXT</span>
+                        </div>
+
+                        <div class="upload-action-row">
+                            <button type="button" class="primary-btn autofill-btn" id="prescription-autofill-btn">
+                                Auto Fill from Prescription
+                            </button>
+                        </div>
+
+                        <p id="prescription-error" class="error-text"></p>
+                        <p id="prescription-info" class="upload-info-text"></p>
+                    </div>
+                </div>
+
+                <div class="addmed-form-col">
+                    <div class="card addmed-form-card">
+                        <div class="card-header">
+                            <div>
+                                <h3 class="card-title">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="card-title-icon">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125"/>
+                                    </svg>
+                                    Medicine Details
+                                </h3>
+                                <p class="card-subtitle">Enter details exactly as on the prescription</p>
+                            </div>
+                        </div>
+
+                        <form id="medicine-form">
+
+                            <div class="form-section">
+                                <div class="form-section-header">
+                                    <span class="form-section-num">1</span>
+                                    Basic Information
+                                </div>
+                                <div class="form-grid-2">
+                                    <div class="form-group">
+                                        <label for="med-name">
+                                            Medicine Name
+                                            <span class="field-required">*</span>
+                                        </label>
+                                        <input type="text" id="med-name" placeholder="e.g. Paracetamol" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="med-dosage">
+                                            Dosage
+                                            <span class="field-required">*</span>
+                                        </label>
+                                        <input type="text" id="med-dosage" placeholder="e.g. 500 mg">
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label for="med-instructions">Instructions</label>
+                                    <input type="text" id="med-instructions" placeholder="e.g. After food, with water">
+                                </div>
+                            </div>
+
+                            <div class="form-section">
+                                <div class="form-section-header">
+                                    <span class="form-section-num">2</span>
+                                    Schedule
+                                </div>
+                                <div class="form-grid-2">
+                                    <div class="form-group">
+                                        <label for="med-start-date">
+                                            Start Date
+                                            <span class="field-required">*</span>
+                                        </label>
+                                        <input type="date" id="med-start-date" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="med-end-date">
+                                            End Date
+                                            <span class="field-required">*</span>
+                                        </label>
+                                        <input type="date" id="med-end-date" required>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="form-section">
+                                <div class="form-section-header">
+                                    <span class="form-section-num">3</span>
+                                    Reminder Times
+                                    <span class="form-section-hint">Add up to 3 daily times</span>
+                                </div>
+                                <div class="form-grid-3">
+                                    <div class="form-group">
+                                        <label for="time-1">Morning</label>
+                                        <input type="time" id="time-1">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="time-2">Afternoon</label>
+                                        <input type="time" id="time-2">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="time-3">Evening</label>
+                                        <input type="time" id="time-3">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="form-submit-row">
+                                <button type="submit" class="primary-btn submit-med-btn">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" width="15" height="15">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
+                                    </svg>
+                                    Save Medicine
+                                </button>
+                                <p class="success-text" id="med-success"></p>
+                                <p class="error-text" id="med-error"></p>
+                            </div>
+
+                        </form>
+                    </div>
+                </div>
+
+            </div>
+        </section>
+
+        <section id="history-view" class="view app-view">
+
+            <div class="history-page-header">
+                <div class="history-header-left">
+                    <div class="history-header-icon">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                    </div>
+                    <div>
+                        <h2 class="page-title">Dose History</h2>
+                        <p class="page-subtitle">A complete log of all your medication activity</p>
+                    </div>
+                </div>
+                <div class="history-header-right">
+                    <button class="primary-btn nav-btn menu-link hist-add-btn" data-view="add-medicine-view">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" width="14" height="14">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
+                        </svg>
+                        Add Medicine
+                    </button>
+                    <div class="export-controls">
+                        <button class="export-btn export-btn-pdf" id="export-history-pdf" title="Export history as PDF">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
+                            Export PDF
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="history-legend-strip">
+                <div class="hist-legend-item">
+                    <span class="hist-legend-dot dot-taken"></span>
+                    <span class="hist-legend-label">Taken</span>
+                    <span class="hist-legend-count" id="hist-taken-count">0</span>
+                </div>
+                <div class="hist-legend-item">
+                    <span class="hist-legend-dot dot-pending"></span>
+                    <span class="hist-legend-label">Pending</span>
+                    <span class="hist-legend-count" id="hist-pending-count">0</span>
+                </div>
+                <div class="hist-legend-item">
+                    <span class="hist-legend-dot dot-missed"></span>
+                    <span class="hist-legend-label">Missed</span>
+                    <span class="hist-legend-count" id="hist-missed-count">0</span>
+                </div>
+                <div class="hist-legend-sep"></div>
+                <span class="hist-legend-note">
+                    Adherence: <strong id="hist-adherence-pct">0%</strong>
+                </span>
+            </div>
+
+            <div class="card history-table-card">
+                <div class="card-header">
+                    <div>
+                        <h3 class="card-title">Activity Log</h3>
+                        <p class="card-subtitle">All doses recorded in the system</p>
+                    </div>
+                    <span class="card-badge">All Time</span>
+                </div>
+
+                <div class="table-wrapper">
+                    <table class="schedule-table history-table">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Time</th>
+                                <th>Medicine</th>
+                                <th>Dosage</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="history-body"></tbody>
+                    </table>
+                </div>
+
+                <div id="history-empty" class="history-empty-state" style="display:none;">
+                    <div class="history-empty-icon">🕐</div>
+                    <p class="history-empty-title">No history yet</p>
+                    <p class="history-empty-sub">Mark doses as taken on the dashboard and they'll appear here.</p>
+                    <button class="primary-btn nav-btn menu-link" data-view="dashboard-view" style="margin-top:var(--space-4);">
+                        Go to Dashboard →
+                    </button>
+                </div>
+            </div>
+
+        </section>
+        <section id="reports-view" class="view app-view">
+            <div class="reports-page-header">
+                <div class="reports-header-left">
+                    <div class="reports-header-icon">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                        </svg>
+                    </div>
+                    <div>
+                        <h2 class="page-title">Analytics &amp; Reports</h2>
+                        <p class="page-subtitle">Track your medication adherence and health patterns</p>
+                    </div>
+                </div>
+                <div class="reports-header-right">
+                    <div class="reports-period-badge">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="13" height="13">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/>
+                        </svg>
+                        Last 7 days
+                    </div>
+                    <!-- Export controls -->
+                    <div class="export-controls" id="reports-export-controls">
+                        <select class="export-period-select" id="reports-export-period" aria-label="Export period">
+                            <option value="7">Last 7 days</option>
+                            <option value="30">Last 30 days</option>
+                            <option value="all">All time</option>
+                        </select>
+                        <button class="export-btn export-btn-pdf" id="export-reports-pdf" title="Export PDF report">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
+                            Export PDF
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="reports-stats-row">
+                <div class="reports-stat-card rsc-blue">
+                    <div class="rsc-icon blue-bg">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/>
+                        </svg>
+                    </div>
+                    <div class="rsc-body">
+                        <p class="rsc-label">Total Doses</p>
+                        <p class="rsc-value" id="rpt-total-doses">—</p>
+                        <p class="rsc-sub">All time</p>
+                    </div>
+                </div>
+
+                <div class="reports-stat-card rsc-green">
+                    <div class="rsc-icon green-bg">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                    </div>
+                    <div class="rsc-body">
+                        <p class="rsc-label">Doses Taken</p>
+                        <p class="rsc-value" id="rpt-taken-doses">—</p>
+                        <p class="rsc-sub">Confirmed</p>
+                    </div>
+                </div>
+
+                <div class="reports-stat-card rsc-red">
+                    <div class="rsc-icon red-bg">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/>
+                        </svg>
+                    </div>
+                    <div class="rsc-body">
+                        <p class="rsc-label">Doses Missed</p>
+                        <p class="rsc-value" id="rpt-missed-doses">—</p>
+                        <p class="rsc-sub">Needs attention</p>
+                    </div>
+                </div>
+
+                <div class="reports-stat-card rsc-purple">
+                    <div class="rsc-icon purple-bg">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                        </svg>
+                    </div>
+                    <div class="rsc-body">
+                        <p class="rsc-label">Adherence Rate</p>
+                        <p class="rsc-value" id="rpt-adherence">—</p>
+                        <p class="rsc-sub">Overall</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card mds-card" id="missed-doses-card" style="display:none;">
+
+                <div class="mds-header">
+                    <div class="mds-header-left">
+                        <div class="mds-header-icon">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/>
+                            </svg>
+                        </div>
+                        <div>
+                            <h3 class="mds-title">Missed Doses Summary</h3>
+                            <p class="mds-subtitle">Track missed medications to improve adherence</p>
+                        </div>
+                    </div>
+                    <span class="mds-badge">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="11" height="11">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9.303 3.376c.866 1.5-.217 3.374-1.948 3.374H2.645c-1.73 0-2.813-1.874-1.948-3.374L10.052 3.378c.866-1.5 3.032-1.5 3.898 0l7.353 12.748z"/>
+                        </svg>
+                        Needs Attention
+                    </span>
+                </div>
+
+                <div class="mds-stats-row">
+                    <div class="mds-stat-card">
+                        <div class="mds-stat-icon mds-icon-today">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/>
+                            </svg>
+                        </div>
+                        <p class="mds-stat-value" id="missed-today">0</p>
+                        <p class="mds-stat-label">Today</p>
+                    </div>
+                    <div class="mds-stat-card">
+                        <div class="mds-stat-icon mds-icon-week">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5"/>
+                            </svg>
+                        </div>
+                        <p class="mds-stat-value" id="missed-week">0</p>
+                        <p class="mds-stat-label">This Week</p>
+                    </div>
+                    <div class="mds-stat-card">
+                        <div class="mds-stat-icon mds-icon-month">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5M12 12.75h.008v.008H12v-.008z"/>
+                            </svg>
+                        </div>
+                        <p class="mds-stat-value" id="missed-month">0</p>
+                        <p class="mds-stat-label">This Month</p>
+                    </div>
+                    <div class="mds-stat-card mds-stat-highlight">
+                        <div class="mds-stat-icon mds-icon-pill">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/>
+                            </svg>
+                        </div>
+                        <p class="mds-stat-value mds-most-missed-name" id="most-missed-med">—</p>
+                        <p class="mds-stat-label">Most Missed <span class="mds-most-missed-count" id="most-missed-count"></span></p>
+                    </div>
+                </div>
+
+                <div class="mds-bottom-row">
+
+                    <div class="mds-chart-panel">
+                        <p class="mds-panel-label">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="13" height="13">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/>
+                            </svg>
+                            Weekly Missed Doses
+                        </p>
+                        <div class="mds-chart-wrap">
+                            <canvas id="missed-mini-chart"></canvas>
+                        </div>
+                    </div>
+
+                    <div class="mds-recommendation-panel" id="missed-alert-banner" style="display:none;">
+                        <div class="mds-rec-icon-wrap">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/>
+                            </svg>
+                        </div>
+                        <div class="mds-rec-body">
+                            <p class="mds-rec-title">Adherence Alert</p>
+                            <p class="mds-rec-text" id="missed-alert-text">Your adherence is below 70%. Consider setting reminders or consulting your healthcare provider.</p>
+                        </div>
+                    </div>
+
+                    <div class="mds-success-panel" id="mds-success-panel" style="display:none;">
+                        <div class="mds-success-icon">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                            </svg>
+                        </div>
+                        <div class="mds-rec-body">
+                            <p class="mds-rec-title mds-success-title">Good Adherence</p>
+                            <p class="mds-rec-text">Your adherence is above 70%. Keep up the great work and stay consistent.</p>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+            <div class="card reports-chart-card">
+                <div class="card-header">
+                    <div class="reports-chart-title-group">
+                        <div class="reports-chart-icon">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/>
+                            </svg>
+                        </div>
+                        <div>
+                            <h3 class="card-title">Weekly Adherence</h3>
+                            <p class="card-subtitle">Daily doses taken over the last 7 days</p>
+                        </div>
+                    </div>
+                    <div class="reports-chart-legend">
+                        <span class="legend-dot" style="background:var(--primary)"></span>
+                        <span class="legend-label">Doses taken</span>
+                    </div>
+                </div>
+
+                <div class="reports-chart-wrapper">
+                    <canvas id="weekly-chart-reports"></canvas>
+                </div>
+
+                <div id="reports-empty-page" class="reports-empty-state" style="display:none;">
+                    <div class="reports-empty-icon">📊</div>
+                    <p class="reports-empty-title">No data yet</p>
+                    <p class="reports-empty-sub">Mark some doses as taken on the dashboard to see your adherence chart here.</p>
+                    <button class="primary-btn nav-btn menu-link" data-view="dashboard-view" style="margin-top:12px;">
+                        Go to Dashboard →
+                    </button>
+                </div>
+            </div>
+
+            <div class="reports-insight-strip">
+                <div class="insight-item">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="insight-icon">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 18v-5.25m0 0a6.01 6.01 0 001.5-.189m-1.5.189a6.01 6.01 0 01-1.5-.189m3.75 7.478a12.06 12.06 0 01-4.5 0m3.75 2.383a14.406 14.406 0 01-3 0M14.25 18v-.192c0-.983.658-1.823 1.508-2.316a7.5 7.5 0 10-7.517 0c.85.493 1.509 1.333 1.509 2.316V18"/>
+                    </svg>
+                    <span>Consistency is key — taking medicines at the same time each day improves effectiveness.</span>
+                </div>
+                <div class="insight-item">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="insight-icon">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    <span>Aim for 90%+ adherence for best treatment outcomes.</span>
+                </div>
+            </div>
+
+            <div class="card rpt-streak-card">
+                <div class="card-header">
+                    <div>
+                        <h3 class="card-title">🔥 Streak &amp; Achievements</h3>
+                        <p class="card-subtitle">Your consistency milestones and earned badges</p>
+                    </div>
+                    <span class="card-badge">Gamification</span>
+                </div>
+
+                <div class="rpt-streak-summary">
+                    <div class="rpt-streak-stat">
+                        <span class="rpt-streak-icon">🔥</span>
+                        <div>
+                            <p class="rpt-streak-val" id="rpt-current-streak">0</p>
+                            <p class="rpt-streak-lbl">Current Streak</p>
+                        </div>
+                    </div>
+                    <div class="rpt-streak-stat">
+                        <span class="rpt-streak-icon">🏆</span>
+                        <div>
+                            <p class="rpt-streak-val" id="rpt-longest-streak">0</p>
+                            <p class="rpt-streak-lbl">Best Streak</p>
+                        </div>
+                    </div>
+                    <div class="rpt-streak-stat">
+                        <span class="rpt-streak-icon">🌟</span>
+                        <div>
+                            <p class="rpt-streak-val" id="rpt-perfect-week">0/7</p>
+                            <p class="rpt-streak-lbl">Perfect Days (Week)</p>
+                        </div>
+                    </div>
+                    <div class="rpt-streak-stat">
+                        <span class="rpt-streak-icon">📅</span>
+                        <div>
+                            <p class="rpt-streak-val" id="rpt-perfect-month">0/30</p>
+                            <p class="rpt-streak-lbl">Perfect Days (Month)</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="rpt-ai-insight" id="rpt-ai-insight" style="display:none;">
+                    <span class="rpt-ai-icon">✨</span>
+                    <p class="rpt-ai-text" id="rpt-ai-text"></p>
+                </div>
+
+                <div class="rpt-badges-section">
+                    <p class="rpt-badges-title">Earned Badges</p>
+                    <div class="rpt-badges-grid" id="rpt-badges-grid">
+                        <p class="empty-state" style="font-size:0.8rem;">No badges yet — keep taking your doses!</p>
+                    </div>
+                </div>
+            </div>
+
+        </section>
+
+        <section id="bmi-view" class="view app-view">
+
+            <div class="page-header">
+                <div class="page-header-left">
+                    <div class="page-icon-wrap">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="page-icon">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/>
+                        </svg>
+                    </div>
+                    <div>
+                        <h1 class="page-title">BMI Calculator</h1>
+                        <p class="page-subtitle">Track your Body Mass Index and health metrics</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card bmi-card">
+                <div class="card-header">
+                    <div>
+                        <h3 class="card-title">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="18" height="18" style="display:inline-block;vertical-align:middle;margin-right:8px;">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 15.75V18m-7.5-6.75h.008v.008H8.25v-.008zm0 2.25h.008v.008H8.25V13.5zm0 2.25h.008v.008H8.25v-.008zm0 2.25h.008v.008H8.25V18zm2.498-6.75h.007v.008h-.007v-.008zm0 2.25h.007v.008h-.007V13.5zm0 2.25h.007v.008h-.007v-.008zm0 2.25h.007v.008h-.007V18zm2.504-6.75h.008v.008h-.008v-.008zm0 2.25h.008v.008h-.008V13.5zm0 2.25h.008v.008h-.008v-.008zm0 2.25h.008v.008h-.008V18zm2.498-6.75h.008v.008h-.008v-.008zm0 2.25h.008v.008h-.008V13.5zM8.25 6h7.5v2.25h-7.5V6zM12 2.25c-1.892 0-3.758.11-5.593.322C5.307 2.7 4.5 3.65 4.5 4.757V19.5a2.25 2.25 0 002.25 2.25h10.5a2.25 2.25 0 002.25-2.25V4.757c0-1.108-.806-2.057-1.907-2.185A48.507 48.507 0 0012 2.25z"/>
+                            </svg>
+                            Calculate Your BMI
+                        </h3>
+                        <p class="card-subtitle">Enter your height and weight to calculate your Body Mass Index</p>
+                    </div>
+                </div>
+
+                <div class="bmi-input-section">
+                    <div class="bmi-input-row">
+                        <div class="bmi-input-group">
+                            <label for="bmi-height-view" class="bmi-label">Height (cm)</label>
+                            <input type="number" id="bmi-height-view" class="bmi-input" placeholder="170" min="50" max="300" step="0.1">
+                        </div>
+                        <div class="bmi-input-group">
+                            <label for="bmi-weight-view" class="bmi-label">Weight (kg)</label>
+                            <input type="number" id="bmi-weight-view" class="bmi-input" placeholder="70" min="20" max="500" step="0.1">
+                        </div>
+                    </div>
+                    <button id="calculate-bmi-view-btn" class="primary-btn full-width">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 15.75V18m-7.5-6.75h.008v.008H8.25v-.008zm0 2.25h.008v.008H8.25V13.5zm0 2.25h.008v.008H8.25v-.008zm0 2.25h.008v.008H8.25V18zm2.498-6.75h.007v.008h-.007v-.008zm0 2.25h.007v.008h-.007V13.5zm0 2.25h.007v.008h-.007v-.008zm0 2.25h.007v.008h-.007V18zm2.504-6.75h.008v.008h-.008v-.008zm0 2.25h.008v.008h-.008V13.5zm0 2.25h.008v.008h-.008v-.008zm0 2.25h.008v.008h-.008V18zm2.498-6.75h.008v.008h-.008v-.008zm0 2.25h.008v.008h-.008V13.5zM8.25 6h7.5v2.25h-7.5V6zM12 2.25c-1.892 0-3.758.11-5.593.322C5.307 2.7 4.5 3.65 4.5 4.757V19.5a2.25 2.25 0 002.25 2.25h10.5a2.25 2.25 0 002.25-2.25V4.757c0-1.108-.806-2.057-1.907-2.185A48.507 48.507 0 0012 2.25z"/>
+                        </svg>
+                        Calculate BMI
+                    </button>
+                </div>
+
+                <div id="bmi-result-section-view" class="bmi-result-section" style="display:none;">
+                    <div class="bmi-result-card">
+                        <div class="bmi-value-display">
+                            <span class="bmi-value-label">Your BMI</span>
+                            <h2 class="bmi-value-number" id="bmi-value-display-view">0.0</h2>
+                        </div>
+                        <div class="bmi-status-badge" id="bmi-status-badge-view">
+                            <span class="bmi-status-icon" id="bmi-status-icon-view">✓</span>
+                            <span class="bmi-status-text" id="bmi-status-text-view">Healthy Weight</span>
+                        </div>
+                    </div>
+                </div>
+
+                <p class="bmi-disclaimer">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="14" height="14">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z"/>
+                    </svg>
+                    BMI is a general indicator. Consult healthcare professionals for personalized advice.
+                </p>
+            </div>
+
+            <div class="card health-insights-card">
+                <div class="card-header">
+                    <div>
+                        <h3 class="card-title">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="18" height="18" style="display:inline-block;vertical-align:middle;margin-right:8px;">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M12 18v-5.25m0 0a6.01 6.01 0 001.5-.189m-1.5.189a6.01 6.01 0 01-1.5-.189m3.75 7.478a12.06 12.06 0 01-4.5 0m3.75 2.383a14.406 14.406 0 01-3 0M14.25 18v-.192c0-.983.658-1.823 1.508-2.316a7.5 7.5 0 10-7.517 0c.85.493 1.509 1.333 1.509 2.316V18"/>
+                            </svg>
+                            Health Insights
+                        </h3>
+                        <p class="card-subtitle">Personalized recommendations based on your BMI</p>
+                    </div>
+                </div>
+                <div id="health-insights-content-view">
+                    <div class="health-insights-empty">
+                        <span class="empty-icon">💡</span>
+                        <p class="empty-text">Calculate your BMI to receive personalized health suggestions and diet recommendations.</p>
+                    </div>
+                </div>
+            </div>
+
+        </section>
+
+        <section id="vitals-view" class="view app-view">
+
+            <div class="page-header">
+                <div class="page-header-left">
+                    <div class="page-icon-wrap vitals-icon-wrap">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="page-icon">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M3 12h2l2-7 3 14 3-10 2 3h6"/>
+                        </svg>
+                    </div>
+                    <div>
+                        <h1 class="page-title">Vitals Log</h1>
+                        <p class="page-subtitle">Track and monitor your health metrics over time</p>
+                    </div>
+                </div>
+                <div class="vitals-header-right">
+                    <div class="vitals-period-tabs" id="vitals-period-tabs">
+                        <button class="vitals-period-btn active" data-period="week">Week</button>
+                        <button class="vitals-period-btn" data-period="month">Month</button>
+                        <button class="vitals-period-btn" data-period="all">All Time</button>
+                    </div>
+                    <button class="export-btn export-btn-pdf" id="export-vitals-pdf" title="Export vitals as PDF">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
+                        Export PDF
+                    </button>
+                </div>
+            </div>
+
+            <div id="vitals-alert-banner" class="vitals-alert-banner" style="display:none;">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/>
+                </svg>
+                <span id="vitals-alert-text">Health alert detected</span>
+            </div>
+
+            <div class="vitals-summary-row" id="vitals-summary-row">
+                <div class="vitals-card vitals-card-bp">
+                    <div class="vitals-card-icon">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/>
+                        </svg>
+                    </div>
+                    <div class="vitals-card-body">
+                        <p class="vitals-card-label">Blood Pressure</p>
+                        <p class="vitals-card-value" id="vc-bp">—</p>
+                        <p class="vitals-card-unit">mmHg</p>
+                        <span class="vitals-card-status" id="vc-bp-status"></span>
+                    </div>
+                </div>
+
+                <div class="vitals-card vitals-card-sugar">
+                    <div class="vitals-card-icon">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/>
+                        </svg>
+                    </div>
+                    <div class="vitals-card-body">
+                        <p class="vitals-card-label">Blood Sugar</p>
+                        <p class="vitals-card-value" id="vc-sugar">—</p>
+                        <p class="vitals-card-unit">mg/dL</p>
+                        <span class="vitals-card-status" id="vc-sugar-status"></span>
+                    </div>
+                </div>
+
+                <div class="vitals-card vitals-card-weight">
+                    <div class="vitals-card-icon">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1M4.22 4.22l.707.707M18.364 18.364l.707.707M1 12h1m20 0h1M4.22 19.778l.707-.707M18.364 5.636l.707-.707"/>
+                        </svg>
+                    </div>
+                    <div class="vitals-card-body">
+                        <p class="vitals-card-label">Weight</p>
+                        <p class="vitals-card-value" id="vc-weight">—</p>
+                        <p class="vitals-card-unit">kg</p>
+                        <span class="vitals-card-status" id="vc-weight-status"></span>
+                    </div>
+                </div>
+
+                <div class="vitals-card vitals-card-hr">
+                    <div class="vitals-card-icon">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M3 12h2l2-7 3 14 3-10 2 3h6"/>
+                        </svg>
+                    </div>
+                    <div class="vitals-card-body">
+                        <p class="vitals-card-label">Heart Rate</p>
+                        <p class="vitals-card-value" id="vc-hr">—</p>
+                        <p class="vitals-card-unit">bpm</p>
+                        <span class="vitals-card-status" id="vc-hr-status"></span>
+                    </div>
+                </div>
+
+                <div class="vitals-card vitals-card-temp">
+                    <div class="vitals-card-icon">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M9 19V6.5a3 3 0 016 0V19m-6 0a3 3 0 006 0m-6 0H6m9 0h3"/>
+                        </svg>
+                    </div>
+                    <div class="vitals-card-body">
+                        <p class="vitals-card-label">Temperature</p>
+                        <p class="vitals-card-value" id="vc-temp">—</p>
+                        <p class="vitals-card-unit">°C</p>
+                        <span class="vitals-card-status" id="vc-temp-status"></span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="vitals-main-grid">
+
+                <div class="card vitals-form-card">
+                    <div class="card-header">
+                        <div>
+                            <h3 class="card-title">Log Vitals</h3>
+                            <p class="card-subtitle">Record your current health measurements</p>
+                        </div>
+                        <span class="card-badge">New Entry</span>
+                    </div>
+
+                    <form id="vitals-form" novalidate>
+                        <div class="vitals-form-section">
+                            <div class="vitals-form-section-label">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="14" height="14">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/>
+                                </svg>
+                                Blood Pressure
+                            </div>
+                            <div class="vitals-bp-row">
+                                <div class="form-group">
+                                    <label for="vf-bp-sys">Systolic <span class="vitals-unit-hint">mmHg</span></label>
+                                    <input type="number" id="vf-bp-sys" placeholder="120" min="50" max="300">
+                                    <span class="field-error" id="vf-bp-sys-err"></span>
+                                </div>
+                                <div class="vitals-bp-slash">/</div>
+                                <div class="form-group">
+                                    <label for="vf-bp-dia">Diastolic <span class="vitals-unit-hint">mmHg</span></label>
+                                    <input type="number" id="vf-bp-dia" placeholder="80" min="30" max="200">
+                                    <span class="field-error" id="vf-bp-dia-err"></span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="vitals-form-row-2">
+                            <div class="vitals-form-section">
+                                <div class="vitals-form-section-label">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="14" height="14">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/>
+                                    </svg>
+                                    Blood Sugar
+                                </div>
+                                <div class="form-group">
+                                    <label for="vf-sugar">Level <span class="vitals-unit-hint">mg/dL</span></label>
+                                    <input type="number" id="vf-sugar" placeholder="100" min="20" max="600" step="0.1">
+                                    <span class="field-error" id="vf-sugar-err"></span>
+                                </div>
+                            </div>
+
+                            <div class="vitals-form-section">
+                                <div class="vitals-form-section-label">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="14" height="14">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1M4.22 4.22l.707.707M18.364 18.364l.707.707M1 12h1m20 0h1M4.22 19.778l.707-.707M18.364 5.636l.707-.707"/>
+                                    </svg>
+                                    Weight
+                                </div>
+                                <div class="form-group">
+                                    <label for="vf-weight">Weight <span class="vitals-unit-hint">kg</span></label>
+                                    <input type="number" id="vf-weight" placeholder="70" min="10" max="500" step="0.1">
+                                    <span class="field-error" id="vf-weight-err"></span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="vitals-form-row-2">
+                            <div class="vitals-form-section">
+                                <div class="vitals-form-section-label">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="14" height="14">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M3 12h2l2-7 3 14 3-10 2 3h6"/>
+                                    </svg>
+                                    Heart Rate
+                                </div>
+                                <div class="form-group">
+                                    <label for="vf-hr">Pulse <span class="vitals-unit-hint">bpm</span></label>
+                                    <input type="number" id="vf-hr" placeholder="72" min="20" max="300">
+                                    <span class="field-error" id="vf-hr-err"></span>
+                                </div>
+                            </div>
+
+                            <div class="vitals-form-section">
+                                <div class="vitals-form-section-label">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="14" height="14">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M9 19V6.5a3 3 0 016 0V19m-6 0a3 3 0 006 0m-6 0H6m9 0h3"/>
+                                    </svg>
+                                    Temperature
+                                </div>
+                                <div class="form-group">
+                                    <label for="vf-temp">Temp <span class="vitals-unit-hint">°C</span></label>
+                                    <input type="number" id="vf-temp" placeholder="37.0" min="30" max="45" step="0.1">
+                                    <span class="field-error" id="vf-temp-err"></span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="vf-notes">Notes <span class="vitals-optional">(optional)</span></label>
+                            <textarea id="vf-notes" class="vitals-notes-input" placeholder="Any additional observations..." rows="2" maxlength="500"></textarea>
+                        </div>
+
+                        <p class="field-error" id="vf-general-err" style="margin-bottom:8px;"></p>
+
+                        <button type="submit" class="primary-btn full-width" id="vitals-submit-btn">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" width="16" height="16">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
+                            </svg>
+                            Save Vitals
+                        </button>
+                    </form>
+                </div>
+
+                <div class="card vitals-charts-card">
+                    <div class="card-header">
+                        <div>
+                            <h3 class="card-title">Trends</h3>
+                            <p class="card-subtitle" id="vitals-chart-period-label">Last 7 days</p>
+                        </div>
+                        <span class="card-badge">Charts</span>
+                    </div>
+
+                    <div class="vitals-chart-block">
+                        <p class="vitals-chart-label">Blood Pressure (mmHg)</p>
+                        <div class="vitals-chart-wrap">
+                            <canvas id="vitals-bp-chart"></canvas>
+                        </div>
+                    </div>
+
+                    <div class="vitals-chart-block">
+                        <p class="vitals-chart-label">Blood Sugar (mg/dL)</p>
+                        <div class="vitals-chart-wrap">
+                            <canvas id="vitals-sugar-chart"></canvas>
+                        </div>
+                    </div>
+
+                    <div class="vitals-chart-block">
+                        <p class="vitals-chart-label">Weight (kg)</p>
+                        <div class="vitals-chart-wrap">
+                            <canvas id="vitals-weight-chart"></canvas>
+                        </div>
+                    </div>
+
+                    <p class="vitals-chart-empty" id="vitals-chart-empty" style="display:none;">
+                        <span class="empty-icon">📊</span>
+                        No data yet for this period. Log some vitals to see trends.
+                    </p>
+                </div>
+            </div>
+
+            <div class="card vitals-insights-card">
+                <div class="card-header">
+                    <div>
+                        <h3 class="card-title">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="18" height="18" style="display:inline-block;vertical-align:middle;margin-right:6px;">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M12 18v-5.25m0 0a6.01 6.01 0 001.5-.189m-1.5.189a6.01 6.01 0 01-1.5-.189m3.75 7.478a12.06 12.06 0 01-4.5 0m3.75 2.383a14.406 14.406 0 01-3 0M14.25 18v-.192c0-.983.658-1.823 1.508-2.316a7.5 7.5 0 10-7.517 0c.85.493 1.509 1.333 1.509 2.316V18"/>
+                            </svg>
+                            Health Insights
+                        </h3>
+                        <p class="card-subtitle">Automated analysis of your recent vitals</p>
+                    </div>
+                    <span class="card-badge badge-ai">Auto</span>
+                </div>
+                <div id="vitals-insights-list" class="vitals-insights-list">
+                    <p class="empty-state"><span class="empty-icon">💡</span> Log vitals to see personalized health insights.</p>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <div>
+                        <h3 class="card-title">Recent Records</h3>
+                        <p class="card-subtitle">Your latest vitals entries</p>
+                    </div>
+                    <span class="card-badge" id="vitals-record-count">0 records</span>
+                </div>
+                <div class="table-wrapper">
+                    <table class="vitals-table" id="vitals-table">
+                        <thead>
+                            <tr>
+                                <th>Date &amp; Time</th>
+                                <th>BP (mmHg)</th>
+                                <th>Sugar (mg/dL)</th>
+                                <th>Weight (kg)</th>
+                                <th>HR (bpm)</th>
+                                <th>Temp (°C)</th>
+                                <th>Notes</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="vitals-table-body"></tbody>
+                    </table>
+                </div>
+                <p id="vitals-table-empty" class="empty-state" style="display:none;">
+                    <span class="empty-icon">🩺</span>
+                    No vitals recorded yet. Use the form above to log your first entry.
+                </p>
+            </div>
+
+        </section>
+
+        <section id="ai-tools-view" class="view app-view">
+
+            <div class="page-header">
+                <div class="page-header-left">
+                    <div class="page-icon-wrap">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="page-icon">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+                        </svg>
+                    </div>
+                    <div>
+                        <h1 class="page-title">AI Tools</h1>
+                        <p class="page-subtitle">AI-powered health assistance and insights</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="two-col-grid">
+                <div class="card ai-card">
+                    <div class="card-header">
+                        <div>
+                            <h3 class="card-title">
+                                <span class="ai-badge">AI</span>
+                                Medicine Assistant
+                            </h3>
+                            <p class="card-subtitle">Ask about medicines, dosages, and interactions</p>
+                        </div>
+                    </div>
+                    <div class="ai-input-section">
+                        <textarea id="ai-query-view" class="ai-textarea" placeholder="Ask me anything about medicines, side effects, or drug interactions..." rows="3"></textarea>
+                        <button id="ai-submit-view" class="primary-btn full-width">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"/>
+                            </svg>
+                            Ask AI
+                        </button>
+                    </div>
+                    <div id="ai-response-view" class="ai-response" style="display:none;"></div>
+                </div>
+
+                <div class="card ai-card">
+                    <div class="card-header">
+                        <div>
+                            <h3 class="card-title">
+                                <span class="ai-badge">AI</span>
+                                Symptom Checker
+                            </h3>
+                            <p class="card-subtitle">Possible causes and precautions</p>
+                        </div>
+                    </div>
+                    <div class="ai-input-section">
+                        <textarea id="symptom-query-view" class="ai-textarea" placeholder="Describe your symptoms (e.g., headache, fever, nausea)..." rows="3"></textarea>
+                        <button id="symptom-submit-view" class="primary-btn full-width">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                            </svg>
+                            Check Symptoms
+                        </button>
+                    </div>
+                    <div id="symptom-response-view" class="ai-response" style="display:none;"></div>
+                </div>
+            </div>
+
+            <div class="ai-disclaimer-card">
+                <div class="ai-disclaimer-icon">⚠️</div>
+                <div class="ai-disclaimer-content">
+                    <h4 class="ai-disclaimer-title">Important Medical Disclaimer</h4>
+                    <p class="ai-disclaimer-text">
+                        AI-generated responses are for informational purposes only and should not replace professional medical advice. 
+                        Always consult with qualified healthcare providers for diagnosis and treatment. In case of emergency, call your local emergency services immediately.
+                    </p>
+                </div>
+            </div>
+
+        </section>
+
+    </main>
+</div>
+
+<audio id="notify-sound" src="notify-sound.mp3" preload="auto"></audio>
+
+<input type="checkbox" id="theme-toggle-checkbox" style="display:none;" aria-hidden="true">
+<span id="theme-toggle-text" style="display:none;" aria-hidden="true"></span>
+
+<div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+
+<div id="profile-dropdown" class="profile-dropdown" role="menu" aria-label="Profile menu">
+    <div class="pd-header">
+        <div class="pd-avatar" id="pd-avatar">U</div>
+        <div class="pd-user-info">
+            <p class="pd-name" id="pd-name">Guest</p>
+            <p class="pd-email" id="pd-email">Not logged in</p>
+            <span class="pd-role-badge" id="pd-role">Patient</span>
+        </div>
+    </div>
+    <div class="pd-divider"></div>
+    <button class="pd-item" id="pd-profile-btn" role="menuitem"><svg class="pd-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"/></svg>Profile Settings</button>
+    <button class="pd-item" id="pd-notif-btn" role="menuitem"><svg class="pd-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"/></svg>Notification Preferences</button>
+    <button class="pd-item" id="pd-help-btn" role="menuitem"><svg class="pd-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z"/></svg>Help &amp; Support</button>
+    <button class="pd-item" id="pd-privacy-btn" role="menuitem"><svg class="pd-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/></svg>Privacy &amp; Security</button>
+    <div class="pd-divider"></div>
+    <button class="pd-item pd-logout-item" id="pd-logout-btn" role="menuitem"><svg class="pd-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75"/></svg>Sign Out</button>
+</div>
+
+<div id="modal-backdrop" class="modal-backdrop" aria-hidden="true"></div>
+
+<div id="modal-profile" class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-profile-title">
+    <div class="modal-box">
+        <div class="modal-header"><div class="modal-header-icon blue-bg"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"/></svg></div><div><h3 class="modal-title" id="modal-profile-title">Profile Settings</h3><p class="modal-subtitle">Manage your personal information</p></div><button class="modal-close" data-modal="modal-profile" aria-label="Close">&times;</button></div>
+        <div class="modal-body">
+            <div class="profile-avatar-row"><div class="profile-avatar-preview" id="profile-avatar-preview">U</div><div><p class="profile-avatar-name" id="profile-avatar-name">User</p><p class="profile-avatar-role" id="profile-avatar-role">Patient</p></div></div>
+            <div class="modal-section-label">Personal Information</div>
+            <div class="modal-form-grid">
+                <div class="form-group"><label for="ps-name">Full Name</label><input type="text" id="ps-name" placeholder="Your full name"></div>
+                <div class="form-group"><label for="ps-email">Email Address</label><input type="email" id="ps-email" placeholder="you@example.com"></div>
+                <div class="form-group"><label for="ps-phone">Phone Number</label><input type="tel" id="ps-phone" placeholder="+1 (555) 000-0000"></div>
+                <div class="form-group"><label for="ps-dob">Date of Birth</label><input type="date" id="ps-dob"></div>
+                <div class="form-group"><label for="ps-gender">Gender</label><select id="ps-gender"><option value="">Select gender</option><option value="Male">Male</option><option value="Female">Female</option><option value="Other">Other</option><option value="Prefer not to say">Prefer not to say</option></select></div>
+                <div class="form-group"><label for="ps-emergency">Emergency Contact</label><input type="tel" id="ps-emergency" placeholder="Emergency contact number"></div>
+            </div>
+        </div>
+        <div class="modal-footer"><button class="modal-btn-secondary" data-modal="modal-profile">Cancel</button><button class="modal-btn-primary" id="ps-save-btn">Save Changes</button></div>
+    </div>
+</div>
+
+<div id="modal-notif" class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-notif-title">
+    <div class="modal-box modal-box-sm">
+        <div class="modal-header"><div class="modal-header-icon purple-bg"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"/></svg></div><div><h3 class="modal-title" id="modal-notif-title">Notification Preferences</h3><p class="modal-subtitle">Control how DoseBuddy alerts you</p></div><button class="modal-close" data-modal="modal-notif" aria-label="Close">&times;</button></div>
+        <div class="modal-body">
+            <div class="modal-section-label">Reminders</div>
+            <div class="pref-list">
+                <div class="pref-row"><div class="pref-info"><p class="pref-title">Medicine Reminders</p><p class="pref-desc">Get notified when it is time to take your medicine</p></div><button class="toggle-switch active" data-pref="medicine-reminders" role="switch" aria-checked="true"><span class="toggle-knob"></span></button></div>
+                <div class="pref-row"><div class="pref-info"><p class="pref-title">Missed Dose Alerts</p><p class="pref-desc">Alert when a scheduled dose is missed</p></div><button class="toggle-switch active" data-pref="missed-alerts" role="switch" aria-checked="true"><span class="toggle-knob"></span></button></div>
+                <div class="pref-row"><div class="pref-info"><p class="pref-title">Daily Summary</p><p class="pref-desc">Receive a daily adherence summary</p></div><button class="toggle-switch" data-pref="daily-summary" role="switch" aria-checked="false"><span class="toggle-knob"></span></button></div>
+            </div>
+            <div class="modal-section-label">Channels</div>
+            <div class="pref-list">
+                <div class="pref-row"><div class="pref-info"><p class="pref-title">Sound Alerts</p><p class="pref-desc">Play a sound when reminders trigger</p></div><button class="toggle-switch active" data-pref="sound-alerts" role="switch" aria-checked="true"><span class="toggle-knob"></span></button></div>
+                <div class="pref-row"><div class="pref-info"><p class="pref-title">Email Notifications</p><p class="pref-desc">Send reminders to your email address</p></div><button class="toggle-switch" data-pref="email-notifs" role="switch" aria-checked="false"><span class="toggle-knob"></span></button></div>
+            </div>
+        </div>
+        <div class="modal-footer"><button class="modal-btn-secondary" data-modal="modal-notif">Cancel</button><button class="modal-btn-primary" id="notif-save-btn">Save Preferences</button></div>
+    </div>
+</div>
+
+<div id="modal-help" class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-help-title">
+    <div class="modal-box modal-box-sm">
+        <div class="modal-header"><div class="modal-header-icon green-bg"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z"/></svg></div><div><h3 class="modal-title" id="modal-help-title">Help &amp; Support</h3><p class="modal-subtitle">We are here to help you</p></div><button class="modal-close" data-modal="modal-help" aria-label="Close">&times;</button></div>
+        <div class="modal-body">
+            <div class="help-contact-card"><div class="help-contact-icon">&#x2709;</div><div><p class="help-contact-label">Support Email</p><p class="help-contact-email">dosebuddySupport@gmail.com</p></div><button class="help-copy-btn" id="help-copy-email" title="Copy email"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="15" height="15"><path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184"/></svg></button><a class="help-mailto-btn" href="mailto:dosebuddySupport@gmail.com">Send Email</a></div>
+            <div class="modal-section-label">Frequently Asked Questions</div>
+            <div class="faq-list">
+                <details class="faq-item"><summary class="faq-question">How do I add a medicine?</summary><p class="faq-answer">Go to <strong>Add Medicine</strong> in the sidebar. Fill in the medicine name, dosage, instructions, start/end dates, and reminder times. You can also upload a prescription image to auto-fill the form using AI.</p></details>
+                <details class="faq-item"><summary class="faq-question">How do reminders work?</summary><p class="faq-answer">DoseBuddy sends browser notifications at the exact times you set for each medicine. Make sure to allow notifications when prompted.</p></details>
+                <details class="faq-item"><summary class="faq-question">How is adherence calculated?</summary><p class="faq-answer">Adherence is the percentage of doses marked as taken out of total scheduled doses for today. Check the Reports page for your 7-day trend.</p></details>
+                <details class="faq-item"><summary class="faq-question">How does dark mode work?</summary><p class="faq-answer">Toggle dark mode using the <strong>Dark Mode</strong> button at the bottom of the sidebar. Your preference is saved automatically.</p></details>
+                <details class="faq-item"><summary class="faq-question">Can a caregiver manage medicines?</summary><p class="faq-answer">Yes. Sign up as a Caretaker and enter the patient email. You can view their schedule but only the patient account can add or delete medicines.</p></details>
+            </div>
+        </div>
+        <div class="modal-footer modal-footer-single"><button class="modal-btn-secondary" data-modal="modal-help">Close</button></div>
+    </div>
+</div>
+
+<div id="modal-privacy" class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-privacy-title">
+    <div class="modal-box modal-box-sm">
+        <div class="modal-header"><div class="modal-header-icon orange-bg"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/></svg></div><div><h3 class="modal-title" id="modal-privacy-title">Privacy &amp; Security</h3><p class="modal-subtitle">Manage your account security</p></div><button class="modal-close" data-modal="modal-privacy" aria-label="Close">&times;</button></div>
+        <div class="modal-body">
+            <div class="modal-section-label">Change Password</div>
+            <div class="security-form">
+                <div class="form-group"><label for="sec-current-pw">Current Password</label><div class="pw-input-wrap"><input type="password" id="sec-current-pw" placeholder="Enter current password"><button class="pw-toggle-btn" data-target="sec-current-pw" aria-label="Toggle visibility"><svg class="pw-eye" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg></button></div></div>
+                <div class="form-group"><label for="sec-new-pw">New Password</label><div class="pw-input-wrap"><input type="password" id="sec-new-pw" placeholder="At least 8 characters"><button class="pw-toggle-btn" data-target="sec-new-pw" aria-label="Toggle visibility"><svg class="pw-eye" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg></button></div></div>
+                <div class="form-group"><label for="sec-confirm-pw">Confirm New Password</label><div class="pw-input-wrap"><input type="password" id="sec-confirm-pw" placeholder="Repeat new password"><button class="pw-toggle-btn" data-target="sec-confirm-pw" aria-label="Toggle visibility"><svg class="pw-eye" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg></button></div></div>
+                <div class="pw-strength-wrap" id="pw-strength-wrap" style="display:none;"><div class="pw-strength-bar"><div class="pw-strength-fill" id="pw-strength-fill"></div></div><span class="pw-strength-label" id="pw-strength-label">Weak</span></div>
+                <p class="sec-form-error" id="sec-pw-error"></p>
+            </div>
+            <div class="modal-section-label">Account Security</div>
+            <div class="security-info-cards">
+                <div class="sec-info-card sec-info-blue"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z"/></svg><p>Your data is stored securely and never shared with third parties.</p></div>
+                <div class="sec-info-card sec-info-green"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg><p>Use a strong password with letters, numbers, and symbols for best security.</p></div>
+            </div>
+        </div>
+        <div class="modal-footer"><button class="modal-btn-secondary" data-modal="modal-privacy">Cancel</button><button class="modal-btn-primary" id="sec-save-btn">Update Password</button></div>
+    </div>
+</div>
+
+<div id="modal-logout" class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-logout-title">
+    <div class="modal-box modal-box-xs">
+        <div class="modal-header"><div class="modal-header-icon danger-bg"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75"/></svg></div><div><h3 class="modal-title" id="modal-logout-title">Sign Out</h3><p class="modal-subtitle">Are you sure you want to sign out?</p></div><button class="modal-close" data-modal="modal-logout" aria-label="Close">&times;</button></div>
+        <div class="modal-body"><div class="logout-warning-card"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg><p>You will be signed out of your DoseBuddy account. Any unsaved changes will be lost.</p></div></div>
+        <div class="modal-footer"><button class="modal-btn-secondary" data-modal="modal-logout">Stay Signed In</button><button class="modal-btn-danger" id="confirm-logout-btn">Sign Out</button></div>
+    </div>
+</div>
+
+<div id="onboarding-overlay" class="onboarding-overlay" aria-hidden="true" style="display:none;">
+    <div id="onboarding-spotlight" class="onboarding-spotlight"></div>
+</div>
+
+<div id="onboarding-tooltip" class="onboarding-tooltip" role="dialog" aria-modal="true" aria-labelledby="ob-title" style="display:none;">
+    <div class="ob-step-indicator" id="ob-step-indicator">Step 1 of 6</div>
+    <h4 class="ob-title" id="ob-title">Welcome to DoseBuddy 👋</h4>
+    <p class="ob-desc" id="ob-desc">Let us show you around in a few quick steps.</p>
+    <div class="ob-footer">
+        <button class="ob-skip-btn" id="ob-skip-btn">Skip tour</button>
+        <button class="ob-next-btn" id="ob-next-btn">Next →</button>
+    </div>
+</div>
+<script src="app.js"></script>
+</body>
+</html>
