@@ -1,9 +1,6 @@
-﻿// API base URL — defaults to localhost for local development.
-// For production, set window.APP_CONFIG.apiBase in a server-rendered config block
-// or replace this value during your build/deploy step.
-const API_BASE = (window.APP_CONFIG && window.APP_CONFIG.apiBase)
+﻿const API_BASE = (window.APP_CONFIG && window.APP_CONFIG.apiBase)
     ? window.APP_CONFIG.apiBase
-    : "http://localhost:8080/api";
+    : "https://dosebuddy-production.up.railway.app/api";
 const LS_CURRENT_USER_KEY = "dosebuddy_current_user";
 
 let currentUser = null;
