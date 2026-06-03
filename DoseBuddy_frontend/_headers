@@ -1,0 +1,7 @@
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+
+/notify-sound.mp3
+  Content-Type: audio/mpeg
+  Cache-Control: public, max-age=31536000, immutable
