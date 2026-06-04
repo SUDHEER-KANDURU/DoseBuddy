@@ -57,11 +57,9 @@
         </dependency>
 
 
-		<!-- Spring Mail (Gmail SMTP) -->
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-mail</artifactId>
-		</dependency>
+		<!-- Email: Resend REST API (replaces Spring Mail / Gmail SMTP).
+		     Resend uses HTTPS, so no outbound port 587 is needed.
+		     No additional dependency required — uses Java's built-in java.net.http.HttpClient. -->
 
 		<!-- PDF -->
 		<dependency>

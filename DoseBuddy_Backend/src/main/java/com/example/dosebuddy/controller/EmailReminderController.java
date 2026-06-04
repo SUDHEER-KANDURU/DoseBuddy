@@ -14,9 +14,12 @@ import java.util.Map;
  * REST API for the email-reminder subsystem.
  *
  * <pre>
+ * GET  /api/email-reminders/email-provider-health          – Resend provider status
+ * GET  /api/email-reminders/mail-health                    – legacy alias
+ * GET  /api/email-reminders/test-smtp-connectivity         – TCP probe (legacy)
  * GET  /api/email-reminders/settings/{userId}              – get preference + offset
  * PUT  /api/email-reminders/settings/{userId}              – update preference + offset
- * POST /api/email-reminders/test/{userId}                  – send test email
+ * POST /api/email-reminders/test/{userId}                  – send test email via Resend
  * POST /api/email-reminders/trigger/{userId}/{medId}?time= – debug trigger
  * GET  /api/email-reminders/analytics/{userId}             – stats
  * GET  /api/email-reminders/logs/{userId}                  – full log history
@@ -34,40 +37,32 @@ public class EmailReminderController {
         this.emailReminderService = emailReminderService;
     }
 
-    // ── Mail health ───────────────────────────────────────────────────────────
+    // ── Email provider health ─────────────────────────────────────────────────
+
+    /**
+     * GET /api/email-reminders/email-provider-health
+     *
+     * Returns Resend provider configuration status.
+     * The API key value is never included in the response.
+     *
+     * <pre>
+     * { "provider": "resend", "configured": true }
+     * </pre>
+     */
+    @GetMapping("/email-provider-health")
+    public ResponseEntity<?> getEmailProviderHealth() {
+        return ResponseEntity.ok(emailReminderService.getEmailProviderHealth());
+    }
+
+    // ── Mail health (legacy alias) ────────────────────────────────────────────
 
     /**
      * GET /api/email-reminders/mail-health
-     *
-     * Returns SMTP configuration status without exposing secret values.
+     * Legacy endpoint — now returns Resend provider status.
      */
     @GetMapping("/mail-health")
     public ResponseEntity<?> getMailHealth() {
         return ResponseEntity.ok(emailReminderService.getMailHealth());
-    }
-
-    // ── SMTP TCP connectivity probe ───────────────────────────────────────────
-
-    /**
-     * GET /api/email-reminders/test-smtp-connectivity
-     *
-     * Opens a raw TCP socket to smtp.gmail.com:587 with a 10-second timeout.
-     * Does NOT authenticate. Does NOT send an email. Only tests TCP reachability.
-     *
-     * Example responses:
-     * <pre>
-     * // success
-     * { "host": "smtp.gmail.com", "port": 587, "reachable": true,
-     *   "message": "TCP connection to smtp.gmail.com:587 succeeded" }
-     *
-     * // failure
-     * { "host": "smtp.gmail.com", "port": 587, "reachable": false,
-     *   "message": "SocketTimeoutException: connect timed out" }
-     * </pre>
-     */
-    @GetMapping("/test-smtp-connectivity")
-    public ResponseEntity<?> testSmtpConnectivity() {
-        return ResponseEntity.ok(emailReminderService.testSmtpConnectivity());
     }
 
     // ── Valid offset values ───────────────────────────────────────────────────
