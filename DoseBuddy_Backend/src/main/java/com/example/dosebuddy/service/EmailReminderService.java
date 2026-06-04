@@ -138,14 +138,22 @@ public class EmailReminderService {
      *   <li>Dedup on the actual dose time (scheduledDt), never the fire time</li>
      *   <li>Reserve log row and send</li>
      * </ol>
+     *
+     * <p><b>Why {@code findActiveWithTimesAndUser}:</b> this method runs on a
+     * scheduler thread with no surrounding JPA session.  The standard derived
+     * query would return detached {@code Medication} entities whose lazy
+     * {@code times} and {@code user} collections cannot be accessed without an
+     * open session, causing {@code LazyInitializationException}.  The JOIN FETCH
+     * query loads both associations in one SQL call so the data is already
+     * in-memory when the session closes.</p>
      */
     private int processNewSlots() {
         LocalDate today       = todayInZone();
         LocalTime nowSlot     = nowSlot();
         LocalTime windowStart = nowSlot.minusMinutes(LOOKBACK_MINUTES);
 
-        List<Medication> activeMeds =
-                medRepo.findByStartDateLessThanEqualAndEndDateGreaterThanEqual(today, today);
+        // JOIN FETCH: times + user loaded eagerly — safe to access after session closes
+        List<Medication> activeMeds = medRepo.findActiveWithTimesAndUser(today);
 
         int sent = 0;
 
@@ -202,7 +210,8 @@ public class EmailReminderService {
 
         for (EmailReminderLog entry : retryable) {
             Optional<User> userOpt = userRepo.findById(entry.getUserId());
-            Optional<Medication> medOpt = medRepo.findById(entry.getMedicationId());
+            // JOIN FETCH: user + times loaded eagerly — safe outside a transaction
+            Optional<Medication> medOpt = medRepo.findByIdWithTimesAndUser(entry.getMedicationId());
 
             if (userOpt.isEmpty() || medOpt.isEmpty()) {
                 exhaustRetries(entry, "User or medication no longer exists");
