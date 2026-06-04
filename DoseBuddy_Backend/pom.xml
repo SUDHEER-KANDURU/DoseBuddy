@@ -57,10 +57,6 @@
         </dependency>
 
 
-		<!-- Email: Resend REST API (replaces Spring Mail / Gmail SMTP).
-		     Resend uses HTTPS, so no outbound port 587 is needed.
-		     No additional dependency required — uses Java's built-in java.net.http.HttpClient. -->
-
 		<!-- PDF -->
 		<dependency>
 			<groupId>org.apache.pdfbox</groupId>

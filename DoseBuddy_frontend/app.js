@@ -1613,9 +1613,6 @@ function renderMissedMiniChart(labels, missedValues) {
 async function renderReports() {
     if (!currentUser) return;
 
-    // Load email analytics whenever the reports page renders
-    loadEmailAnalytics();
-
     const dashEmpty = document.getElementById("reports-empty");
     const dashCtx   = document.getElementById("weekly-chart");
 
@@ -4200,9 +4197,6 @@ function openNotifPrefsModal() {
         btn.setAttribute("aria-checked", String(on));
     });
 
-    // Sync email-reminder toggle from server/local state
-    loadEmailReminderToggle();
-
     openModal("modal-notif");
 }
 
@@ -4215,22 +4209,14 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     document.getElementById("notif-save-btn")?.addEventListener("click", async () => {
-        // Save local browser prefs
         const prefs = {};
         document.querySelectorAll(".toggle-switch[data-pref]").forEach(btn => {
             prefs[btn.dataset.pref] = btn.classList.contains("active");
         });
         saveToLS(NOTIF_PREFS_KEY, prefs);
-
-        // Save email reminder setting to server
-        await saveEmailReminderSetting();
-
         closeModal("modal-notif");
         showToast("Notification preferences saved!", "success");
     });
-
-    // Wire up test email button
-    document.getElementById("email-test-btn")?.addEventListener("click", handleTestEmail);
 });
 
 function openPrivacyModal() {
@@ -5877,169 +5863,4 @@ document.addEventListener("DOMContentLoaded", () => {
         ?.addEventListener("click", exportHistoryPDF);
     document.getElementById("export-vitals-pdf")
         ?.addEventListener("click", exportVitalsPDF);
-});
-
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// EMAIL REMINDER SYSTEM
-// ═══════════════════════════════════════════════════════════════════════════════
-
-// ── Load settings from server into the notification modal ─────────────────────
-async function loadEmailReminderToggle() {
-    if (!currentUser) return;
-
-    const toggle      = document.getElementById("email-reminder-toggle");
-    const offsetSelect = document.getElementById("email-offset-select");
-    const recipientEl = document.getElementById("email-reminder-recipient");
-    const offsetSection = document.getElementById("email-offset-section");
-
-    if (recipientEl && currentUser.email) {
-        recipientEl.textContent = `Sends to: ${currentUser.email}`;
-    }
-
-    try {
-        const res = await fetch(`${API_BASE}/email-reminders/settings/${currentUser.id}`);
-        if (!res.ok) throw new Error("Could not fetch email settings");
-        const data = await res.json();
-
-        const enabled = !!data.emailRemindersEnabled;
-        const offset  = data.emailReminderOffsetMinutes ?? 0;
-
-        _applyEmailToggleState(toggle, offsetSelect, offsetSection, enabled, offset);
-
-        currentUser.emailRemindersEnabled      = enabled;
-        currentUser.emailReminderOffsetMinutes = offset;
-        saveToLS(LS_CURRENT_USER_KEY, currentUser);
-    } catch (err) {
-        console.warn("[EmailReminder] loadEmailReminderToggle error:", err.message);
-        // fall back to cached user state
-        const enabled = !!currentUser.emailRemindersEnabled;
-        const offset  = currentUser.emailReminderOffsetMinutes ?? 0;
-        _applyEmailToggleState(toggle, offsetSelect, offsetSection, enabled, offset);
-    }
-}
-
-/** Apply toggle + offset state to the DOM. */
-function _applyEmailToggleState(toggle, offsetSelect, offsetSection, enabled, offset) {
-    if (toggle) {
-        toggle.classList.toggle("active", enabled);
-        toggle.setAttribute("aria-checked", String(enabled));
-    }
-    if (offsetSelect) {
-        offsetSelect.value = String(offset);
-    }
-    if (offsetSection) {
-        offsetSection.classList.toggle("email-offset-hidden", !enabled);
-    }
-}
-
-// ── Save settings to server ───────────────────────────────────────────────────
-async function saveEmailReminderSetting() {
-    if (!currentUser) return;
-
-    const toggle       = document.getElementById("email-reminder-toggle");
-    const offsetSelect = document.getElementById("email-offset-select");
-
-    const enabled = toggle ? toggle.classList.contains("active") : false;
-    const offset  = offsetSelect ? parseInt(offsetSelect.value, 10) || 0 : 0;
-
-    try {
-        const res = await fetch(`${API_BASE}/email-reminders/settings/${currentUser.id}`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                emailRemindersEnabled: enabled,
-                emailReminderOffsetMinutes: offset
-            })
-        });
-        if (!res.ok) throw new Error("Server error saving email setting");
-        currentUser.emailRemindersEnabled      = enabled;
-        currentUser.emailReminderOffsetMinutes = offset;
-        saveToLS(LS_CURRENT_USER_KEY, currentUser);
-    } catch (err) {
-        console.error("[EmailReminder] saveEmailReminderSetting error:", err.message);
-        showToast("Could not save email reminder setting.", "error");
-    }
-}
-
-// ── Send test email ────────────────────────────────────────────────────────────
-async function handleTestEmail() {
-    if (!currentUser) return;
-
-    const btn = document.getElementById("email-test-btn");
-    if (btn) {
-        btn.disabled = true;
-        btn.innerHTML = `<span class="btn-spinner"></span>Sending…`;
-    }
-
-    try {
-        const res  = await fetch(`${API_BASE}/email-reminders/test/${currentUser.id}`, { method: "POST" });
-        const data = await res.json();
-        if (res.ok && data.success) {
-            showToast("Test email sent! Check your inbox 📧", "success", 4000);
-        } else {
-            showToast(data.message || "Failed to send test email.", "error");
-        }
-    } catch (err) {
-        console.error("[EmailReminder] handleTestEmail error:", err.message);
-        showToast("Could not send test email. Check your connection.", "error");
-    } finally {
-        if (btn) {
-            btn.disabled = false;
-            btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"/></svg>Send Test Email`;
-        }
-    }
-}
-
-// ── Load email analytics ───────────────────────────────────────────────────────
-async function loadEmailAnalytics() {
-    if (!currentUser) return;
-
-    const totalEl   = document.getElementById("email-stat-total");
-    const successEl = document.getElementById("email-stat-success");
-    const failedEl  = document.getElementById("email-stat-failed");
-    const lastEl    = document.getElementById("email-stat-last");
-
-    [totalEl, successEl, failedEl, lastEl].forEach(el => { if (el) el.textContent = "…"; });
-
-    try {
-        const res  = await fetch(`${API_BASE}/email-reminders/analytics/${currentUser.id}`);
-        if (!res.ok) throw new Error("Failed to load email analytics");
-        const data = await res.json();
-
-        if (totalEl)   totalEl.textContent   = data.totalEmailsSent  ?? 0;
-        if (successEl) successEl.textContent = data.successfulEmails ?? 0;
-        if (failedEl)  failedEl.textContent  = data.failedEmails     ?? 0;
-
-        if (lastEl) {
-            if (data.lastReminderSent) {
-                lastEl.textContent = new Date(data.lastReminderSent).toLocaleString(undefined, {
-                    month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"
-                });
-            } else {
-                lastEl.textContent = "None yet";
-            }
-        }
-    } catch (err) {
-        console.warn("[EmailReminder] loadEmailAnalytics error:", err.message);
-        [totalEl, successEl, failedEl].forEach(el => { if (el) el.textContent = "—"; });
-        if (lastEl) lastEl.textContent = "—";
-    }
-}
-
-// ── Wire up toggle + offset select interactions ────────────────────────────────
-document.addEventListener("DOMContentLoaded", () => {
-    const emailToggle   = document.getElementById("email-reminder-toggle");
-    const offsetSection = document.getElementById("email-offset-section");
-
-    if (emailToggle) {
-        emailToggle.addEventListener("click", () => {
-            const isOn = emailToggle.classList.toggle("active");
-            emailToggle.setAttribute("aria-checked", String(isOn));
-            // Show/hide the offset selector based on toggle state
-            if (offsetSection) {
-                offsetSection.classList.toggle("email-offset-hidden", !isOn);
-            }
-        });
-    }
 });

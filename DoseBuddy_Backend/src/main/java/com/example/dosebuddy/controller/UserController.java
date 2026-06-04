@@ -117,9 +117,7 @@ public class UserController {
                 dobStr,
                 user.getGender(),
                 user.getEmergencyContact(),
-                user.isAcceptedTerms(),
-                user.isEmailRemindersEnabled(),
-                user.getEmailReminderOffsetMinutes()
+                user.isAcceptedTerms()
         );
     }
 }

@@ -1446,48 +1446,6 @@
                 </div>
             </div>
 
-            <!-- Email Reminder Analytics -->
-            <div class="card email-analytics-card" id="email-analytics-card">
-                <div class="card-header">
-                    <div class="adash-chart-title-grp">
-                        <div class="adash-chart-icon" style="background:rgba(34,197,94,.12);color:#16a34a;">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75"/></svg>
-                        </div>
-                        <div>
-                            <h3 class="card-title">Email Reminder Analytics</h3>
-                            <p class="card-subtitle">Track your automated medication email reminders</p>
-                        </div>
-                    </div>
-                    <span class="card-badge" style="background:rgba(34,197,94,.12);color:#16a34a;">Email</span>
-                </div>
-                <div class="email-analytics-stats" id="email-analytics-stats">
-                    <div class="email-stat-card">
-                        <div class="email-stat-icon" style="background:rgba(37,99,235,.1);color:#2563eb;">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75"/></svg>
-                        </div>
-                        <div><p class="email-stat-val" id="email-stat-total">—</p><p class="email-stat-lbl">Total Sent</p></div>
-                    </div>
-                    <div class="email-stat-card">
-                        <div class="email-stat-icon" style="background:rgba(34,197,94,.1);color:#16a34a;">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                        </div>
-                        <div><p class="email-stat-val" id="email-stat-success">—</p><p class="email-stat-lbl">Successful</p></div>
-                    </div>
-                    <div class="email-stat-card">
-                        <div class="email-stat-icon" style="background:rgba(239,68,68,.1);color:#dc2626;">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"/></svg>
-                        </div>
-                        <div><p class="email-stat-val" id="email-stat-failed">—</p><p class="email-stat-lbl">Failed</p></div>
-                    </div>
-                    <div class="email-stat-card">
-                        <div class="email-stat-icon" style="background:rgba(245,158,11,.1);color:#d97706;">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                        </div>
-                        <div><p class="email-stat-val email-stat-time" id="email-stat-last">—</p><p class="email-stat-lbl">Last Reminder</p></div>
-                    </div>
-                </div>
-            </div>
-
             <!-- AI Health Insights -->
             <div class="card adash-ai-insights-card">
                 <div class="card-header">
@@ -2369,42 +2327,6 @@
             <div class="modal-section-label">Channels</div>
             <div class="pref-list">
                 <div class="pref-row"><div class="pref-info"><p class="pref-title">Sound Alerts</p><p class="pref-desc">Play a sound when reminders trigger</p></div><button class="toggle-switch active" data-pref="sound-alerts" role="switch" aria-checked="true"><span class="toggle-knob"></span></button></div>
-            </div>
-            <div class="modal-section-label">Email Reminders</div>
-            <div class="pref-list">
-                <div class="pref-row">
-                    <div class="pref-info">
-                        <p class="pref-title">Email Reminders</p>
-                        <p class="pref-desc">Receive an email reminder for every scheduled dose</p>
-                    </div>
-                    <button class="toggle-switch" id="email-reminder-toggle" role="switch" aria-checked="false"><span class="toggle-knob"></span></button>
-                </div>
-            </div>
-
-            <!-- Reminder offset selector — shown when email reminders are enabled -->
-            <div class="email-offset-section" id="email-offset-section">
-                <label class="email-offset-label" for="email-offset-select">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                    Send reminder
-                </label>
-                <select id="email-offset-select" class="email-offset-select" aria-label="Reminder timing">
-                    <option value="0">At exact medicine time</option>
-                    <option value="5">5 minutes before</option>
-                    <option value="10">10 minutes before</option>
-                    <option value="15">15 minutes before</option>
-                    <option value="30">30 minutes before</option>
-                </select>
-            </div>
-
-            <div class="email-reminder-test-row" id="email-reminder-test-row">
-                <div class="email-test-info">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75"/></svg>
-                    <span id="email-reminder-recipient">Sends to your registered email</span>
-                </div>
-                <button class="email-test-btn" id="email-test-btn">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"/></svg>
-                    Send Test Email
-                </button>
             </div>
         </div>
         <div class="modal-footer"><button class="modal-btn-secondary" data-modal="modal-notif">Cancel</button><button class="modal-btn-primary" id="notif-save-btn">Save Preferences</button></div>

@@ -11,15 +11,12 @@ public class UserProfileResponse {
     private String gender;
     private String emergencyContact;
     private boolean acceptedTerms;
-    private boolean emailRemindersEnabled;
-    private int emailReminderOffsetMinutes;
 
     public UserProfileResponse() {}
 
     public UserProfileResponse(Long id, String name, String email, String role, String patientEmail,
                                String phone, String dob, String gender, String emergencyContact,
-                               boolean acceptedTerms, boolean emailRemindersEnabled,
-                               int emailReminderOffsetMinutes) {
+                               boolean acceptedTerms) {
         this.id = id;
         this.name = name;
         this.email = email;
@@ -30,8 +27,6 @@ public class UserProfileResponse {
         this.gender = gender;
         this.emergencyContact = emergencyContact;
         this.acceptedTerms = acceptedTerms;
-        this.emailRemindersEnabled = emailRemindersEnabled;
-        this.emailReminderOffsetMinutes = emailReminderOffsetMinutes;
     }
 
     public Long getId() { return id; }
@@ -63,10 +58,4 @@ public class UserProfileResponse {
 
     public boolean isAcceptedTerms() { return acceptedTerms; }
     public void setAcceptedTerms(boolean acceptedTerms) { this.acceptedTerms = acceptedTerms; }
-
-    public boolean isEmailRemindersEnabled() { return emailRemindersEnabled; }
-    public void setEmailRemindersEnabled(boolean emailRemindersEnabled) { this.emailRemindersEnabled = emailRemindersEnabled; }
-
-    public int getEmailReminderOffsetMinutes() { return emailReminderOffsetMinutes; }
-    public void setEmailReminderOffsetMinutes(int emailReminderOffsetMinutes) { this.emailReminderOffsetMinutes = emailReminderOffsetMinutes; }
 }
