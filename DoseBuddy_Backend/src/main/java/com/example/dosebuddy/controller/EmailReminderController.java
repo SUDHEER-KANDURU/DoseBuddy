@@ -40,21 +40,34 @@ public class EmailReminderController {
      * GET /api/email-reminders/mail-health
      *
      * Returns SMTP configuration status without exposing secret values.
-     * Useful for verifying Railway environment variables are set correctly.
-     *
-     * Example response:
-     * <pre>
-     * {
-     *   "host": "smtp.gmail.com",
-     *   "port": 587,
-     *   "usernameConfigured": true,
-     *   "passwordConfigured": true
-     * }
-     * </pre>
      */
     @GetMapping("/mail-health")
     public ResponseEntity<?> getMailHealth() {
         return ResponseEntity.ok(emailReminderService.getMailHealth());
+    }
+
+    // ── SMTP TCP connectivity probe ───────────────────────────────────────────
+
+    /**
+     * GET /api/email-reminders/test-smtp-connectivity
+     *
+     * Opens a raw TCP socket to smtp.gmail.com:587 with a 10-second timeout.
+     * Does NOT authenticate. Does NOT send an email. Only tests TCP reachability.
+     *
+     * Example responses:
+     * <pre>
+     * // success
+     * { "host": "smtp.gmail.com", "port": 587, "reachable": true,
+     *   "message": "TCP connection to smtp.gmail.com:587 succeeded" }
+     *
+     * // failure
+     * { "host": "smtp.gmail.com", "port": 587, "reachable": false,
+     *   "message": "SocketTimeoutException: connect timed out" }
+     * </pre>
+     */
+    @GetMapping("/test-smtp-connectivity")
+    public ResponseEntity<?> testSmtpConnectivity() {
+        return ResponseEntity.ok(emailReminderService.testSmtpConnectivity());
     }
 
     // ── Valid offset values ───────────────────────────────────────────────────

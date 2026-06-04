@@ -157,6 +157,38 @@ public class EmailReminderService {
         return health;
     }
 
+    // ── SMTP TCP connectivity probe ───────────────────────────────────────────
+
+    /**
+     * Tests raw TCP reachability to the configured SMTP host:port.
+     *
+     * <p>Does NOT authenticate, does NOT send any email, does NOT issue any
+     * SMTP commands — it only opens a socket and immediately closes it.</p>
+     *
+     * @return a map with keys: host, port, reachable, message
+     */
+    public Map<String, Object> testSmtpConnectivity() {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("host", mailHost);
+        result.put("port", mailPort);
+
+        try (java.net.Socket socket = new java.net.Socket()) {
+            socket.connect(
+                new java.net.InetSocketAddress(mailHost, mailPort),
+                10_000   // 10-second timeout
+            );
+            result.put("reachable", true);
+            result.put("message",   "TCP connection to " + mailHost + ":" + mailPort + " succeeded");
+            log.info("[SmtpProbe] TCP reachable: {}:{}", mailHost, mailPort);
+        } catch (Exception ex) {
+            result.put("reachable", false);
+            result.put("message",   ex.getClass().getSimpleName() + ": " + ex.getMessage());
+            log.warn("[SmtpProbe] TCP unreachable: {}:{} — {}", mailHost, mailPort, ex.getMessage());
+        }
+
+        return result;
+    }
+
     // ── Zone helpers ─────────────────────────────────────────────────────────
 
     private ZoneId zone()            { return ZoneId.of(appTimezone); }
