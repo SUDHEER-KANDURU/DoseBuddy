@@ -9,6 +9,7 @@ import com.example.dosebuddy.model.User;
 import com.example.dosebuddy.repository.EmailReminderLogRepository;
 import com.example.dosebuddy.repository.MedicationRepository;
 import com.example.dosebuddy.repository.UserRepository;
+import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -26,7 +27,9 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
@@ -79,6 +82,16 @@ public class EmailReminderService {
     @Value("${spring.mail.username}")
     private String fromAddress;
 
+    /** Raw password value — injected only to check whether it is set; never logged. */
+    @Value("${spring.mail.password:}")
+    private String mailPassword;
+
+    @Value("${spring.mail.host:smtp.gmail.com}")
+    private String mailHost;
+
+    @Value("${spring.mail.port:587}")
+    private int mailPort;
+
     @Value("${app.timezone:UTC}")
     private String appTimezone;
 
@@ -92,6 +105,56 @@ public class EmailReminderService {
         this.logRepo         = logRepo;
         this.medRepo         = medRepo;
         this.userRepo        = userRepo;
+    }
+
+    // ── Startup health log ────────────────────────────────────────────────────
+
+    /**
+     * Logs mail configuration status at startup so Railway logs immediately show
+     * whether the SMTP credentials are present — without revealing the actual values.
+     */
+    @PostConstruct
+    public void logMailConfigOnStartup() {
+        boolean usernameConfigured = fromAddress  != null && !fromAddress.isBlank()
+                                     && !fromAddress.equals("${MAIL_USERNAME}");
+        boolean passwordConfigured = mailPassword != null && !mailPassword.isBlank()
+                                     && !mailPassword.equals("${MAIL_PASSWORD}");
+
+        log.info("========================================");
+        log.info("[MailConfig] host                 : {}", mailHost);
+        log.info("[MailConfig] port                 : {}", mailPort);
+        log.info("[MailConfig] MAIL_USERNAME set     : {}", usernameConfigured);
+        log.info("[MailConfig] MAIL_PASSWORD set     : {}", passwordConfigured);
+        log.info("[MailConfig] timezone              : {}", appTimezone);
+        log.info("========================================");
+
+        if (!usernameConfigured) {
+            log.warn("[MailConfig] MAIL_USERNAME is NOT configured — email reminders will fail.");
+        }
+        if (!passwordConfigured) {
+            log.warn("[MailConfig] MAIL_PASSWORD is NOT configured — email reminders will fail.");
+        }
+    }
+
+    // ── Mail health snapshot (used by /mail-health endpoint) ─────────────────
+
+    /**
+     * Returns a plain map describing the mail configuration state.
+     * Password is never included — only a boolean indicating whether it is set.
+     */
+    public Map<String, Object> getMailHealth() {
+        boolean usernameConfigured = fromAddress  != null && !fromAddress.isBlank()
+                                     && !fromAddress.equals("${MAIL_USERNAME}");
+        boolean passwordConfigured = mailPassword != null && !mailPassword.isBlank()
+                                     && !mailPassword.equals("${MAIL_PASSWORD}");
+
+        // LinkedHashMap preserves insertion order for consistent JSON field order
+        Map<String, Object> health = new LinkedHashMap<>();
+        health.put("host",                 mailHost);
+        health.put("port",                 mailPort);
+        health.put("usernameConfigured",   usernameConfigured);
+        health.put("passwordConfigured",   passwordConfigured);
+        return health;
     }
 
     // ── Zone helpers ─────────────────────────────────────────────────────────

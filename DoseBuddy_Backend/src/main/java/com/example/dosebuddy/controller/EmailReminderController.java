@@ -34,6 +34,29 @@ public class EmailReminderController {
         this.emailReminderService = emailReminderService;
     }
 
+    // ── Mail health ───────────────────────────────────────────────────────────
+
+    /**
+     * GET /api/email-reminders/mail-health
+     *
+     * Returns SMTP configuration status without exposing secret values.
+     * Useful for verifying Railway environment variables are set correctly.
+     *
+     * Example response:
+     * <pre>
+     * {
+     *   "host": "smtp.gmail.com",
+     *   "port": 587,
+     *   "usernameConfigured": true,
+     *   "passwordConfigured": true
+     * }
+     * </pre>
+     */
+    @GetMapping("/mail-health")
+    public ResponseEntity<?> getMailHealth() {
+        return ResponseEntity.ok(emailReminderService.getMailHealth());
+    }
+
     // ── Valid offset values ───────────────────────────────────────────────────
 
     /**
