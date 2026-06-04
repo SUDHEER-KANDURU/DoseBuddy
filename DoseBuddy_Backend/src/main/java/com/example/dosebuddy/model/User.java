@@ -45,6 +45,18 @@ public class User {
     @Column(name = "accepted_terms_timestamp")
     private LocalDateTime acceptedTermsTimestamp;
 
+    /** User preference: receive email reminders for scheduled doses. Defaults to true. */
+    @Column(name = "email_reminders_enabled", columnDefinition = "BOOLEAN DEFAULT TRUE")
+    private Boolean emailRemindersEnabled = true;
+
+    /**
+     * How many minutes before the actual dose time to send the email reminder.
+     * Allowed values: 0 (at dose time), 5, 10, 15, 30.
+     * Default 0 = send exactly at the scheduled time.
+     */
+    @Column(name = "email_reminder_offset_minutes", columnDefinition = "INT DEFAULT 0")
+    private int emailReminderOffsetMinutes = 0;
+
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
 
@@ -107,6 +119,24 @@ public class User {
 
     public LocalDateTime getAcceptedTermsTimestamp() { return acceptedTermsTimestamp; }
     public void setAcceptedTermsTimestamp(LocalDateTime acceptedTermsTimestamp) { this.acceptedTermsTimestamp = acceptedTermsTimestamp; }
+
+    public boolean isEmailRemindersEnabled() { return emailRemindersEnabled != null && emailRemindersEnabled; }
+    public void setEmailRemindersEnabled(Boolean emailRemindersEnabled) {
+        this.emailRemindersEnabled = emailRemindersEnabled != null ? emailRemindersEnabled : true;
+    }
+
+    /** Valid values: 0, 5, 10, 15, 30. Any other value is clamped to 0. */
+    public int getEmailReminderOffsetMinutes() { return emailReminderOffsetMinutes; }
+    public void setEmailReminderOffsetMinutes(int emailReminderOffsetMinutes) {
+        int[] allowed = {0, 5, 10, 15, 30};
+        for (int v : allowed) {
+            if (v == emailReminderOffsetMinutes) {
+                this.emailReminderOffsetMinutes = emailReminderOffsetMinutes;
+                return;
+            }
+        }
+        this.emailReminderOffsetMinutes = 0; // clamp invalid values
+    }
 
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }

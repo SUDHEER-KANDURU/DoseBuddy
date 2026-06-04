@@ -584,8 +584,9 @@
 
             <div class="greeting-row">
                 <div class="greeting-left">
-                    <h1 class="greeting-title" id="greeting-text">Good Morning 👋</h1>
+                    <h1 class="greeting-title" id="greeting-text">Good Morning 🌅</h1>
                     <p class="greeting-sub" id="dashboard-date">Stay on track with your medications today.</p>
+                    <span class="caregiver-patient-note" id="caregiver-patient-note"></span>
                 </div>
                 <div class="greeting-right">
                     <div class="greeting-summary-pill">
@@ -1087,11 +1088,12 @@
                     </div>
                 </div>
                 <div class="reports-header-right">
-                    <div class="reports-period-badge">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="13" height="13">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/>
-                        </svg>
-                        Last 7 days
+                    <!-- Date Filter Tabs -->
+                    <div class="analytics-filter-tabs">
+                        <button class="analytics-filter-btn active" data-period="7">7 Days</button>
+                        <button class="analytics-filter-btn" data-period="30">30 Days</button>
+                        <button class="analytics-filter-btn" data-period="90">90 Days</button>
+                        <button class="analytics-filter-btn" data-period="all">All Time</button>
                     </div>
                     <!-- Export controls -->
                     <div class="export-controls" id="reports-export-controls">
@@ -1108,8 +1110,472 @@
                 </div>
             </div>
 
-            <div class="reports-stats-row">
-                <div class="reports-stat-card rsc-blue">
+            <!-- Overview Statistics Cards — Row 1: 4 cards -->
+            <div class="adash-stats-row" id="adash-stats-row">
+                <div class="adash-stat-card adash-sc-blue">
+                    <div class="adash-sc-icon-wrap">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/></svg>
+                    </div>
+                    <div class="adash-sc-body">
+                        <p class="adash-sc-label">Total Medicines</p>
+                        <p class="adash-sc-value" id="adash-total-meds">—</p>
+                        <p class="adash-sc-trend" id="adash-total-meds-sub">All time</p>
+                    </div>
+                </div>
+                <div class="adash-stat-card adash-sc-teal">
+                    <div class="adash-sc-icon-wrap">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                    </div>
+                    <div class="adash-sc-body">
+                        <p class="adash-sc-label">Active Medicines</p>
+                        <p class="adash-sc-value" id="adash-active-meds">—</p>
+                        <p class="adash-sc-trend" id="adash-active-meds-sub">Currently taking</p>
+                    </div>
+                </div>
+                <div class="adash-stat-card adash-sc-green">
+                    <div class="adash-sc-icon-wrap">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+                    </div>
+                    <div class="adash-sc-body">
+                        <p class="adash-sc-label">Doses Taken</p>
+                        <p class="adash-sc-value" id="rpt-taken-doses">—</p>
+                        <p class="adash-sc-trend adash-trend-up" id="adash-taken-trend">All time</p>
+                    </div>
+                </div>
+                <div class="adash-stat-card adash-sc-red">
+                    <div class="adash-sc-icon-wrap">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9.303 3.376c.866 1.5-.217 3.374-1.948 3.374H2.645c-1.73 0-2.813-1.874-1.948-3.374L10.052 3.378c.866-1.5 3.032-1.5 3.898 0l7.353 12.748z"/></svg>
+                    </div>
+                    <div class="adash-sc-body">
+                        <p class="adash-sc-label">Missed Doses</p>
+                        <p class="adash-sc-value" id="rpt-missed-doses">—</p>
+                        <p class="adash-sc-trend adash-trend-down" id="adash-missed-trend">Needs attention</p>
+                    </div>
+                </div>
+                <div class="adash-stat-card adash-sc-orange">
+                    <div class="adash-sc-icon-wrap">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                    </div>
+                    <div class="adash-sc-body">
+                        <p class="adash-sc-label">Today's Doses</p>
+                        <p class="adash-sc-value" id="adash-today-doses">—</p>
+                        <p class="adash-sc-trend" id="adash-today-sub">Scheduled today</p>
+                    </div>
+                </div>
+                <div class="adash-stat-card adash-sc-purple">
+                    <div class="adash-sc-icon-wrap">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                    </div>
+                    <div class="adash-sc-body">
+                        <p class="adash-sc-label">Adherence Rate</p>
+                        <p class="adash-sc-value" id="rpt-adherence">—</p>
+                        <p class="adash-sc-trend" id="adash-adherence-sub">Overall</p>
+                    </div>
+                </div>
+                <div class="adash-stat-card adash-sc-indigo">
+                    <div class="adash-sc-icon-wrap">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/></svg>
+                    </div>
+                    <div class="adash-sc-body">
+                        <p class="adash-sc-label">Current BMI</p>
+                        <p class="adash-sc-value" id="adash-current-bmi">—</p>
+                        <p class="adash-sc-trend" id="adash-bmi-category">—</p>
+                    </div>
+                </div>
+                <div class="adash-stat-card adash-sc-cyan">
+                    <div class="adash-sc-icon-wrap">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z"/></svg>
+                    </div>
+                    <div class="adash-sc-body">
+                        <p class="adash-sc-label">Vitals Logged</p>
+                        <p class="adash-sc-value" id="adash-vitals-logged">—</p>
+                        <p class="adash-sc-trend" id="adash-vitals-sub">Total records</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Health Score + Adherence Donut Row -->
+            <div class="adash-score-adherence-row">
+                <!-- Overall Health Score -->
+                <div class="card adash-health-score-card">
+                    <div class="card-header">
+                        <div>
+                            <h3 class="card-title">Overall Health Score</h3>
+                            <p class="card-subtitle">Combined adherence, BMI &amp; vitals assessment</p>
+                        </div>
+                        <span class="adash-score-badge" id="adash-score-badge">—</span>
+                    </div>
+                    <div class="adash-health-score-body">
+                        <div class="adash-circular-wrap">
+                            <svg class="adash-circular-svg" viewBox="0 0 120 120" aria-hidden="true">
+                                <circle class="adash-circ-bg" cx="60" cy="60" r="50" fill="none" stroke-width="10"/>
+                                <circle class="adash-circ-fill" id="adash-circ-fill" cx="60" cy="60" r="50" fill="none" stroke-width="10" stroke-linecap="round" stroke-dasharray="314" stroke-dashoffset="314" transform="rotate(-90 60 60)"/>
+                            </svg>
+                            <div class="adash-circ-center">
+                                <span class="adash-circ-score" id="adash-overall-score">0</span>
+                                <span class="adash-circ-label">/ 100</span>
+                            </div>
+                        </div>
+                        <div class="adash-score-breakdown">
+                            <div class="adash-score-row">
+                                <span class="adash-score-row-label">💊 Adherence</span>
+                                <div class="adash-score-bar-wrap">
+                                    <div class="adash-score-bar-track">
+                                        <div class="adash-score-bar-fill adash-bar-teal" id="adash-bar-adherence" style="width:0%"></div>
+                                    </div>
+                                    <span class="adash-score-row-val" id="adash-val-adherence">0</span>
+                                </div>
+                            </div>
+                            <div class="adash-score-row">
+                                <span class="adash-score-row-label">❤️ BMI</span>
+                                <div class="adash-score-bar-wrap">
+                                    <div class="adash-score-bar-track">
+                                        <div class="adash-score-bar-fill adash-bar-indigo" id="adash-bar-bmi" style="width:0%"></div>
+                                    </div>
+                                    <span class="adash-score-row-val" id="adash-val-bmi">0</span>
+                                </div>
+                            </div>
+                            <div class="adash-score-row">
+                                <span class="adash-score-row-label">🩺 Vitals</span>
+                                <div class="adash-score-bar-wrap">
+                                    <div class="adash-score-bar-track">
+                                        <div class="adash-score-bar-fill adash-bar-cyan" id="adash-bar-vitals" style="width:0%"></div>
+                                    </div>
+                                    <span class="adash-score-row-val" id="adash-val-vitals">0</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Medication Consumption Donut -->
+                <div class="card adash-donut-card">
+                    <div class="card-header">
+                        <div>
+                            <h3 class="card-title">Medicine Consumption</h3>
+                            <p class="card-subtitle">Taken vs missed vs pending doses</p>
+                        </div>
+                    </div>
+                    <div class="adash-donut-body">
+                        <div class="adash-donut-wrap">
+                            <canvas id="adash-donut-chart"></canvas>
+                        </div>
+                        <div class="adash-donut-legend">
+                            <div class="adash-dl-item">
+                                <span class="adash-dl-dot" style="background:#00A19B"></span>
+                                <span class="adash-dl-label">Taken</span>
+                                <span class="adash-dl-val" id="adash-dl-taken">—</span>
+                            </div>
+                            <div class="adash-dl-item">
+                                <span class="adash-dl-dot" style="background:#dc2626"></span>
+                                <span class="adash-dl-label">Missed</span>
+                                <span class="adash-dl-val" id="adash-dl-missed">—</span>
+                            </div>
+                            <div class="adash-dl-item">
+                                <span class="adash-dl-dot" style="background:#d97706"></span>
+                                <span class="adash-dl-label">Pending</span>
+                                <span class="adash-dl-val" id="adash-dl-pending">—</span>
+                            </div>
+                            <div class="adash-dl-item adash-dl-total">
+                                <span class="adash-dl-label">Total</span>
+                                <span class="adash-dl-val" id="rpt-total-doses">—</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Medication Adherence Trend Chart -->
+            <div class="card adash-chart-card">
+                <div class="card-header">
+                    <div class="adash-chart-title-grp">
+                        <div class="adash-chart-icon adash-icon-teal">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/></svg>
+                        </div>
+                        <div>
+                            <h3 class="card-title">Medication Adherence Trend</h3>
+                            <p class="card-subtitle">Daily doses taken vs missed over time</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="adash-chart-wrap">
+                    <canvas id="weekly-chart-reports"></canvas>
+                    <canvas id="adash-adherence-chart" style="display:none;"></canvas>
+                </div>
+                <div id="reports-empty-page" class="adash-empty-state" style="display:none;">
+                    <div class="adash-empty-icon">📊</div>
+                    <p class="adash-empty-title">No data yet</p>
+                    <p class="adash-empty-sub">Mark some doses as taken on the dashboard to see your adherence chart here.</p>
+                </div>
+            </div>
+
+            <!-- Missed Doses Alert Card -->
+            <div class="card mds-card" id="missed-doses-card" style="display:none;">
+                <div class="mds-header">
+                    <div class="mds-header-left">
+                        <div class="mds-header-icon">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>
+                        </div>
+                        <div>
+                            <h3 class="mds-title">Missed Doses Summary</h3>
+                            <p class="mds-subtitle">Track missed medications to improve adherence</p>
+                        </div>
+                    </div>
+                    <span class="mds-badge">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="11" height="11"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9.303 3.376c.866 1.5-.217 3.374-1.948 3.374H2.645c-1.73 0-2.813-1.874-1.948-3.374L10.052 3.378c.866-1.5 3.032-1.5 3.898 0l7.353 12.748z"/></svg>
+                        Needs Attention
+                    </span>
+                </div>
+                <div class="mds-stats-row">
+                    <div class="mds-stat-card">
+                        <div class="mds-stat-icon mds-icon-today"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/></svg></div>
+                        <p class="mds-stat-value" id="missed-today">0</p>
+                        <p class="mds-stat-label">Today</p>
+                    </div>
+                    <div class="mds-stat-card">
+                        <div class="mds-stat-icon mds-icon-week"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5"/></svg></div>
+                        <p class="mds-stat-value" id="missed-week">0</p>
+                        <p class="mds-stat-label">This Week</p>
+                    </div>
+                    <div class="mds-stat-card">
+                        <div class="mds-stat-icon mds-icon-month"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5M12 12.75h.008v.008H12v-.008z"/></svg></div>
+                        <p class="mds-stat-value" id="missed-month">0</p>
+                        <p class="mds-stat-label">This Month</p>
+                    </div>
+                    <div class="mds-stat-card mds-stat-highlight">
+                        <div class="mds-stat-icon mds-icon-pill"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/></svg></div>
+                        <p class="mds-stat-value mds-most-missed-name" id="most-missed-med">—</p>
+                        <p class="mds-stat-label">Most Missed <span class="mds-most-missed-count" id="most-missed-count"></span></p>
+                    </div>
+                </div>
+                <div class="mds-bottom-row">
+                    <div class="mds-chart-panel">
+                        <p class="mds-panel-label"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="13" height="13"><path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/></svg> Weekly Missed Doses</p>
+                        <div class="mds-chart-wrap"><canvas id="missed-mini-chart"></canvas></div>
+                    </div>
+                    <div class="mds-recommendation-panel" id="missed-alert-banner" style="display:none;">
+                        <div class="mds-rec-icon-wrap"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg></div>
+                        <div class="mds-rec-body">
+                            <p class="mds-rec-title">Adherence Alert</p>
+                            <p class="mds-rec-text" id="missed-alert-text">Your adherence is below 70%. Consider setting reminders or consulting your healthcare provider.</p>
+                        </div>
+                    </div>
+                    <div class="mds-success-panel" id="mds-success-panel" style="display:none;">
+                        <div class="mds-success-icon"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg></div>
+                        <div class="mds-rec-body">
+                            <p class="mds-rec-title mds-success-title">Good Adherence</p>
+                            <p class="mds-rec-text">Your adherence is above 70%. Keep up the great work and stay consistent.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- BMI & Vitals Analytics Row -->
+            <div class="adash-bmi-vitals-row">
+                <!-- BMI Trend -->
+                <div class="card adash-bmi-card">
+                    <div class="card-header">
+                        <div class="adash-chart-title-grp">
+                            <div class="adash-chart-icon adash-icon-indigo">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/></svg>
+                            </div>
+                            <div>
+                                <h3 class="card-title">BMI Trend</h3>
+                                <p class="card-subtitle">BMI &amp; weight history over time</p>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- BMI Category Card -->
+                    <div class="adash-bmi-category-row" id="adash-bmi-cat-row" style="display:none;">
+                        <div class="adash-bmi-cat-pill" id="adash-bmi-cat-underweight">Underweight</div>
+                        <div class="adash-bmi-cat-pill adash-bmi-cat-active" id="adash-bmi-cat-normal">Normal</div>
+                        <div class="adash-bmi-cat-pill" id="adash-bmi-cat-overweight">Overweight</div>
+                        <div class="adash-bmi-cat-pill" id="adash-bmi-cat-obese">Obese</div>
+                    </div>
+                    <div class="adash-chart-wrap">
+                        <canvas id="adash-bmi-chart"></canvas>
+                    </div>
+                    <div class="adash-empty-state" id="adash-bmi-empty" style="display:none;">
+                        <div class="adash-empty-icon">❤️</div>
+                        <p class="adash-empty-title">No BMI data</p>
+                        <p class="adash-empty-sub">Use the BMI Calculator to start tracking your health.</p>
+                    </div>
+                </div>
+
+                <!-- Vitals Trend -->
+                <div class="card adash-vitals-trends-card">
+                    <div class="card-header">
+                        <div class="adash-chart-title-grp">
+                            <div class="adash-chart-icon adash-icon-cyan">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z"/></svg>
+                            </div>
+                            <div>
+                                <h3 class="card-title">Vitals Analytics</h3>
+                                <p class="card-subtitle">Heart rate, BP, blood sugar &amp; O2</p>
+                            </div>
+                        </div>
+                        <div class="adash-vitals-period-tabs">
+                            <button class="adash-vp-btn active" data-vperiod="week">Week</button>
+                            <button class="adash-vp-btn" data-vperiod="month">Month</button>
+                            <button class="adash-vp-btn" data-vperiod="3months">3 Months</button>
+                        </div>
+                    </div>
+                    <div class="adash-vitals-charts-grid">
+                        <div class="adash-vt-block">
+                            <p class="adash-vt-label">❤️ Heart Rate <span class="adash-vt-unit">bpm</span></p>
+                            <div class="adash-vt-wrap"><canvas id="adash-hr-chart"></canvas></div>
+                        </div>
+                        <div class="adash-vt-block">
+                            <p class="adash-vt-label">🩸 Blood Pressure <span class="adash-vt-unit">mmHg</span></p>
+                            <div class="adash-vt-wrap"><canvas id="adash-bp-chart"></canvas></div>
+                        </div>
+                        <div class="adash-vt-block">
+                            <p class="adash-vt-label">🍬 Blood Sugar <span class="adash-vt-unit">mg/dL</span></p>
+                            <div class="adash-vt-wrap"><canvas id="adash-sugar-chart"></canvas></div>
+                        </div>
+                        <div class="adash-vt-block">
+                            <p class="adash-vt-label">⚖️ Weight <span class="adash-vt-unit">kg</span></p>
+                            <div class="adash-vt-wrap"><canvas id="adash-weight-chart"></canvas></div>
+                        </div>
+                    </div>
+                    <div class="adash-empty-state" id="adash-vitals-empty" style="display:none;">
+                        <div class="adash-empty-icon">🩺</div>
+                        <p class="adash-empty-title">No vitals data</p>
+                        <p class="adash-empty-sub">Log your vitals to see health trend charts here.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Email Reminder Analytics -->
+            <div class="card email-analytics-card" id="email-analytics-card">
+                <div class="card-header">
+                    <div class="adash-chart-title-grp">
+                        <div class="adash-chart-icon" style="background:rgba(34,197,94,.12);color:#16a34a;">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75"/></svg>
+                        </div>
+                        <div>
+                            <h3 class="card-title">Email Reminder Analytics</h3>
+                            <p class="card-subtitle">Track your automated medication email reminders</p>
+                        </div>
+                    </div>
+                    <span class="card-badge" style="background:rgba(34,197,94,.12);color:#16a34a;">Email</span>
+                </div>
+                <div class="email-analytics-stats" id="email-analytics-stats">
+                    <div class="email-stat-card">
+                        <div class="email-stat-icon" style="background:rgba(37,99,235,.1);color:#2563eb;">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75"/></svg>
+                        </div>
+                        <div><p class="email-stat-val" id="email-stat-total">—</p><p class="email-stat-lbl">Total Sent</p></div>
+                    </div>
+                    <div class="email-stat-card">
+                        <div class="email-stat-icon" style="background:rgba(34,197,94,.1);color:#16a34a;">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                        </div>
+                        <div><p class="email-stat-val" id="email-stat-success">—</p><p class="email-stat-lbl">Successful</p></div>
+                    </div>
+                    <div class="email-stat-card">
+                        <div class="email-stat-icon" style="background:rgba(239,68,68,.1);color:#dc2626;">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"/></svg>
+                        </div>
+                        <div><p class="email-stat-val" id="email-stat-failed">—</p><p class="email-stat-lbl">Failed</p></div>
+                    </div>
+                    <div class="email-stat-card">
+                        <div class="email-stat-icon" style="background:rgba(245,158,11,.1);color:#d97706;">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                        </div>
+                        <div><p class="email-stat-val email-stat-time" id="email-stat-last">—</p><p class="email-stat-lbl">Last Reminder</p></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- AI Health Insights -->
+            <div class="card adash-ai-insights-card">
+                <div class="card-header">
+                    <div class="adash-chart-title-grp">
+                        <div class="adash-chart-icon adash-icon-purple">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456zM16.894 20.567L16.5 21.75l-.394-1.183a2.25 2.25 0 00-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 001.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 001.423 1.423l1.183.394-1.183.394a2.25 2.25 0 00-1.423 1.423z"/></svg>
+                        </div>
+                        <div>
+                            <h3 class="card-title">AI Health Insights</h3>
+                            <p class="card-subtitle">Personalized health recommendations powered by AI</p>
+                        </div>
+                    </div>
+                    <button class="adash-ai-refresh-btn" id="adash-ai-refresh-btn" title="Refresh insights">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"/></svg>
+                        Refresh
+                    </button>
+                </div>
+                <div class="adash-ai-grid" id="adash-ai-grid">
+                    <div class="adash-ai-loading">
+                        <div class="adash-ai-spinner"></div>
+                        <p>Generating AI insights…</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Streak & Achievements -->
+            <div class="card rpt-streak-card">
+                <div class="card-header">
+                    <div>
+                        <h3 class="card-title">🔥 Streak &amp; Achievements</h3>
+                        <p class="card-subtitle">Your consistency milestones and earned badges</p>
+                    </div>
+                    <span class="card-badge">Gamification</span>
+                </div>
+                <div class="rpt-streak-summary">
+                    <div class="rpt-streak-stat">
+                        <span class="rpt-streak-icon">🔥</span>
+                        <div>
+                            <p class="rpt-streak-val" id="rpt-current-streak">0</p>
+                            <p class="rpt-streak-lbl">Current Streak</p>
+                        </div>
+                    </div>
+                    <div class="rpt-streak-stat">
+                        <span class="rpt-streak-icon">🏆</span>
+                        <div>
+                            <p class="rpt-streak-val" id="rpt-longest-streak">0</p>
+                            <p class="rpt-streak-lbl">Best Streak</p>
+                        </div>
+                    </div>
+                    <div class="rpt-streak-stat">
+                        <span class="rpt-streak-icon">🌟</span>
+                        <div>
+                            <p class="rpt-streak-val" id="rpt-perfect-week">0/7</p>
+                            <p class="rpt-streak-lbl">Perfect Days (Week)</p>
+                        </div>
+                    </div>
+                    <div class="rpt-streak-stat">
+                        <span class="rpt-streak-icon">📅</span>
+                        <div>
+                            <p class="rpt-streak-val" id="rpt-perfect-month">0/30</p>
+                            <p class="rpt-streak-lbl">Perfect Days (Month)</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="rpt-ai-insight" id="rpt-ai-insight" style="display:none;">
+                    <span class="rpt-ai-icon">✨</span>
+                    <p class="rpt-ai-text" id="rpt-ai-text"></p>
+                </div>
+                <div class="rpt-badges-section">
+                    <p class="rpt-badges-title">Earned Badges</p>
+                    <div class="rpt-badges-grid" id="rpt-badges-grid">
+                        <p class="empty-state" style="font-size:0.8rem;">No badges yet — keep taking your doses!</p>
+                    </div>
+                </div>
+            </div>
+
+        </section>
+
+        <section id="bmi-view" class="view app-view">
+
+            <div class="page-header">
+                <div class="page-header-left">
+                    <div class="page-icon-wrap">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="page-icon">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/>
+                        </svg>
+                    </div>
+                    <div>
                     <div class="rsc-icon blue-bg">
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/>
@@ -1903,7 +2369,42 @@
             <div class="modal-section-label">Channels</div>
             <div class="pref-list">
                 <div class="pref-row"><div class="pref-info"><p class="pref-title">Sound Alerts</p><p class="pref-desc">Play a sound when reminders trigger</p></div><button class="toggle-switch active" data-pref="sound-alerts" role="switch" aria-checked="true"><span class="toggle-knob"></span></button></div>
-                <div class="pref-row"><div class="pref-info"><p class="pref-title">Email Notifications</p><p class="pref-desc">Send reminders to your email address</p></div><button class="toggle-switch" data-pref="email-notifs" role="switch" aria-checked="false"><span class="toggle-knob"></span></button></div>
+            </div>
+            <div class="modal-section-label">Email Reminders</div>
+            <div class="pref-list">
+                <div class="pref-row">
+                    <div class="pref-info">
+                        <p class="pref-title">Email Reminders</p>
+                        <p class="pref-desc">Receive an email reminder for every scheduled dose</p>
+                    </div>
+                    <button class="toggle-switch" id="email-reminder-toggle" role="switch" aria-checked="false"><span class="toggle-knob"></span></button>
+                </div>
+            </div>
+
+            <!-- Reminder offset selector — shown when email reminders are enabled -->
+            <div class="email-offset-section" id="email-offset-section">
+                <label class="email-offset-label" for="email-offset-select">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                    Send reminder
+                </label>
+                <select id="email-offset-select" class="email-offset-select" aria-label="Reminder timing">
+                    <option value="0">At exact medicine time</option>
+                    <option value="5">5 minutes before</option>
+                    <option value="10">10 minutes before</option>
+                    <option value="15">15 minutes before</option>
+                    <option value="30">30 minutes before</option>
+                </select>
+            </div>
+
+            <div class="email-reminder-test-row" id="email-reminder-test-row">
+                <div class="email-test-info">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75"/></svg>
+                    <span id="email-reminder-recipient">Sends to your registered email</span>
+                </div>
+                <button class="email-test-btn" id="email-test-btn">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"/></svg>
+                    Send Test Email
+                </button>
             </div>
         </div>
         <div class="modal-footer"><button class="modal-btn-secondary" data-modal="modal-notif">Cancel</button><button class="modal-btn-primary" id="notif-save-btn">Save Preferences</button></div>

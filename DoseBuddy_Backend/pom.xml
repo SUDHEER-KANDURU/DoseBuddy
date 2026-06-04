@@ -57,6 +57,12 @@
         </dependency>
 
 
+		<!-- Spring Mail (Gmail SMTP) -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-mail</artifactId>
+		</dependency>
+
 		<!-- PDF -->
 		<dependency>
 			<groupId>org.apache.pdfbox</groupId>

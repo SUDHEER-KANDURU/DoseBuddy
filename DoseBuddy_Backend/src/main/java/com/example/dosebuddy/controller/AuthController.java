@@ -104,7 +104,9 @@ public class AuthController {
                 dobStr,
                 user.getGender(),
                 user.getEmergencyContact(),
-                user.isAcceptedTerms()
+                user.isAcceptedTerms(),
+                user.isEmailRemindersEnabled(),
+                user.getEmailReminderOffsetMinutes()
         );
         return ResponseEntity.ok(response);
     }
@@ -140,7 +142,9 @@ public class AuthController {
                 dobStr,
                 user.getGender(),
                 user.getEmergencyContact(),
-                user.isAcceptedTerms()
+                user.isAcceptedTerms(),
+                user.isEmailRemindersEnabled(),
+                user.getEmailReminderOffsetMinutes()
         );
         return ResponseEntity.ok(response);
     }

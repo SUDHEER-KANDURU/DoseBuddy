@@ -520,6 +520,18 @@ p  { color: var(--text-secondary); }
 
 .greeting-sub { font-size: 0.82rem; color: rgba(255,255,255,0.75); margin-top: 4px; }
 
+.caregiver-patient-note {
+  display: inline-block;
+  font-size: 0.75rem;
+  color: rgba(255,255,255,0.6);
+  background: rgba(255,255,255,0.12);
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: var(--radius-full);
+  padding: 2px 10px;
+  margin-top: 6px;
+}
+.caregiver-patient-note:empty { display: none; }
+
 .greeting-summary-pill {
   display: flex; align-items: center; gap: var(--space-2);
   background: rgba(255,255,255,0.15);
@@ -5750,4 +5762,582 @@ body.dark-mode .export-btn-pdf:hover {
   .export-controls-vitals { margin-top: 8px; }
   .vitals-period-tabs { flex-wrap: wrap; }
   .vitals-header-right { flex-wrap: wrap; gap: 8px; }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════
+   ANALYTICS DASHBOARD  — all .adash-* rules
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── Date filter tab bar ──────────────────────────────────────────────── */
+.analytics-filter-tabs {
+  display: flex;
+  gap: 4px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  padding: 3px;
+}
+.analytics-filter-btn {
+  padding: 5px 14px;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-full);
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+  white-space: nowrap;
+}
+.analytics-filter-btn.active {
+  background: var(--primary);
+  color: #fff;
+  font-weight: 600;
+}
+body.dark-mode .analytics-filter-btn.active { color: #000; }
+body.dark-mode .analytics-filter-tabs { background: #111; border-color: #2a2a2a; }
+
+/* ── Stats cards row (8 cards) ────────────────────────────────────────── */
+.adash-stats-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
+}
+
+.adash-stat-card {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  box-shadow: var(--shadow-md);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  position: relative;
+  overflow: hidden;
+  transition: box-shadow var(--transition), transform var(--transition);
+  border: 1px solid var(--border-light);
+}
+.adash-stat-card::after {
+  content: '';
+  position: absolute;
+  bottom: 0; left: 0; right: 0; height: 3px;
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+}
+.adash-stat-card:hover { box-shadow: var(--shadow-lg); transform: translateY(-2px); }
+
+.adash-sc-blue::after   { background: #3b82f6; }
+.adash-sc-teal::after   { background: var(--primary); }
+.adash-sc-green::after  { background: var(--success); }
+.adash-sc-red::after    { background: var(--danger); }
+.adash-sc-orange::after { background: var(--warning); }
+.adash-sc-purple::after { background: var(--purple); }
+.adash-sc-indigo::after { background: #6366f1; }
+.adash-sc-cyan::after   { background: #06b6d4; }
+
+.adash-sc-icon-wrap {
+  width: 42px; height: 42px; border-radius: var(--radius-md);
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.adash-sc-icon-wrap svg { width: 20px; height: 20px; stroke: currentColor; }
+
+.adash-sc-blue   .adash-sc-icon-wrap { background: rgba(59,130,246,0.12);  color: #3b82f6; }
+.adash-sc-teal   .adash-sc-icon-wrap { background: var(--primary-light);    color: var(--primary); }
+.adash-sc-green  .adash-sc-icon-wrap { background: var(--success-light);    color: var(--success); }
+.adash-sc-red    .adash-sc-icon-wrap { background: var(--danger-light);     color: var(--danger); }
+.adash-sc-orange .adash-sc-icon-wrap { background: var(--warning-light);    color: var(--warning); }
+.adash-sc-purple .adash-sc-icon-wrap { background: var(--purple-light);     color: var(--purple); }
+.adash-sc-indigo .adash-sc-icon-wrap { background: rgba(99,102,241,0.12);   color: #6366f1; }
+.adash-sc-cyan   .adash-sc-icon-wrap { background: rgba(6,182,212,0.12);    color: #06b6d4; }
+
+.adash-sc-body { min-width: 0; flex: 1; }
+.adash-sc-label {
+  font-size: 0.68rem; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.06em; color: var(--text-muted); margin-bottom: 3px;
+}
+.adash-sc-value {
+  font-size: 1.55rem; font-weight: 800; color: var(--text-primary);
+  line-height: 1.1; letter-spacing: -0.02em;
+}
+.adash-sc-trend {
+  font-size: 0.68rem; color: var(--text-muted); margin-top: 3px; font-weight: 500;
+  display: flex; align-items: center; gap: 3px;
+}
+.adash-trend-up   { color: var(--success); }
+.adash-trend-down { color: var(--danger); }
+
+/* ── Health Score + Donut row ─────────────────────────────────────────── */
+.adash-score-adherence-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-5);
+  margin-bottom: var(--space-5);
+}
+
+.adash-health-score-card { }
+
+.adash-score-badge {
+  padding: 5px 14px;
+  border-radius: var(--radius-full);
+  font-size: 0.75rem;
+  font-weight: 700;
+  background: var(--success-light);
+  color: var(--success);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.adash-score-badge.score-excellent { background: var(--success-light);  color: var(--success); }
+.adash-score-badge.score-good      { background: var(--primary-light);  color: var(--primary); }
+.adash-score-badge.score-fair      { background: var(--warning-light);  color: var(--warning); }
+.adash-score-badge.score-poor      { background: var(--danger-light);   color: var(--danger); }
+
+.adash-health-score-body {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  padding-top: var(--space-4);
+}
+
+/* Circular progress */
+.adash-circular-wrap {
+  position: relative;
+  width: 130px; height: 130px;
+  flex-shrink: 0;
+}
+.adash-circular-svg { width: 100%; height: 100%; }
+.adash-circ-bg   { stroke: var(--border-light); }
+.adash-circ-fill {
+  stroke: var(--primary);
+  transition: stroke-dashoffset 1.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.adash-circ-center {
+  position: absolute;
+  inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+}
+.adash-circ-score {
+  font-size: 2rem; font-weight: 800;
+  color: var(--text-primary); line-height: 1;
+}
+.adash-circ-label { font-size: 0.68rem; color: var(--text-muted); font-weight: 500; }
+
+/* Score breakdown bars */
+.adash-score-breakdown { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--space-4); }
+.adash-score-row { display: flex; flex-direction: column; gap: 5px; }
+.adash-score-row-label {
+  font-size: 0.78rem; font-weight: 600; color: var(--text-secondary);
+  display: flex; align-items: center; gap: 5px;
+}
+.adash-score-bar-wrap {
+  display: flex; align-items: center; gap: var(--space-3);
+}
+.adash-score-bar-track {
+  flex: 1; height: 8px; background: var(--border-light);
+  border-radius: var(--radius-full); overflow: hidden;
+}
+.adash-score-bar-fill {
+  height: 100%; border-radius: var(--radius-full);
+  transition: width 1s cubic-bezier(0.4, 0, 0.2, 1);
+  min-width: 0;
+}
+.adash-bar-teal   { background: linear-gradient(90deg, var(--primary), #00c9c3); }
+.adash-bar-indigo { background: linear-gradient(90deg, #6366f1, #818cf8); }
+.adash-bar-cyan   { background: linear-gradient(90deg, #06b6d4, #22d3ee); }
+.adash-score-row-val { font-size: 0.75rem; font-weight: 700; color: var(--text-primary); white-space: nowrap; min-width: 28px; text-align: right; }
+
+/* Donut card */
+.adash-donut-card { }
+.adash-donut-body {
+  display: flex; align-items: center;
+  gap: var(--space-6); padding-top: var(--space-4);
+}
+.adash-donut-wrap { width: 150px; height: 150px; flex-shrink: 0; position: relative; }
+.adash-donut-wrap canvas { width: 100% !important; height: 100% !important; }
+
+.adash-donut-legend { flex: 1; display: flex; flex-direction: column; gap: var(--space-3); }
+.adash-dl-item {
+  display: flex; align-items: center; gap: var(--space-2);
+  font-size: 0.82rem;
+}
+.adash-dl-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.adash-dl-label { flex: 1; color: var(--text-secondary); font-weight: 500; }
+.adash-dl-val   { font-weight: 700; color: var(--text-primary); }
+.adash-dl-total { border-top: 1px solid var(--border-light); padding-top: var(--space-2); margin-top: 2px; }
+.adash-dl-total .adash-dl-label { font-weight: 700; color: var(--text-primary); }
+
+/* ── General chart card ──────────────────────────────────────────────── */
+.adash-chart-card { margin-bottom: var(--space-5); }
+
+.adash-chart-title-grp { display: flex; align-items: center; gap: var(--space-3); flex: 1; }
+
+.adash-chart-icon {
+  width: 38px; height: 38px; border-radius: var(--radius-md);
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.adash-chart-icon svg { width: 18px; height: 18px; }
+
+.adash-icon-teal   { background: var(--primary-light);        color: var(--primary); }
+.adash-icon-indigo { background: rgba(99,102,241,0.12);        color: #6366f1; }
+.adash-icon-cyan   { background: rgba(6,182,212,0.12);         color: #06b6d4; }
+.adash-icon-purple { background: var(--purple-light);          color: var(--purple); }
+
+.adash-chart-wrap {
+  position: relative; height: 240px; margin-top: var(--space-4);
+}
+.adash-chart-wrap canvas { width: 100% !important; height: 100% !important; }
+
+/* Empty states */
+.adash-empty-state {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: var(--space-8) var(--space-4); text-align: center;
+}
+.adash-empty-icon { font-size: 2.5rem; margin-bottom: var(--space-3); }
+.adash-empty-title { font-size: 0.9rem; font-weight: 700; color: var(--text-primary); margin-bottom: 4px; }
+.adash-empty-sub { font-size: 0.78rem; color: var(--text-muted); line-height: 1.5; max-width: 260px; }
+
+/* ── BMI + Vitals row ────────────────────────────────────────────────── */
+.adash-bmi-vitals-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-5);
+  margin-bottom: var(--space-5);
+}
+
+.adash-bmi-card { }
+
+.adash-bmi-category-row {
+  display: flex; gap: var(--space-2); flex-wrap: wrap;
+  margin: var(--space-4) 0 var(--space-2);
+}
+.adash-bmi-cat-pill {
+  padding: 4px 14px;
+  border-radius: var(--radius-full);
+  font-size: 0.72rem; font-weight: 600;
+  background: var(--border-light); color: var(--text-muted);
+  border: 1px solid var(--border);
+  transition: background var(--transition), color var(--transition);
+}
+.adash-bmi-cat-pill.adash-bmi-cat-active.cat-underweight { background: rgba(99,102,241,0.15);  color: #6366f1; border-color: rgba(99,102,241,0.3); }
+.adash-bmi-cat-pill.adash-bmi-cat-active.cat-normal      { background: var(--success-light);   color: var(--success); border-color: rgba(45,164,78,0.3); }
+.adash-bmi-cat-pill.adash-bmi-cat-active.cat-overweight  { background: var(--warning-light);   color: var(--warning); border-color: rgba(217,119,6,0.3); }
+.adash-bmi-cat-pill.adash-bmi-cat-active.cat-obese       { background: var(--danger-light);    color: var(--danger);  border-color: rgba(220,38,38,0.3); }
+
+/* Vitals trend card */
+.adash-vitals-trends-card { }
+.adash-vitals-period-tabs {
+  display: flex; gap: 4px;
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: var(--radius-full); padding: 3px; flex-shrink: 0;
+}
+.adash-vp-btn {
+  padding: 4px 10px; border: none; background: transparent;
+  border-radius: var(--radius-full); font-size: 0.72rem; font-weight: 500;
+  color: var(--text-secondary); cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+  white-space: nowrap;
+}
+.adash-vp-btn.active { background: var(--primary); color: #fff; }
+body.dark-mode .adash-vp-btn.active { color: #000; }
+
+.adash-vitals-charts-grid {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: var(--space-4); margin-top: var(--space-4);
+}
+.adash-vt-block { }
+.adash-vt-label {
+  font-size: 0.72rem; font-weight: 600; color: var(--text-secondary);
+  margin-bottom: var(--space-2);
+}
+.adash-vt-unit { font-weight: 400; color: var(--text-muted); font-size: 0.68rem; }
+.adash-vt-wrap { position: relative; height: 90px; }
+.adash-vt-wrap canvas { width: 100% !important; height: 100% !important; }
+
+/* ── AI Insights Card ────────────────────────────────────────────────── */
+.adash-ai-insights-card { margin-bottom: var(--space-5); }
+
+.adash-ai-refresh-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 14px; border: 1px solid var(--border);
+  border-radius: var(--radius-md); background: var(--surface);
+  color: var(--text-secondary); font-size: 0.75rem; font-weight: 600;
+  cursor: pointer; font-family: inherit;
+  transition: border-color var(--transition), background var(--transition), color var(--transition);
+}
+.adash-ai-refresh-btn:hover {
+  border-color: var(--primary); color: var(--primary); background: var(--primary-light);
+}
+.adash-ai-refresh-btn.spinning svg { animation: adashSpin 0.8s linear infinite; }
+@keyframes adashSpin { to { transform: rotate(360deg); } }
+
+.adash-ai-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-4); margin-top: var(--space-4);
+}
+
+.adash-ai-card {
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  border: 1px solid;
+  position: relative;
+  overflow: hidden;
+  animation: adashFadeIn 0.4s ease;
+}
+@keyframes adashFadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.adash-ai-card::before {
+  content: '';
+  position: absolute; top: 0; left: 0; bottom: 0; width: 3px;
+  border-radius: var(--radius-md) 0 0 var(--radius-md);
+}
+
+.adash-ai-card-good     { background: var(--success-light);  border-color: rgba(45,164,78,0.25); }
+.adash-ai-card-good::before { background: var(--success); }
+.adash-ai-card-warning  { background: var(--warning-light); border-color: rgba(217,119,6,0.25); }
+.adash-ai-card-warning::before { background: var(--warning); }
+.adash-ai-card-alert    { background: var(--danger-light);  border-color: rgba(220,38,38,0.25); }
+.adash-ai-card-alert::before { background: var(--danger); }
+.adash-ai-card-info     { background: var(--primary-light); border-color: rgba(0,161,155,0.25); }
+.adash-ai-card-info::before { background: var(--primary); }
+.adash-ai-card-purple   { background: var(--purple-light);  border-color: rgba(124,58,237,0.25); }
+.adash-ai-card-purple::before { background: var(--purple); }
+.adash-ai-card-indigo   { background: rgba(99,102,241,0.1); border-color: rgba(99,102,241,0.25); }
+.adash-ai-card-indigo::before { background: #6366f1; }
+
+.adash-ai-card-icon { font-size: 1.4rem; margin-bottom: var(--space-2); display: block; }
+.adash-ai-card-title {
+  font-size: 0.78rem; font-weight: 700; margin-bottom: 5px;
+  color: var(--text-primary);
+}
+.adash-ai-card-text { font-size: 0.75rem; color: var(--text-secondary); line-height: 1.55; }
+
+/* Loading spinner */
+.adash-ai-loading {
+  grid-column: 1 / -1;
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: var(--space-3);
+  padding: var(--space-8);
+  color: var(--text-muted); font-size: 0.83rem;
+}
+.adash-ai-spinner {
+  width: 28px; height: 28px;
+  border: 3px solid var(--border);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: adashSpin 0.7s linear infinite;
+}
+
+/* ── AI card type aliases (success = good, danger = alert) ───────────── */
+.adash-ai-card-success  { background: var(--success-light);  border-color: rgba(45,164,78,0.25); }
+.adash-ai-card-success::before { background: var(--success); }
+.adash-ai-card-danger   { background: var(--danger-light);   border-color: rgba(220,38,38,0.25); }
+.adash-ai-card-danger::before  { background: var(--danger); }
+
+/* ── BMI category pill active — generic highlight ────────────────────── */
+.adash-bmi-cat-pill.adash-bmi-cat-active {
+  background: var(--primary-light); color: var(--primary);
+  border-color: rgba(0,161,155,0.35); font-weight: 700;
+}
+
+/* ── Dark mode overrides ─────────────────────────────────────────────── */
+body.dark-mode .adash-stat-card            { background: #111; border-color: #222; }
+body.dark-mode .adash-circ-bg              { stroke: #2a2a2a; }
+body.dark-mode .adash-score-bar-track      { background: #1a1a1a; }
+body.dark-mode .adash-dl-total             { border-top-color: #2a2a2a; }
+body.dark-mode .adash-bmi-cat-pill         { background: #1a1a1a; border-color: #2a2a2a; }
+body.dark-mode .adash-ai-card-success { background: rgba(74,222,128,0.08);  border-color: rgba(74,222,128,0.15); }
+body.dark-mode .adash-ai-card-danger  { background: rgba(248,113,113,0.08); border-color: rgba(248,113,113,0.15); }
+body.dark-mode .adash-ai-card-good    { background: rgba(74,222,128,0.08);  border-color: rgba(74,222,128,0.15); }
+body.dark-mode .adash-ai-card-warning { background: rgba(251,191,36,0.08);  border-color: rgba(251,191,36,0.15); }
+body.dark-mode .adash-ai-card-alert   { background: rgba(248,113,113,0.08); border-color: rgba(248,113,113,0.15); }
+body.dark-mode .adash-ai-card-info    { background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.08); }
+body.dark-mode .adash-ai-card-purple  { background: rgba(192,132,252,0.08); border-color: rgba(192,132,252,0.15); }
+body.dark-mode .adash-ai-card-indigo  { background: rgba(99,102,241,0.08);  border-color: rgba(99,102,241,0.15); }
+body.dark-mode .adash-ai-refresh-btn  { background: #111; border-color: #2a2a2a; }
+body.dark-mode .adash-vitals-period-tabs { background: #0a0a0a; border-color: #2a2a2a; }
+
+/* ── Responsive ──────────────────────────────────────────────────────── */
+@media (max-width: 1280px) {
+  .adash-stats-row { grid-template-columns: repeat(4, 1fr); }
+}
+@media (max-width: 1100px) {
+  .adash-score-adherence-row { grid-template-columns: 1fr; }
+  .adash-bmi-vitals-row      { grid-template-columns: 1fr; }
+  .adash-ai-grid             { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 900px) {
+  .adash-stats-row { grid-template-columns: repeat(2, 1fr); }
+  .analytics-filter-tabs { flex-wrap: wrap; gap: 2px; }
+}
+@media (max-width: 640px) {
+  .adash-stats-row { grid-template-columns: 1fr 1fr; gap: var(--space-3); }
+  .adash-sc-value { font-size: 1.3rem; }
+  .adash-health-score-body { flex-direction: column; align-items: flex-start; gap: var(--space-4); }
+  .adash-circular-wrap { width: 110px; height: 110px; align-self: center; }
+  .adash-donut-body { flex-direction: column; }
+  .adash-donut-wrap { width: 130px; height: 130px; align-self: center; }
+  .adash-vitals-charts-grid { grid-template-columns: 1fr; }
+  .adash-ai-grid { grid-template-columns: 1fr; }
+  .adash-chart-wrap { height: 200px; }
+  .analytics-filter-tabs { gap: 2px; border-radius: var(--radius-md); }
+  .analytics-filter-btn { padding: 4px 10px; font-size: 0.72rem; }
+}
+@media (max-width: 400px) {
+  .adash-stats-row { grid-template-columns: 1fr 1fr; gap: var(--space-2); }
+  .adash-sc-value { font-size: 1.15rem; }
+  .adash-sc-icon-wrap { width: 36px; height: 36px; }
+}
+
+
+/* ── Email Reminder Analytics Card ─────────────────────────────────────────── */
+.email-analytics-card { margin-bottom: var(--space-5); }
+
+.email-analytics-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-4);
+  padding: var(--space-4) 0 0;
+}
+
+.email-stat-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  background: var(--bg-secondary, #f8fafc);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+}
+
+.email-stat-icon {
+  width: 40px; height: 40px;
+  border-radius: var(--radius-md);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+
+.email-stat-val {
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.1;
+  margin: 0;
+}
+
+.email-stat-time {
+  font-size: 0.85rem !important;
+  font-weight: 600 !important;
+  line-height: 1.3 !important;
+}
+
+.email-stat-lbl {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin: 2px 0 0;
+  font-weight: 500;
+}
+
+/* ── Email Reminder Toggle in Notif Modal ─────────────────────────────────── */
+.email-reminder-test-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  background: rgba(37,99,235,.05);
+  border: 1px solid rgba(37,99,235,.15);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+  margin-top: var(--space-3);
+}
+
+.email-test-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.email-test-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--primary, #2563eb);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-md);
+  padding: 7px 14px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .2s;
+}
+.email-test-btn:hover { background: #1d4ed8; }
+.email-test-btn:disabled { opacity: .6; cursor: not-allowed; }
+
+/* dark mode */
+body.dark-mode .email-stat-card { background: var(--card-bg); }
+body.dark-mode .email-reminder-test-row { background: rgba(37,99,235,.08); border-color: rgba(37,99,235,.25); }
+
+@media (max-width: 900px) {
+  .email-analytics-stats { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 500px) {
+  .email-analytics-stats { grid-template-columns: 1fr; }
+  .email-reminder-test-row { flex-direction: column; align-items: flex-start; }
+}
+
+/* ── Email Offset Selector ──────────────────────────────────────────────────── */
+.email-offset-section {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: rgba(37,99,235,.04);
+  border: 1px solid rgba(37,99,235,.12);
+  border-radius: var(--radius-md);
+  margin-top: 8px;
+}
+
+.email-offset-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.email-offset-select {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: var(--card-bg, #fff);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 6px 10px;
+  cursor: pointer;
+  outline: none;
+  transition: border-color .15s;
+}
+.email-offset-select:focus { border-color: var(--primary, #2563eb); }
+
+/* hidden when email reminders are disabled */
+.email-offset-section.email-offset-hidden { display: none; }
+
+body.dark-mode .email-offset-section {
+  background: rgba(37,99,235,.08);
+  border-color: rgba(37,99,235,.20);
+}
+body.dark-mode .email-offset-select {
+  background: var(--card-bg);
+  color: var(--text-primary);
+  border-color: var(--border);
 }

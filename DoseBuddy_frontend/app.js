@@ -1077,8 +1077,64 @@ function setupMedicineForm() {
     });
 }
 
+/**
+ * updateGreeting()
+ * Determines the appropriate greeting, emoji, and today's formatted date
+ * based on the user's local browser time, then updates the DOM elements.
+ *
+ * Time ranges:
+ *   Morning   05:00 – 11:59  → 🌅
+ *   Afternoon 12:00 – 16:59  → ☀️
+ *   Evening   17:00 – 20:59  → 🌇
+ *   Night     21:00 – 04:59  → 🌙
+ */
+function updateGreeting() {
+    const now = new Date();
+    const hour = now.getHours();
+
+    let greetingText, emoji;
+
+    if (hour >= 5 && hour < 12) {
+        greetingText = "Good Morning";
+        emoji = "🌅";
+    } else if (hour >= 12 && hour < 17) {
+        greetingText = "Good Afternoon";
+        emoji = "☀️";
+    } else if (hour >= 17 && hour < 21) {
+        greetingText = "Good Evening";
+        emoji = "🌇";
+    } else {
+        greetingText = "Good Night";
+        emoji = "🌙";
+    }
+
+    // Format today's date as "Thursday, June 4, 2026"
+    const formattedDate = now.toLocaleDateString(undefined, {
+        weekday: "long",
+        year:    "numeric",
+        month:   "long",
+        day:     "numeric"
+    });
+
+    const greetingEl = document.getElementById("greeting-text");
+    if (greetingEl) {
+        const name = currentUser && currentUser.name
+            ? `, ${currentUser.name.split(" ")[0]}`
+            : "";
+        greetingEl.textContent = `${greetingText}${name} ${emoji}`;
+    }
+
+    const dateEl = document.getElementById("dashboard-date");
+    if (dateEl) {
+        dateEl.textContent = formattedDate;
+    }
+}
+
 async function renderDashboard() {
     if (!currentUser) return;
+
+    // Update greeting and date every time the dashboard renders
+    updateGreeting();
 
     const dateElem = document.getElementById("dashboard-date");
     const noMedsMsg = document.getElementById("no-meds-message");
@@ -1091,19 +1147,22 @@ async function renderDashboard() {
     const today = new Date();
     const todayStr = today.toISOString().split("T")[0];
 
-    let headerText = `For ${todayStr}`;
     let medsUrl;
 
     if (currentUser.role === "CAREGIVER" && currentUser.patientEmail) {
-        headerText += ` · Patient: ${currentUser.patientEmail}`;
         medsUrl = `${API_BASE}/medications/today-by-email/${encodeURIComponent(
             currentUser.patientEmail
         )}`;
+        // Show patient context in the stats pill, not in the date line
+        const patientNote = document.getElementById("caregiver-patient-note");
+        if (patientNote) patientNote.textContent = `Patient: ${currentUser.patientEmail}`;
     } else {
         medsUrl = `${API_BASE}/medications/today/${currentUser.id}`;
+        const patientNote = document.getElementById("caregiver-patient-note");
+        if (patientNote) patientNote.textContent = "";
     }
 
-    dateElem.textContent = headerText;
+    // dateElem is already set by updateGreeting(); do not overwrite it here.
 
     tbody.innerHTML = "";
     noMedsMsg.style.display = "none";
@@ -1554,6 +1613,9 @@ function renderMissedMiniChart(labels, missedValues) {
 async function renderReports() {
     if (!currentUser) return;
 
+    // Load email analytics whenever the reports page renders
+    loadEmailAnalytics();
+
     const dashEmpty = document.getElementById("reports-empty");
     const dashCtx   = document.getElementById("weekly-chart");
 
@@ -1744,7 +1806,793 @@ async function renderReports() {
         if (dashEmpty) { dashEmpty.style.display = "block"; dashEmpty.textContent = "Could not load weekly summary."; }
         if (rptEmpty)  { rptEmpty.style.display  = "flex"; }
     }
+
+    // ── Analytics dashboard extra sections ─────────────────────────────────
+    renderAnalyticsDashboard();
 }
+
+// ═══════════════════════════════════════════════════════════════════
+//  ANALYTICS DASHBOARD — full implementation
+// ═══════════════════════════════════════════════════════════════════
+
+// Track current analytics period (days, or "all")
+let adashCurrentPeriod = 7;
+
+// Chart instances for analytics dashboard
+let adashDonutChart    = null;
+let adashBmiChart      = null;
+let adashHrChart       = null;
+let adashBpChart       = null;
+let adashSugarChart    = null;
+let adashWeightChart   = null;
+
+/**
+ * Main entry point — called whenever reports view opens or period changes.
+ * Fires all data loads in parallel.
+ */
+async function renderAnalyticsDashboard() {
+    if (!currentUser) return;
+    const uid = currentUser.id;
+
+    try {
+        // Fetch everything in parallel
+        const [
+            medsRes,
+            statsRes,
+            todayLogsRes,
+            bmiHistRes,
+            vitalsHistRes,
+            streakRes
+        ] = await Promise.all([
+            fetch(`${API_BASE}/medications/today/${uid}`),
+            fetch(`${API_BASE}/logs/adherence/stats/${uid}`),
+            fetch(`${API_BASE}/logs/today/${uid}`),
+            fetch(`${API_BASE}/bmi/history/${uid}`),
+            fetch(`${API_BASE}/vitals/history/${uid}`),
+            fetch(`${API_BASE}/streaks/${uid}`)
+        ]);
+
+        const meds       = medsRes.ok       ? await medsRes.json()       : [];
+        const stats      = statsRes.ok      ? await statsRes.json()      : {};
+        const todayLogs  = todayLogsRes.ok  ? await todayLogsRes.json()  : [];
+        const bmiHistory = bmiHistRes.ok    ? await bmiHistRes.json()    : [];
+        const vitalsHist = vitalsHistRes.ok ? await vitalsHistRes.json() : [];
+        const streak     = streakRes.ok     ? await streakRes.json()     : {};
+
+        // ── 1. Stat cards ─────────────────────────────────────────────────
+        adashRenderStatCards(meds, stats, todayLogs, bmiHistory, vitalsHist);
+
+        // ── 2. Health Score ───────────────────────────────────────────────
+        adashRenderHealthScore(stats, bmiHistory, vitalsHist);
+
+        // ── 3. Medicine Consumption Donut ─────────────────────────────────
+        adashRenderDonut(stats);
+
+        // ── 4. BMI Trend chart ────────────────────────────────────────────
+        adashRenderBmiChart(bmiHistory);
+
+        // ── 5. Vitals charts (default: week) ─────────────────────────────
+        adashRenderVitalsCharts(vitalsHist, adashCurrentVitalsPeriod || "week");
+
+        // ── 6. AI Health Insights ─────────────────────────────────────────
+        adashRenderAiInsights(stats, bmiHistory, vitalsHist, streak);
+
+    } catch (err) {
+        console.warn("[Analytics] Dashboard load error:", err);
+    }
+}
+
+// ── 1. Stat Cards ─────────────────────────────────────────────────────────────
+function adashRenderStatCards(meds, stats, todayLogs, bmiHistory, vitalsHist) {
+    // Medications
+    const totalMeds  = meds.length;
+    const activeMeds = meds.filter(m => m.active !== false).length;
+
+    setText("adash-total-meds", totalMeds);
+    setText("adash-active-meds", activeMeds);
+    setText("adash-total-meds-sub", "All time");
+    setText("adash-active-meds-sub", "Currently taking");
+
+    // Doses
+    const taken  = stats.takenDoses  || 0;
+    const missed = stats.missedDoses || 0;
+    const adher  = stats.adherencePercentage || 0;
+
+    setText("rpt-taken-doses", taken);
+    setText("rpt-missed-doses", missed);
+    setText("rpt-adherence", adher + "%");
+
+    // Adherence trend text
+    const takenTrend = document.getElementById("adash-taken-trend");
+    if (takenTrend) takenTrend.textContent = adher >= 80 ? "↑ Good progress" : adher >= 60 ? "→ On track" : "↓ Needs work";
+
+    const missedTrend = document.getElementById("adash-missed-trend");
+    if (missedTrend) {
+        missedTrend.textContent = missed === 0 ? "✓ Perfect!" : missed <= 3 ? "Low" : "Needs attention";
+        missedTrend.className = "adash-sc-trend " + (missed === 0 ? "adash-trend-up" : "adash-trend-down");
+    }
+
+    // Today's doses
+    const todayTotal  = todayLogs.length;
+    const todayTaken  = todayLogs.filter(l => l.status === "TAKEN").length;
+    setText("adash-today-doses", todayTaken + "/" + todayTotal);
+    setText("adash-today-sub", todayTotal > 0 ? `${todayTaken} taken of ${todayTotal}` : "No doses today");
+
+    // BMI
+    const latestBmi = bmiHistory.length > 0 ? bmiHistory[bmiHistory.length - 1] : null;
+    if (latestBmi) {
+        setText("adash-current-bmi", latestBmi.bmiValue ? latestBmi.bmiValue.toFixed(1) : "—");
+        const catInfo = getBmiCategoryInfo(latestBmi.bmiCategory || determineBmiCategory(latestBmi.bmiValue));
+        const bmiCatEl = document.getElementById("adash-bmi-category");
+        if (bmiCatEl) {
+            bmiCatEl.textContent = catInfo.icon + " " + catInfo.label;
+            bmiCatEl.className = "adash-sc-trend";
+        }
+    } else {
+        setText("adash-current-bmi", "—");
+        setText("adash-bmi-category", "Not tracked");
+    }
+
+    // Vitals logged
+    setText("adash-vitals-logged", vitalsHist.length);
+    setText("adash-vitals-sub", vitalsHist.length > 0 ? "Records in history" : "No records yet");
+}
+
+function setText(id, val) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = val;
+}
+
+// ── 2. Health Score ───────────────────────────────────────────────────────────
+function adashRenderHealthScore(stats, bmiHistory, vitalsHist) {
+    // Adherence score = adherencePercentage (already 0-100)
+    const adherScore = Math.min(100, Math.round(stats.adherencePercentage || 0));
+
+    // BMI score: 100 for Normal, scaled for others
+    let bmiScore = 50; // default if no data
+    const latestBmi = bmiHistory.length > 0 ? bmiHistory[bmiHistory.length - 1] : null;
+    if (latestBmi) {
+        const bmiVal = latestBmi.bmiValue || 0;
+        if (bmiVal >= 18.5 && bmiVal < 25)      bmiScore = 100;
+        else if (bmiVal >= 25 && bmiVal < 27.5)  bmiScore = 80;
+        else if (bmiVal >= 17 && bmiVal < 18.5)  bmiScore = 80;
+        else if (bmiVal >= 27.5 && bmiVal < 30)  bmiScore = 65;
+        else if (bmiVal >= 15 && bmiVal < 17)    bmiScore = 60;
+        else if (bmiVal >= 30 && bmiVal < 35)    bmiScore = 50;
+        else                                     bmiScore = 35;
+    }
+
+    // Vitals score: based on how many vitals are in normal range
+    let vitalsScore = 50; // default if no data
+    if (vitalsHist.length > 0) {
+        const latest = vitalsHist[vitalsHist.length - 1];
+        let checks = 0, passed = 0;
+        if (latest.heartRate) {
+            checks++;
+            if (latest.heartRate >= 60 && latest.heartRate <= 100) passed++;
+        }
+        if (latest.bpSystolic && latest.bpDiastolic) {
+            checks++;
+            if (latest.bpSystolic <= 130 && latest.bpDiastolic <= 85) passed++;
+        }
+        if (latest.bloodSugar) {
+            checks++;
+            if (latest.bloodSugar >= 70 && latest.bloodSugar <= 140) passed++;
+        }
+        if (checks > 0) vitalsScore = Math.round((passed / checks) * 100);
+        else vitalsScore = 70; // has records but no specific values to check
+    }
+
+    // Overall: weighted average (adherence 50%, BMI 30%, vitals 20%)
+    const overall = Math.round((adherScore * 0.5) + (bmiScore * 0.3) + (vitalsScore * 0.2));
+
+    // Animate circular gauge
+    const circumference = 314; // 2 * π * 50
+    const offset = circumference - (overall / 100) * circumference;
+    const circFill = document.getElementById("adash-circ-fill");
+    const circScore = document.getElementById("adash-overall-score");
+
+    if (circFill) {
+        circFill.style.strokeDashoffset = offset;
+        // Color the ring based on score
+        if (overall >= 80)      circFill.style.stroke = "#2da44e";
+        else if (overall >= 65) circFill.style.stroke = "#00A19B";
+        else if (overall >= 50) circFill.style.stroke = "#d97706";
+        else                    circFill.style.stroke = "#dc2626";
+    }
+
+    // Animate score counter
+    if (circScore) animateCounter(circScore, 0, overall, 1200);
+
+    // Score badge
+    const badge = document.getElementById("adash-score-badge");
+    if (badge) {
+        if (overall >= 80)      { badge.textContent = "Excellent"; badge.className = "adash-score-badge score-excellent"; }
+        else if (overall >= 65) { badge.textContent = "Good";      badge.className = "adash-score-badge score-good"; }
+        else if (overall >= 50) { badge.textContent = "Fair";      badge.className = "adash-score-badge score-fair"; }
+        else                    { badge.textContent = "Needs Attention"; badge.className = "adash-score-badge score-poor"; }
+    }
+
+    // Score bars
+    setTimeout(() => {
+        setScoreBar("adash-bar-adherence", "adash-val-adherence", adherScore);
+        setScoreBar("adash-bar-bmi",        "adash-val-bmi",       bmiScore);
+        setScoreBar("adash-bar-vitals",     "adash-val-vitals",    vitalsScore);
+    }, 200);
+}
+
+function setScoreBar(barId, valId, score) {
+    const bar = document.getElementById(barId);
+    const val = document.getElementById(valId);
+    if (bar) bar.style.width = score + "%";
+    if (val) val.textContent = score;
+}
+
+function animateCounter(el, from, to, duration) {
+    const start = performance.now();
+    function step(timestamp) {
+        const progress = Math.min((timestamp - start) / duration, 1);
+        const eased = 1 - Math.pow(1 - progress, 3);
+        el.textContent = Math.round(from + (to - from) * eased);
+        if (progress < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+}
+
+// ── 3. Medicine Consumption Donut ─────────────────────────────────────────────
+function adashRenderDonut(stats) {
+    const ctx = document.getElementById("adash-donut-chart");
+    if (!ctx) return;
+
+    const taken   = stats.takenDoses   || 0;
+    const missed  = stats.missedDoses  || 0;
+    const pending = stats.pendingDoses || 0;
+
+    // Update legend values
+    setText("adash-dl-taken",   taken);
+    setText("adash-dl-missed",  missed);
+    setText("adash-dl-pending", pending);
+
+    if (adashDonutChart) { adashDonutChart.destroy(); adashDonutChart = null; }
+    const existing = Chart.getChart(ctx);
+    if (existing) existing.destroy();
+
+    const isDark = document.body.classList.contains("dark-mode");
+
+    const total = taken + missed + pending;
+    if (total === 0) {
+        // Show placeholder
+        adashDonutChart = new Chart(ctx, {
+            type: "doughnut",
+            data: {
+                labels: ["No data"],
+                datasets: [{ data: [1], backgroundColor: [isDark ? "#2a2a2a" : "#e8e3dc"], borderWidth: 0 }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: true,
+                plugins: { legend: { display: false }, tooltip: { enabled: false } },
+                cutout: "72%"
+            }
+        });
+        return;
+    }
+
+    adashDonutChart = new Chart(ctx, {
+        type: "doughnut",
+        data: {
+            labels: ["Taken", "Missed", "Pending"],
+            datasets: [{
+                data: [taken, missed, pending],
+                backgroundColor: ["#00A19B", "#dc2626", "#d97706"],
+                borderColor: isDark ? "#111" : "#f5f1ec",
+                borderWidth: 3,
+                hoverOffset: 8
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        label: (ctx) => {
+                            const pct = total > 0 ? Math.round((ctx.parsed / total) * 100) : 0;
+                            return ` ${ctx.label}: ${ctx.parsed} (${pct}%)`;
+                        }
+                    }
+                }
+            },
+            cutout: "72%",
+            animation: { animateRotate: true, duration: 1000 }
+        }
+    });
+}
+
+// ── 4. BMI Trend Chart ────────────────────────────────────────────────────────
+function adashRenderBmiChart(bmiHistory) {
+    const ctx      = document.getElementById("adash-bmi-chart");
+    const emptyEl  = document.getElementById("adash-bmi-empty");
+    const catRow   = document.getElementById("adash-bmi-cat-row");
+
+    if (!ctx) return;
+
+    if (adashBmiChart) { adashBmiChart.destroy(); adashBmiChart = null; }
+    const existing = Chart.getChart(ctx);
+    if (existing) existing.destroy();
+
+    if (!bmiHistory || bmiHistory.length === 0) {
+        ctx.style.display = "none";
+        if (emptyEl) emptyEl.style.display = "flex";
+        if (catRow)  catRow.style.display  = "none";
+        return;
+    }
+
+    ctx.style.display = "";
+    if (emptyEl) emptyEl.style.display = "none";
+    if (catRow)  catRow.style.display  = "flex";
+
+    // Show BMI category pills
+    const latestBmi = bmiHistory[bmiHistory.length - 1];
+    if (latestBmi) {
+        const cat = latestBmi.bmiCategory || determineBmiCategory(latestBmi.bmiValue);
+        ["underweight","normal","overweight","obese"].forEach(c => {
+            const el = document.getElementById(`adash-bmi-cat-${c}`);
+            if (el) {
+                el.classList.toggle("adash-bmi-cat-active",
+                    cat.toUpperCase() === c.toUpperCase() ||
+                    (c === "normal" && cat.toUpperCase() === "NORMAL_WEIGHT") ||
+                    (c === "obese"  && cat.toUpperCase() === "OBESE")
+                );
+            }
+        });
+    }
+
+    // Filter by current period
+    const filteredBmi = adashFilterByPeriod(bmiHistory, adashCurrentPeriod, "calculatedAt");
+
+    const labels = filteredBmi.map(b => {
+        const d = new Date(b.calculatedAt || b.date || b.createdAt || "");
+        return isNaN(d) ? "—" : d.toLocaleDateString("en-GB", { month: "short", day: "numeric" });
+    });
+    const bmiVals   = filteredBmi.map(b => b.bmiValue ? +b.bmiValue.toFixed(1) : null);
+    const weightVals = filteredBmi.map(b => b.weight  || null);
+
+    const isDark = document.body.classList.contains("dark-mode");
+    const gridColor = isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)";
+    const tickColor = isDark ? "#555" : "#8c8278";
+
+    adashBmiChart = new Chart(ctx, {
+        type: "line",
+        data: {
+            labels,
+            datasets: [
+                {
+                    label: "BMI",
+                    data: bmiVals,
+                    borderColor: "#6366f1",
+                    backgroundColor: "rgba(99,102,241,0.08)",
+                    fill: true,
+                    tension: 0.4,
+                    pointRadius: 4,
+                    pointBackgroundColor: "#6366f1",
+                    borderWidth: 2.5,
+                    yAxisID: "yBmi"
+                },
+                {
+                    label: "Weight (kg)",
+                    data: weightVals,
+                    borderColor: "#06b6d4",
+                    backgroundColor: "rgba(6,182,212,0.06)",
+                    fill: false,
+                    tension: 0.4,
+                    pointRadius: 3,
+                    pointBackgroundColor: "#06b6d4",
+                    borderWidth: 2,
+                    borderDash: [5, 4],
+                    yAxisID: "yWeight"
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: "index", intersect: false },
+            plugins: {
+                legend: { display: true, position: "top", labels: { boxWidth: 12, font: { size: 11 }, color: isDark ? "#a8a8a8" : "#4a4540" } },
+                tooltip: {
+                    callbacks: {
+                        label: (ctx) => {
+                            if (ctx.dataset.label === "BMI") return ` BMI: ${ctx.parsed.y}`;
+                            return ` Weight: ${ctx.parsed.y} kg`;
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: { grid: { color: gridColor }, ticks: { color: tickColor, maxRotation: 45 } },
+                yBmi: {
+                    type: "linear", position: "left", beginAtZero: false,
+                    grid: { color: gridColor }, ticks: { color: tickColor },
+                    title: { display: true, text: "BMI", color: "#6366f1", font: { size: 10 } }
+                },
+                yWeight: {
+                    type: "linear", position: "right", beginAtZero: false,
+                    grid: { drawOnChartArea: false }, ticks: { color: tickColor },
+                    title: { display: true, text: "kg", color: "#06b6d4", font: { size: 10 } }
+                }
+            }
+        }
+    });
+}
+
+// ── 5. Vitals Charts ──────────────────────────────────────────────────────────
+let adashCurrentVitalsPeriod = "week";
+
+function adashRenderVitalsCharts(allVitals, period) {
+    const emptyEl = document.getElementById("adash-vitals-empty");
+
+    if (!allVitals || allVitals.length === 0) {
+        ["adash-hr-chart","adash-bp-chart","adash-sugar-chart","adash-weight-chart"].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) { const c = Chart.getChart(el); if (c) c.destroy(); }
+        });
+        if (emptyEl) emptyEl.style.display = "flex";
+        return;
+    }
+    if (emptyEl) emptyEl.style.display = "none";
+
+    // Filter by period
+    const days = period === "week" ? 7 : period === "month" ? 30 : 90;
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - days);
+    const filtered = allVitals.filter(v => new Date(v.recordedAt) >= cutoff);
+    const src = filtered.length > 0 ? filtered : allVitals.slice(-days);
+
+    const labels = src.map(v => {
+        const d = new Date(v.recordedAt);
+        return isNaN(d) ? "" : d.toLocaleDateString("en-GB", { month: "short", day: "numeric" });
+    });
+
+    const isDark = document.body.classList.contains("dark-mode");
+    const gridColor = isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.05)";
+    const tickColor = isDark ? "#555" : "#8c8278";
+
+    function makeVitalChart(chartVar, canvasId, label, data, color, unit) {
+        const ctx = document.getElementById(canvasId);
+        if (!ctx) return null;
+        if (chartVar) { chartVar.destroy(); }
+        const existing = Chart.getChart(ctx);
+        if (existing) existing.destroy();
+        return new Chart(ctx, {
+            type: "line",
+            data: {
+                labels,
+                datasets: [{
+                    label, data,
+                    borderColor: color,
+                    backgroundColor: color + "18",
+                    fill: true, tension: 0.4,
+                    pointRadius: data.length <= 10 ? 4 : 2,
+                    pointBackgroundColor: color,
+                    borderWidth: 2
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { callbacks: { label: (c) => ` ${c.parsed.y} ${unit}` } }
+                },
+                scales: {
+                    x: { grid: { color: gridColor }, ticks: { color: tickColor, font: { size: 9 }, maxRotation: 45, maxTicksLimit: 8 } },
+                    y: { beginAtZero: false, grid: { color: gridColor }, ticks: { color: tickColor, font: { size: 9 } } }
+                },
+                animation: { duration: 800 }
+            }
+        });
+    }
+
+    adashHrChart     = makeVitalChart(adashHrChart,     "adash-hr-chart",     "Heart Rate", src.map(v => v.heartRate  || null), "#ef4444", "bpm");
+    adashSugarChart  = makeVitalChart(adashSugarChart,  "adash-sugar-chart",  "Blood Sugar", src.map(v => v.bloodSugar || null), "#f59e0b", "mg/dL");
+    adashWeightChart = makeVitalChart(adashWeightChart, "adash-weight-chart", "Weight",      src.map(v => v.weight    || null), "#06b6d4", "kg");
+
+    // Blood pressure — two lines (systolic + diastolic)
+    const bpCtx = document.getElementById("adash-bp-chart");
+    if (bpCtx) {
+        if (adashBpChart) { adashBpChart.destroy(); adashBpChart = null; }
+        const existing = Chart.getChart(bpCtx);
+        if (existing) existing.destroy();
+        adashBpChart = new Chart(bpCtx, {
+            type: "line",
+            data: {
+                labels,
+                datasets: [
+                    {
+                        label: "Systolic",
+                        data: src.map(v => v.bpSystolic  || null),
+                        borderColor: "#dc2626",
+                        backgroundColor: "rgba(220,38,38,0.07)",
+                        fill: false, tension: 0.4,
+                        pointRadius: src.length <= 10 ? 3 : 1,
+                        pointBackgroundColor: "#dc2626",
+                        borderWidth: 2
+                    },
+                    {
+                        label: "Diastolic",
+                        data: src.map(v => v.bpDiastolic || null),
+                        borderColor: "#3b82f6",
+                        backgroundColor: "rgba(59,130,246,0.07)",
+                        fill: false, tension: 0.4,
+                        pointRadius: src.length <= 10 ? 3 : 1,
+                        pointBackgroundColor: "#3b82f6",
+                        borderWidth: 2
+                    }
+                ]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: true, position: "top", labels: { boxWidth: 10, font: { size: 9 }, color: isDark ? "#a8a8a8" : "#4a4540" } },
+                    tooltip: { callbacks: { label: (c) => ` ${c.dataset.label}: ${c.parsed.y} mmHg` } }
+                },
+                scales: {
+                    x: { grid: { color: gridColor }, ticks: { color: tickColor, font: { size: 9 }, maxRotation: 45, maxTicksLimit: 8 } },
+                    y: { beginAtZero: false, grid: { color: gridColor }, ticks: { color: tickColor, font: { size: 9 } } }
+                },
+                animation: { duration: 800 }
+            }
+        });
+    }
+}
+
+// ── 6. AI Health Insights ─────────────────────────────────────────────────────
+let adashAiInsightsCache = null;
+let adashAiInsightsUid   = null;
+
+async function adashRenderAiInsights(stats, bmiHistory, vitalsHist, streak, forceRefresh) {
+    const grid    = document.getElementById("adash-ai-grid");
+    if (!grid) return;
+
+    // Show loading state
+    grid.innerHTML = `
+        <div class="adash-ai-loading">
+            <div class="adash-ai-spinner"></div>
+            <p>Generating AI insights…</p>
+        </div>`;
+
+    // Use cache unless forced refresh or different user
+    if (!forceRefresh && adashAiInsightsCache && adashAiInsightsUid === currentUser.id) {
+        grid.innerHTML = adashAiInsightsCache;
+        return;
+    }
+
+    try {
+        const adherence = stats.adherencePercentage || 0;
+        const taken     = stats.takenDoses  || 0;
+        const missed    = stats.missedDoses || 0;
+        const latestBmi = bmiHistory.length > 0 ? bmiHistory[bmiHistory.length - 1] : null;
+        const latestV   = vitalsHist.length > 0  ? vitalsHist[vitalsHist.length - 1]  : null;
+        const curStreak = streak.currentStreak || 0;
+
+        const bmiStr     = latestBmi ? `BMI ${latestBmi.bmiValue?.toFixed(1)} (${latestBmi.bmiCategory || "Unknown"})` : "No BMI data";
+        const vitalsStr  = latestV
+            ? `HR ${latestV.heartRate || "?"} bpm, BP ${latestV.bpSystolic || "?"}/${latestV.bpDiastolic || "?"} mmHg, Sugar ${latestV.bloodSugar || "?"} mg/dL`
+            : "No vitals data";
+        const streakStr  = curStreak > 0 ? `${curStreak}-day streak` : "No active streak";
+
+        const prompt = `You are a friendly healthcare assistant. Provide 4 concise health insights (each max 2 sentences) as JSON array.
+Each insight has: title (string), message (string), type (one of: success, warning, info, danger), icon (emoji).
+
+Patient data:
+- Medication adherence: ${adherence}% (${taken} taken, ${missed} missed)
+- ${bmiStr}
+- ${vitalsStr}  
+- Adherence streak: ${streakStr}
+- Most missed medicine: ${stats.mostMissedMedicine || "None"}
+
+Return ONLY a valid JSON array. No markdown, no code blocks. Example:
+[{"title":"Great Adherence","message":"Your 85% rate exceeds the 80% target.","type":"success","icon":"✅"}]`;
+
+        const res = await fetch(`${API_BASE}/medicine/ai-info?name=${encodeURIComponent(prompt)}&userId=${currentUser.id}`);
+        if (!res.ok) throw new Error("AI request failed");
+
+        const text = await res.text();
+
+        // Parse JSON from response (strip any markdown wrapping)
+        const jsonMatch = text.match(/\[[\s\S]*\]/);
+        if (!jsonMatch) throw new Error("Invalid AI response format");
+
+        const insights = JSON.parse(jsonMatch[0]);
+        if (!Array.isArray(insights) || insights.length === 0) throw new Error("Empty insights");
+
+        const html = insights.map(i => adashInsightCard(i)).join("");
+        grid.innerHTML = html;
+        adashAiInsightsCache = html;
+        adashAiInsightsUid   = currentUser.id;
+
+    } catch (err) {
+        console.warn("[Analytics] AI insights error:", err);
+        // Fallback: generate rule-based insights
+        const fallbackInsights = adashGenerateFallbackInsights(stats, bmiHistory, vitalsHist, streak);
+        const html = fallbackInsights.map(i => adashInsightCard(i)).join("");
+        grid.innerHTML = html;
+        adashAiInsightsCache = html;
+        adashAiInsightsUid   = currentUser.id;
+    }
+}
+
+function adashInsightCard(insight) {
+    const typeClass = {
+        success: "adash-ai-card-success",
+        warning: "adash-ai-card-warning",
+        info:    "adash-ai-card-info",
+        danger:  "adash-ai-card-danger"
+    }[insight.type] || "adash-ai-card-info";
+
+    return `
+        <div class="adash-ai-card ${typeClass}">
+            <div class="adash-ai-card-icon">${insight.icon || "💡"}</div>
+            <div class="adash-ai-card-body">
+                <p class="adash-ai-card-title">${insight.title || "Insight"}</p>
+                <p class="adash-ai-card-text">${insight.message || ""}</p>
+            </div>
+        </div>`;
+}
+
+function adashGenerateFallbackInsights(stats, bmiHistory, vitalsHist, streak) {
+    const adherence = stats.adherencePercentage || 0;
+    const missed    = stats.missedDoses || 0;
+    const curStreak = streak.currentStreak || 0;
+    const latestBmi = bmiHistory.length > 0 ? bmiHistory[bmiHistory.length - 1] : null;
+    const latestV   = vitalsHist.length > 0 ? vitalsHist[vitalsHist.length - 1] : null;
+    const insights  = [];
+
+    // Adherence insight
+    if (adherence >= 90) {
+        insights.push({ title: "Excellent Adherence", message: `Your ${adherence}% adherence is outstanding. You're in the top tier of medication consistency.`, type: "success", icon: "🏆" });
+    } else if (adherence >= 70) {
+        insights.push({ title: "Good Adherence", message: `${adherence}% adherence is good. Try to reach 90%+ for optimal treatment outcomes.`, type: "info", icon: "💊" });
+    } else if (adherence > 0) {
+        insights.push({ title: "Low Adherence Alert", message: `Your adherence is ${adherence}%. Missing doses reduces treatment effectiveness. Set reminders to stay on track.`, type: "danger", icon: "⚠️" });
+    } else {
+        insights.push({ title: "Start Tracking", message: "Mark your doses as taken each day to build your adherence score and unlock health insights.", type: "info", icon: "📋" });
+    }
+
+    // Streak insight
+    if (curStreak >= 7) {
+        insights.push({ title: "Great Streak", message: `You're on a ${curStreak}-day consecutive streak! Consistency like this significantly improves health outcomes.`, type: "success", icon: "🔥" });
+    } else if (missed > 5) {
+        insights.push({ title: "Missed Dose Pattern", message: `You've missed ${missed} doses. Consider morning alarms or pill organizers to build a consistent routine.`, type: "warning", icon: "⏰" });
+    } else {
+        insights.push({ title: "Building Consistency", message: "Keep taking doses daily to build your streak. Even a 7-day streak shows meaningful habit formation.", type: "info", icon: "📈" });
+    }
+
+    // BMI insight
+    if (latestBmi) {
+        const bmiVal = latestBmi.bmiValue || 0;
+        if (bmiVal >= 18.5 && bmiVal < 25) {
+            insights.push({ title: "Healthy BMI", message: `Your BMI of ${bmiVal.toFixed(1)} is in the normal range. Maintain your current lifestyle with balanced diet and exercise.`, type: "success", icon: "❤️" });
+        } else if (bmiVal >= 25 && bmiVal < 30) {
+            insights.push({ title: "BMI Observation", message: `Your BMI is ${bmiVal.toFixed(1)} (Overweight). Moderate exercise and a balanced diet can help bring it to the normal range.`, type: "warning", icon: "📊" });
+        } else if (bmiVal >= 30) {
+            insights.push({ title: "BMI Alert", message: `Your BMI of ${bmiVal.toFixed(1)} is in the obese range. Consult a healthcare provider for a personalized weight management plan.`, type: "danger", icon: "🩺" });
+        } else {
+            insights.push({ title: "Low BMI Note", message: `Your BMI is ${bmiVal.toFixed(1)} (Underweight). Ensure adequate nutrition and consult a doctor if needed.`, type: "warning", icon: "💪" });
+        }
+    } else {
+        insights.push({ title: "Track Your BMI", message: "Use the BMI Calculator to start monitoring your body mass index over time for better health insights.", type: "info", icon: "⚖️" });
+    }
+
+    // Vitals insight
+    if (latestV) {
+        const hrOk = latestV.heartRate && latestV.heartRate >= 60 && latestV.heartRate <= 100;
+        const bpOk = latestV.bpSystolic && latestV.bpSystolic <= 130;
+        if (hrOk && bpOk) {
+            insights.push({ title: "Vitals Look Good", message: "Your recent heart rate and blood pressure readings are within normal ranges. Keep monitoring regularly.", type: "success", icon: "🫀" });
+        } else if (latestV.bpSystolic && latestV.bpSystolic > 140) {
+            insights.push({ title: "Blood Pressure Elevated", message: `Your blood pressure reading of ${latestV.bpSystolic}/${latestV.bpDiastolic} mmHg is elevated. Consider consulting your doctor.`, type: "danger", icon: "🩸" });
+        } else {
+            insights.push({ title: "Monitor Vitals", message: "Keep logging your vitals regularly. Consistent tracking helps detect trends early.", type: "info", icon: "📉" });
+        }
+    } else {
+        insights.push({ title: "Start Logging Vitals", message: "Track blood pressure, heart rate, and blood sugar to get personalized health trend insights.", type: "info", icon: "🩺" });
+    }
+
+    return insights.slice(0, 4);
+}
+
+// ── Period filter helper ───────────────────────────────────────────────────────
+function adashFilterByPeriod(items, period, dateField) {
+    if (period === "all" || !period) return items;
+    const days = parseInt(period, 10);
+    if (isNaN(days)) return items;
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - days);
+    cutoff.setHours(0, 0, 0, 0);
+    return items.filter(item => {
+        const d = new Date(item[dateField]);
+        return !isNaN(d) && d >= cutoff;
+    });
+}
+
+// ── Analytics filter tab wiring ───────────────────────────────────────────────
+function setupAnalyticsFilterTabs() {
+    document.querySelectorAll(".analytics-filter-btn").forEach(btn => {
+        btn.addEventListener("click", function () {
+            document.querySelectorAll(".analytics-filter-btn").forEach(b => b.classList.remove("active"));
+            this.classList.add("active");
+            const period = this.dataset.period;
+            adashCurrentPeriod = period === "all" ? "all" : parseInt(period, 10);
+
+            // Re-render period-sensitive charts
+            if (!currentUser) return;
+            Promise.all([
+                fetch(`${API_BASE}/bmi/history/${currentUser.id}`).then(r => r.ok ? r.json() : []),
+                fetch(`${API_BASE}/vitals/history/${currentUser.id}`).then(r => r.ok ? r.json() : [])
+            ]).then(([bmiHistory, vitalsHist]) => {
+                adashRenderBmiChart(bmiHistory);
+                adashRenderVitalsCharts(vitalsHist, adashCurrentVitalsPeriod || "week");
+            }).catch(err => console.warn("[Analytics] Filter reload error:", err));
+        });
+    });
+}
+
+// ── Vitals period tab wiring ───────────────────────────────────────────────────
+function setupVitalsPeriodTabs() {
+    document.querySelectorAll(".adash-vp-btn").forEach(btn => {
+        btn.addEventListener("click", function () {
+            document.querySelectorAll(".adash-vp-btn").forEach(b => b.classList.remove("active"));
+            this.classList.add("active");
+            adashCurrentVitalsPeriod = this.dataset.vperiod;
+
+            if (!currentUser) return;
+            fetch(`${API_BASE}/vitals/history/${currentUser.id}`)
+                .then(r => r.ok ? r.json() : [])
+                .then(vitalsHist => adashRenderVitalsCharts(vitalsHist, adashCurrentVitalsPeriod))
+                .catch(err => console.warn("[Analytics] Vitals period reload error:", err));
+        });
+    });
+}
+
+// ── AI Insights refresh button ────────────────────────────────────────────────
+function setupAdashAiRefresh() {
+    const btn = document.getElementById("adash-ai-refresh-btn");
+    if (!btn) return;
+    btn.addEventListener("click", async () => {
+        if (!currentUser) return;
+        btn.disabled = true;
+        try {
+            const [statsRes, bmiRes, vitalsRes, streakRes] = await Promise.all([
+                fetch(`${API_BASE}/logs/adherence/stats/${currentUser.id}`),
+                fetch(`${API_BASE}/bmi/history/${currentUser.id}`),
+                fetch(`${API_BASE}/vitals/history/${currentUser.id}`),
+                fetch(`${API_BASE}/streaks/${currentUser.id}`)
+            ]);
+            const stats      = statsRes.ok  ? await statsRes.json()  : {};
+            const bmiHistory = bmiRes.ok    ? await bmiRes.json()    : [];
+            const vitalsHist = vitalsRes.ok ? await vitalsRes.json() : [];
+            const streak     = streakRes.ok ? await streakRes.json() : {};
+            adashAiInsightsCache = null; // force refresh
+            await adashRenderAiInsights(stats, bmiHistory, vitalsHist, streak, true);
+        } catch (err) {
+            console.warn("[Analytics] AI refresh error:", err);
+        } finally {
+            btn.disabled = false;
+        }
+    });
+}
+
+// ── Wire up all analytics dashboard events on DOM ready ───────────────────────
+document.addEventListener("DOMContentLoaded", () => {
+    setupAnalyticsFilterTabs();
+    setupVitalsPeriodTabs();
+    setupAdashAiRefresh();
+});
+
+// ═══════════════════════════════════════════════════════════════════
+//  END ANALYTICS DASHBOARD
+// ═══════════════════════════════════════════════════════════════════
 
 function stopReminderAudio() {
     if (activeReminderAudio) {
@@ -3340,10 +4188,9 @@ document.addEventListener("DOMContentLoaded", () => {
 function openNotifPrefsModal() {
     const saved = loadFromLS(NOTIF_PREFS_KEY, {
         "medicine-reminders": true,
-        "missed-alerts": true,
-        "daily-summary": false,
-        "sound-alerts": true,
-        "email-notifs": false,
+        "missed-alerts":      true,
+        "daily-summary":      false,
+        "sound-alerts":       true,
     });
 
     document.querySelectorAll(".toggle-switch[data-pref]").forEach(btn => {
@@ -3352,6 +4199,9 @@ function openNotifPrefsModal() {
         btn.classList.toggle("active", on);
         btn.setAttribute("aria-checked", String(on));
     });
+
+    // Sync email-reminder toggle from server/local state
+    loadEmailReminderToggle();
 
     openModal("modal-notif");
 }
@@ -3364,15 +4214,23 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     });
 
-    document.getElementById("notif-save-btn")?.addEventListener("click", () => {
+    document.getElementById("notif-save-btn")?.addEventListener("click", async () => {
+        // Save local browser prefs
         const prefs = {};
         document.querySelectorAll(".toggle-switch[data-pref]").forEach(btn => {
             prefs[btn.dataset.pref] = btn.classList.contains("active");
         });
         saveToLS(NOTIF_PREFS_KEY, prefs);
+
+        // Save email reminder setting to server
+        await saveEmailReminderSetting();
+
         closeModal("modal-notif");
         showToast("Notification preferences saved!", "success");
     });
+
+    // Wire up test email button
+    document.getElementById("email-test-btn")?.addEventListener("click", handleTestEmail);
 });
 
 function openPrivacyModal() {
@@ -5019,4 +5877,169 @@ document.addEventListener("DOMContentLoaded", () => {
         ?.addEventListener("click", exportHistoryPDF);
     document.getElementById("export-vitals-pdf")
         ?.addEventListener("click", exportVitalsPDF);
+});
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// EMAIL REMINDER SYSTEM
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── Load settings from server into the notification modal ─────────────────────
+async function loadEmailReminderToggle() {
+    if (!currentUser) return;
+
+    const toggle      = document.getElementById("email-reminder-toggle");
+    const offsetSelect = document.getElementById("email-offset-select");
+    const recipientEl = document.getElementById("email-reminder-recipient");
+    const offsetSection = document.getElementById("email-offset-section");
+
+    if (recipientEl && currentUser.email) {
+        recipientEl.textContent = `Sends to: ${currentUser.email}`;
+    }
+
+    try {
+        const res = await fetch(`${API_BASE}/email-reminders/settings/${currentUser.id}`);
+        if (!res.ok) throw new Error("Could not fetch email settings");
+        const data = await res.json();
+
+        const enabled = !!data.emailRemindersEnabled;
+        const offset  = data.emailReminderOffsetMinutes ?? 0;
+
+        _applyEmailToggleState(toggle, offsetSelect, offsetSection, enabled, offset);
+
+        currentUser.emailRemindersEnabled      = enabled;
+        currentUser.emailReminderOffsetMinutes = offset;
+        saveToLS(LS_CURRENT_USER_KEY, currentUser);
+    } catch (err) {
+        console.warn("[EmailReminder] loadEmailReminderToggle error:", err.message);
+        // fall back to cached user state
+        const enabled = !!currentUser.emailRemindersEnabled;
+        const offset  = currentUser.emailReminderOffsetMinutes ?? 0;
+        _applyEmailToggleState(toggle, offsetSelect, offsetSection, enabled, offset);
+    }
+}
+
+/** Apply toggle + offset state to the DOM. */
+function _applyEmailToggleState(toggle, offsetSelect, offsetSection, enabled, offset) {
+    if (toggle) {
+        toggle.classList.toggle("active", enabled);
+        toggle.setAttribute("aria-checked", String(enabled));
+    }
+    if (offsetSelect) {
+        offsetSelect.value = String(offset);
+    }
+    if (offsetSection) {
+        offsetSection.classList.toggle("email-offset-hidden", !enabled);
+    }
+}
+
+// ── Save settings to server ───────────────────────────────────────────────────
+async function saveEmailReminderSetting() {
+    if (!currentUser) return;
+
+    const toggle       = document.getElementById("email-reminder-toggle");
+    const offsetSelect = document.getElementById("email-offset-select");
+
+    const enabled = toggle ? toggle.classList.contains("active") : false;
+    const offset  = offsetSelect ? parseInt(offsetSelect.value, 10) || 0 : 0;
+
+    try {
+        const res = await fetch(`${API_BASE}/email-reminders/settings/${currentUser.id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                emailRemindersEnabled: enabled,
+                emailReminderOffsetMinutes: offset
+            })
+        });
+        if (!res.ok) throw new Error("Server error saving email setting");
+        currentUser.emailRemindersEnabled      = enabled;
+        currentUser.emailReminderOffsetMinutes = offset;
+        saveToLS(LS_CURRENT_USER_KEY, currentUser);
+    } catch (err) {
+        console.error("[EmailReminder] saveEmailReminderSetting error:", err.message);
+        showToast("Could not save email reminder setting.", "error");
+    }
+}
+
+// ── Send test email ────────────────────────────────────────────────────────────
+async function handleTestEmail() {
+    if (!currentUser) return;
+
+    const btn = document.getElementById("email-test-btn");
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = `<span class="btn-spinner"></span>Sending…`;
+    }
+
+    try {
+        const res  = await fetch(`${API_BASE}/email-reminders/test/${currentUser.id}`, { method: "POST" });
+        const data = await res.json();
+        if (res.ok && data.success) {
+            showToast("Test email sent! Check your inbox 📧", "success", 4000);
+        } else {
+            showToast(data.message || "Failed to send test email.", "error");
+        }
+    } catch (err) {
+        console.error("[EmailReminder] handleTestEmail error:", err.message);
+        showToast("Could not send test email. Check your connection.", "error");
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"/></svg>Send Test Email`;
+        }
+    }
+}
+
+// ── Load email analytics ───────────────────────────────────────────────────────
+async function loadEmailAnalytics() {
+    if (!currentUser) return;
+
+    const totalEl   = document.getElementById("email-stat-total");
+    const successEl = document.getElementById("email-stat-success");
+    const failedEl  = document.getElementById("email-stat-failed");
+    const lastEl    = document.getElementById("email-stat-last");
+
+    [totalEl, successEl, failedEl, lastEl].forEach(el => { if (el) el.textContent = "…"; });
+
+    try {
+        const res  = await fetch(`${API_BASE}/email-reminders/analytics/${currentUser.id}`);
+        if (!res.ok) throw new Error("Failed to load email analytics");
+        const data = await res.json();
+
+        if (totalEl)   totalEl.textContent   = data.totalEmailsSent  ?? 0;
+        if (successEl) successEl.textContent = data.successfulEmails ?? 0;
+        if (failedEl)  failedEl.textContent  = data.failedEmails     ?? 0;
+
+        if (lastEl) {
+            if (data.lastReminderSent) {
+                lastEl.textContent = new Date(data.lastReminderSent).toLocaleString(undefined, {
+                    month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"
+                });
+            } else {
+                lastEl.textContent = "None yet";
+            }
+        }
+    } catch (err) {
+        console.warn("[EmailReminder] loadEmailAnalytics error:", err.message);
+        [totalEl, successEl, failedEl].forEach(el => { if (el) el.textContent = "—"; });
+        if (lastEl) lastEl.textContent = "—";
+    }
+}
+
+// ── Wire up toggle + offset select interactions ────────────────────────────────
+document.addEventListener("DOMContentLoaded", () => {
+    const emailToggle   = document.getElementById("email-reminder-toggle");
+    const offsetSection = document.getElementById("email-offset-section");
+
+    if (emailToggle) {
+        emailToggle.addEventListener("click", () => {
+            const isOn = emailToggle.classList.toggle("active");
+            emailToggle.setAttribute("aria-checked", String(isOn));
+            // Show/hide the offset selector based on toggle state
+            if (offsetSection) {
+                offsetSection.classList.toggle("email-offset-hidden", !isOn);
+            }
+        });
+    }
 });

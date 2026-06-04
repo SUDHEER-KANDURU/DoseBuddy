@@ -35,10 +35,8 @@ public class UserController {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
                     .body(Map.of("message", "User not found"));
         }
-
         User user = userOpt.get();
-        UserProfileResponse response = buildProfileResponse(user);
-        return ResponseEntity.ok(response);
+        return ResponseEntity.ok(buildProfileResponse(user));
     }
 
     @PutMapping("/profile/{userId}")
@@ -55,38 +53,30 @@ public class UserController {
         if (request.getName() != null && !request.getName().isBlank()) {
             user.setName(request.getName().trim());
         }
-
         if (request.getPhone() != null) {
             String phone = request.getPhone().trim();
             user.setPhone(phone.isEmpty() ? null : phone);
         }
-
         if (request.getDob() != null && !request.getDob().isBlank()) {
             try {
-                LocalDate dob = LocalDate.parse(request.getDob());
-                user.setDob(dob);
+                user.setDob(LocalDate.parse(request.getDob()));
             } catch (DateTimeParseException e) {
                 return ResponseEntity.badRequest()
                         .body(Map.of("message", "Invalid date format. Use YYYY-MM-DD"));
             }
         }
-
         if (request.getGender() != null) {
             String gender = request.getGender().trim();
             user.setGender(gender.isEmpty() ? null : gender);
         }
-
         if (request.getEmergencyContact() != null) {
             String ec = request.getEmergencyContact().trim();
             user.setEmergencyContact(ec.isEmpty() ? null : ec);
         }
 
         user = userRepository.save(user);
-
         activityService.logActivity(user, "PROFILE_UPDATED", "Profile information updated", "USER", user.getId());
-
-        UserProfileResponse response = buildProfileResponse(user);
-        return ResponseEntity.ok(response);
+        return ResponseEntity.ok(buildProfileResponse(user));
     }
 
     @PostMapping("/change-password/{userId}")
@@ -100,13 +90,10 @@ public class UserController {
 
         User user = userOpt.get();
 
-
         if (!user.getPasswordHash().equals(request.getCurrentPassword())) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("message", "Current password is incorrect"));
         }
-
-
         if (request.getNewPassword() == null || request.getNewPassword().length() < 8) {
             return ResponseEntity.badRequest()
                     .body(Map.of("message", "New password must be at least 8 characters"));
@@ -114,10 +101,7 @@ public class UserController {
 
         user.setPasswordHash(request.getNewPassword());
         userRepository.save(user);
-
-
         activityService.logActivity(user, "PASSWORD_CHANGED", "Password changed successfully", "USER", user.getId());
-
         return ResponseEntity.ok(Map.of("message", "Password changed successfully"));
     }
 
@@ -133,7 +117,9 @@ public class UserController {
                 dobStr,
                 user.getGender(),
                 user.getEmergencyContact(),
-                user.isAcceptedTerms()
+                user.isAcceptedTerms(),
+                user.isEmailRemindersEnabled(),
+                user.getEmailReminderOffsetMinutes()
         );
     }
 }
