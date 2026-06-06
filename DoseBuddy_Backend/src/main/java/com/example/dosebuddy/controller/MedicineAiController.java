@@ -25,18 +25,32 @@ public class MedicineAiController {
     }
 
     @GetMapping("/ai-info")
-    public ResponseEntity<String> getAiInfo(@RequestParam("name") String name, 
+    public ResponseEntity<String> getAiInfo(@RequestParam("name") String name,
                                             @RequestParam(value = "userId", required = false) Long userId) {
-        String info = aiService.getSafeMedicineInfo(name);
-        
+        // Wrap the entire handler in a try/catch so any AI service exception
+        // returns a 200 with an error-message string instead of a 500.
+        // The frontend already handles non-JSON / error responses gracefully.
+        String info;
+        try {
+            info = aiService.getSafeMedicineInfo(name);
+        } catch (Exception e) {
+            System.err.println("[MedicineAiController] getSafeMedicineInfo threw: " + e.getMessage());
+            info = "AI service temporarily unavailable. Please try again later.";
+        }
+
         if (userId != null) {
-            User user = userRepository.findById(userId).orElse(null);
-            if (user != null) {
-                String activityMessage = String.format("Searched medicine information: %s", name);
-                activityService.logActivity(user, "AI_MEDICINE_INFO", activityMessage);
+            try {
+                User user = userRepository.findById(userId).orElse(null);
+                if (user != null) {
+                    String activityMessage = String.format("Searched medicine information: %s", name);
+                    activityService.logActivity(user, "AI_MEDICINE_INFO", activityMessage);
+                }
+            } catch (Exception e) {
+                // Activity logging failure must never affect the response
+                System.err.println("[MedicineAiController] Activity log failed: " + e.getMessage());
             }
         }
-        
+
         return ResponseEntity.ok(info);
     }
 

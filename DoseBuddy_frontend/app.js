@@ -7,7 +7,17 @@ let currentUser = null;
 let logs = [];
 let medsCache = [];
 let medsCacheDate = null;
-let lastReminderKey = null;
+// ─── Notification deduplication ──────────────────────────────────────────────
+// firedReminderKeys  – Set of "userId-medId-YYYY-MM-DD-HH:MM" strings.
+//   • Added when triggerDoseNotification fires.
+//   • Cleared only on logout or on a genuine calendar-day change.
+//   • NEVER cleared just because renderDashboard() ran again.
+//
+// _lastScheduledDate – the calendar date string that was current the last time
+//   scheduleMedicineReminders() built its timeout list.  Starts as "" (empty
+//   string) so the first call does NOT trigger the new-day branch.
+const firedReminderKeys = new Set();
+let _lastScheduledDate = "";   // "" means "never scheduled yet"
 let weeklyChart = null;
 
 const ACTIVITY_TYPES = {
@@ -278,8 +288,14 @@ document.addEventListener("DOMContentLoaded", () => {
     setHamburgerVisible(!!currentUser);
 
     
-    if ("Notification" in window && Notification.permission === "default") {
-        Notification.requestPermission();
+    // ── Notification permission: never auto-request on load ─────────────────
+    // Modern browsers require a user gesture before showing the permission
+    // dialog. Auto-requesting on load is silently ignored or blocked.
+    // Instead, we show a non-intrusive banner and let the user opt in.
+    if ("Notification" in window) {
+        if (Notification.permission === "default") {
+            showNotifPermissionBanner();
+        }
     }
 
     if (currentUser) {
@@ -294,6 +310,11 @@ document.addEventListener("DOMContentLoaded", () => {
                 updateProfileDropdown();
             }
         });
+        // Show permission banner for returning users (2 s delay so the page
+        // renders first and the banner doesn't flash on load)
+        if ("Notification" in window && Notification.permission === "default") {
+            setTimeout(() => showNotifPermissionBanner(), 2000);
+        }
     } else {
         showAuthView();
         setThemeToggleVisible(false);
@@ -849,6 +870,10 @@ async function handleLoginApi(email, password, errorElem) {
         showAppViews();
         switchView("dashboard-view");
         showToast(`Welcome back, ${currentUser.name || ""}!`, "success", 3000);
+        // Prompt for notification permission after login (user gesture already happened)
+        if ("Notification" in window && Notification.permission === "default") {
+            setTimeout(() => showNotifPermissionBanner(), 2000);
+        }
     } catch (err) {
         console.error("Post-login processing error:", err);
         currentUser = user;
@@ -856,6 +881,9 @@ async function handleLoginApi(email, password, errorElem) {
         showAppViews();
         switchView("dashboard-view");
         showToast(`Welcome back, ${currentUser.name || ""}!`, "success", 3000);
+        if ("Notification" in window && Notification.permission === "default") {
+            setTimeout(() => showNotifPermissionBanner(), 2000);
+        }
     }
 }
 
@@ -899,6 +927,12 @@ function setupNav() {
         stopReminderAudio(); // Stop any active reminder audio
         currentUser = null;
         saveToLS(LS_CURRENT_USER_KEY, null);
+        // Clear all notification dedup state so the next login starts fresh
+        firedReminderKeys.clear();
+        _lastScheduledDate = "";
+        clearScheduledTimeouts();
+        medsCache = [];
+        medsCacheDate = null;
         showAuthView();
     }
 
@@ -1205,7 +1239,8 @@ async function renderDashboard() {
 
     tbody.innerHTML = "";
     noMedsMsg.style.display = "none";
-    scheduleTable.style.display = "table";
+    // On mobile (≤767px) the table is reflowed as cards using display:block
+    scheduleTable.style.display = window.innerWidth <= 767 ? "block" : "table";
 
     try {
         const logsRes = await fetch(`${API_BASE}/logs/history/${currentUser.id}`);
@@ -1364,7 +1399,8 @@ async function renderDashboard() {
         if (pendingElem)  pendingElem.textContent  = pending;
         if (adherenceElem) adherenceElem.textContent = percent + "%";
         updateMissedDoseNotifications(meds, todayStr);
-        scheduleNotificationsForToday();
+        // Single scheduling call — scheduleMedicineReminders is the sole
+        // source of truth for dose-time timeouts.
         scheduleMedicineReminders();
 
         await logMissedDoseActivities(meds, todayStr);
@@ -1683,7 +1719,9 @@ async function renderReports() {
     const rptCtx    = document.getElementById("weekly-chart-reports");
     const rptEmpty  = document.getElementById("reports-empty-page");
 
-    if (!dashCtx) return;
+    // Guard on rptCtx (the reports-view canvas), not dashCtx.
+    // dashCtx lives inside dashboard-view and may be hidden when reports is active.
+    if (!rptCtx && !dashCtx) return;
 
     // ── Update the period badge in the reports header ─────────────────────
     const periodBadgeEl = document.getElementById("reports-period-badge");
@@ -1696,8 +1734,13 @@ async function renderReports() {
         // new backend endpoint while keeping results perfectly consistent
         // across every widget on the page.
         const histRes = await fetch(`${API_BASE}/logs/history/${currentUser.id}`);
-        if (!histRes.ok) throw new Error("Failed to load history");
+        // Graceful degradation: if history fails, proceed with empty data so
+        // the chart and stat cards still render (showing zeros) instead of
+        // going completely blank.
         const allHistory = histRes.ok ? await histRes.json() : [];
+        if (!histRes.ok) {
+            console.warn("[renderReports] History endpoint returned", histRes.status, "— rendering with empty data");
+        }
 
         // Filtered subset for the selected period (date field = "date")
         const filtered = filterByPeriod(allHistory, period === "all" ? "all" : periodDays, "date");
@@ -1737,48 +1780,57 @@ async function renderReports() {
         const hasData      = takenValues.some(v => v > 0) || missedValues.some(v => v > 0);
 
         // ── Dashboard mini chart (Weekly Adherence card on dashboard) ──────
-        if (dashEmpty) {
-            dashEmpty.style.display = hasData ? "none" : "block";
-            if (!hasData) dashEmpty.textContent = "Chart will appear after you mark some doses as taken.";
+        // Only draw onto the dashboard canvas (#weekly-chart) when the
+        // dashboard view is actually visible.  Drawing on a hidden canvas
+        // causes Chart.js to produce a 0×0 chart AND can throw an error that
+        // aborts the rest of renderReports() (including the stat-card writes).
+        const dashboardIsVisible = document.getElementById("dashboard-view")?.classList.contains("active");
+        if (dashboardIsVisible) {
+            if (dashEmpty) {
+                dashEmpty.style.display = hasData ? "none" : "block";
+                if (!hasData) dashEmpty.textContent = "Chart will appear after you mark some doses as taken.";
+            }
+            if (weeklyChart) { weeklyChart.destroy(); weeklyChart = null; }
+            const _existingDash = Chart.getChart(dashCtx);
+            if (_existingDash) _existingDash.destroy();
+            weeklyChart = new Chart(dashCtx, {
+                type: "bar",
+                data: {
+                    labels,
+                    datasets: [
+                        {
+                            label: "Taken",
+                            data: takenValues,
+                            backgroundColor: "rgba(0,161,155,0.18)",
+                            borderColor: "#00A19B",
+                            borderWidth: 2,
+                            borderRadius: 6,
+                            borderSkipped: false,
+                        },
+                        {
+                            label: "Missed",
+                            data: missedValues,
+                            backgroundColor: "rgba(220,38,38,0.15)",
+                            borderColor: "#dc2626",
+                            borderWidth: 2,
+                            borderRadius: 6,
+                            borderSkipped: false,
+                        },
+                    ],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: true, position: "top", labels: { boxWidth: 12, font: { size: 11 }, color: "#4a4540" } },
+                    },
+                    scales: {
+                        x: { grid: { color: "rgba(0,0,0,0.05)" }, ticks: { color: "#8c8278", maxTicksLimit: 10 } },
+                        y: { beginAtZero: true, ticks: { precision: 0, color: "#8c8278" }, grid: { color: "rgba(0,0,0,0.05)" } },
+                    },
+                },
+            });
         }
-        if (weeklyChart) weeklyChart.destroy();
-        weeklyChart = new Chart(dashCtx, {
-            type: "bar",
-            data: {
-                labels,
-                datasets: [
-                    {
-                        label: "Taken",
-                        data: takenValues,
-                        backgroundColor: "rgba(0,161,155,0.18)",
-                        borderColor: "#00A19B",
-                        borderWidth: 2,
-                        borderRadius: 6,
-                        borderSkipped: false,
-                    },
-                    {
-                        label: "Missed",
-                        data: missedValues,
-                        backgroundColor: "rgba(220,38,38,0.15)",
-                        borderColor: "#dc2626",
-                        borderWidth: 2,
-                        borderRadius: 6,
-                        borderSkipped: false,
-                    },
-                ],
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: { display: true, position: "top", labels: { boxWidth: 12, font: { size: 11 }, color: "#4a4540" } },
-                },
-                scales: {
-                    x: { grid: { color: "rgba(0,0,0,0.05)" }, ticks: { color: "#8c8278", maxTicksLimit: 10 } },
-                    y: { beginAtZero: true, ticks: { precision: 0, color: "#8c8278" }, grid: { color: "rgba(0,0,0,0.05)" } },
-                },
-            },
-        });
 
         // ── Reports page chart ─────────────────────────────────────────────
         if (rptCtx) {
@@ -1957,52 +2009,71 @@ async function renderAnalyticsDashboard() {
     if (!currentUser) return;
     const uid = currentUser.id;
 
-    try {
-        // Fetch everything in parallel
-        const [
-            medsRes,
-            statsRes,
-            todayLogsRes,
-            bmiHistRes,
-            vitalsHistRes,
-            streakRes
-        ] = await Promise.all([
-            fetch(`${API_BASE}/medications/today/${uid}`),
-            fetch(`${API_BASE}/logs/adherence/stats/${uid}`),
-            fetch(`${API_BASE}/logs/today/${uid}`),
-            fetch(`${API_BASE}/bmi/history/${uid}`),
-            fetch(`${API_BASE}/vitals/history/${uid}`),
-            fetch(`${API_BASE}/streaks/${uid}`)
-        ]);
+    // Use Promise.allSettled so a single failed fetch never aborts the
+    // entire analytics dashboard.  Each result is { status, value } or
+    // { status, reason }.
+    const [
+        medsResult,
+        statsResult,
+        todayLogsResult,
+        bmiHistResult,
+        vitalsHistResult,
+        streakResult
+    ] = await Promise.allSettled([
+        fetch(`${API_BASE}/medications/today/${uid}`),
+        fetch(`${API_BASE}/logs/adherence/stats/${uid}`),
+        fetch(`${API_BASE}/logs/today/${uid}`),
+        fetch(`${API_BASE}/bmi/history/${uid}`),
+        fetch(`${API_BASE}/vitals/history/${uid}`),
+        fetch(`${API_BASE}/streaks/${uid}`)
+    ]);
 
-        const meds       = medsRes.ok       ? await medsRes.json()       : [];
-        const stats      = statsRes.ok      ? await statsRes.json()      : {};
-        const todayLogs  = todayLogsRes.ok  ? await todayLogsRes.json()  : [];
-        const bmiHistory = bmiHistRes.ok    ? await bmiHistRes.json()    : [];
-        const vitalsHist = vitalsHistRes.ok ? await vitalsHistRes.json() : [];
-        const streak     = streakRes.ok     ? await streakRes.json()     : {};
-
-        // ── 1. Stat cards ─────────────────────────────────────────────────
-        adashRenderStatCards(meds, stats, todayLogs, bmiHistory, vitalsHist);
-
-        // ── 2. Health Score ───────────────────────────────────────────────
-        adashRenderHealthScore(stats, bmiHistory, vitalsHist);
-
-        // ── 3. Medicine Consumption Donut ─────────────────────────────────
-        adashRenderDonut(stats);
-
-        // ── 4. BMI Trend chart ────────────────────────────────────────────
-        adashRenderBmiChart(bmiHistory);
-
-        // ── 5. Vitals charts (default: week) ─────────────────────────────
-        adashRenderVitalsCharts(vitalsHist, adashCurrentVitalsPeriod || "week");
-
-        // ── 6. AI Health Insights ─────────────────────────────────────────
-        adashRenderAiInsights(stats, bmiHistory, vitalsHist, streak);
-
-    } catch (err) {
-        console.warn("[Analytics] Dashboard load error:", err);
+    // Helper: safely extract JSON from a settled fetch result
+    async function settled(result, fallback) {
+        try {
+            if (result.status !== "fulfilled") return fallback;
+            const res = result.value;
+            if (!res.ok) return fallback;
+            return await res.json();
+        } catch (e) {
+            return fallback;
+        }
     }
+
+    const meds       = await settled(medsResult,      []);
+    const stats      = await settled(statsResult,     {});
+    const todayLogs  = await settled(todayLogsResult, []);
+    const bmiHistory = await settled(bmiHistResult,   []);
+    const vitalsHist = await settled(vitalsHistResult,[]);
+    const streak     = await settled(streakResult,    {});
+
+    // ── 1. Stat cards ──────────────────────────────────────────────────────
+    // Each render step is individually guarded so one DOM error can't
+    // cascade and blank out the rest of the page.
+    try { adashRenderStatCards(meds, stats, todayLogs, bmiHistory, vitalsHist); }
+    catch (e) { console.warn("[Analytics] stat cards error:", e); }
+
+    // ── 2. Health Score ────────────────────────────────────────────────────
+    try { adashRenderHealthScore(stats, bmiHistory, vitalsHist); }
+    catch (e) { console.warn("[Analytics] health score error:", e); }
+
+    // ── 3. Medicine Consumption Donut ──────────────────────────────────────
+    try { adashRenderDonut(stats); }
+    catch (e) { console.warn("[Analytics] donut error:", e); }
+
+    // ── 4. BMI Trend chart ─────────────────────────────────────────────────
+    try { adashRenderBmiChart(bmiHistory); }
+    catch (e) { console.warn("[Analytics] BMI chart error:", e); }
+
+    // ── 5. Vitals charts ───────────────────────────────────────────────────
+    try { adashRenderVitalsCharts(vitalsHist, adashCurrentVitalsPeriod || "week"); }
+    catch (e) { console.warn("[Analytics] vitals chart error:", e); }
+
+    // ── 6. AI Health Insights — runs independently, never blocks steps 1-5 ─
+    // adashRenderAiInsights is async and has its own full try/catch with
+    // rule-based fallback.  We intentionally do not await it here.
+    try { adashRenderAiInsights(stats, bmiHistory, vitalsHist, streak); }
+    catch (e) { console.warn("[Analytics] AI insights launch error:", e); }
 }
 
 // ── 1. Stat Cards ─────────────────────────────────────────────────────────────
@@ -2529,8 +2600,9 @@ Patient data:
 Return ONLY a valid JSON array. No markdown, no code blocks. Example:
 [{"title":"Great Adherence","message":"Your 85% rate exceeds the 80% target.","type":"success","icon":"✅"}]`;
 
-        const res = await fetch(`${API_BASE}/medicine/ai-info?name=${encodeURIComponent(prompt)}&userId=${currentUser.id}`);
-        if (!res.ok) throw new Error("AI request failed");
+        const res = await fetch(`${API_BASE}/medicine/ai-info?name=${encodeURIComponent(prompt)}&userId=${currentUser.id}`,
+            { signal: AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined });
+        if (!res.ok) throw new Error(`AI request failed (HTTP ${res.status})`);
 
         const text = await res.text();
 
@@ -2782,28 +2854,61 @@ function playReminderSound() {
 
 function triggerDoseNotification(med, dateStr, displayTime) {
     if (!currentUser) return;
-    if (!("Notification" in window)) return;
-    if (Notification.permission !== "granted") return;
+
+    // Check if medicine-reminders pref is enabled (defaults true)
+    const prefs = loadFromLS(NOTIF_PREFS_KEY, { "medicine-reminders": true });
+    if (prefs["medicine-reminders"] === false) return;
 
     const key = `${currentUser.id}-${med.id}-${dateStr}-${displayTime}`;
 
-    if (getDoseStatus(currentUser.id, med.id, dateStr, displayTime) === "TAKEN") return;
-    if (lastReminderKey === key) return;
+    // Skip already-taken doses
+    if (getDoseStatus(currentUser.id, med.id, dateStr, displayTime) === "TAKEN") {
+        console.log(`[DoseBuddy] REMINDER SKIPPED (already taken): ${key}`);
+        return;
+    }
 
-    lastReminderKey = key;
+    // ── Strict deduplication ─────────────────────────────────────────────
+    // firedReminderKeys persists for the entire calendar day.
+    // It is ONLY cleared on logout or on a genuine date change.
+    // It is never cleared by renderDashboard(), rescheduling, or re-rendering.
+    if (firedReminderKeys.has(key)) {
+        console.log(`[DoseBuddy] REMINDER BLOCKED (already fired today): ${key}`);
+        return;
+    }
+    firedReminderKeys.add(key);
+    console.log(`[DoseBuddy] REMINDER FIRED: userId=${currentUser.id} medId=${med.id} date=${dateStr} time=${displayTime} dedupKey=${key}`);
 
-    const notification = new Notification("DoseBuddy Reminder", {
-        body: `${med.name} (${med.dosage}) at ${displayTime}`,
-        icon: "https://cdn-icons-png.flaticon.com/512/2966/2966327.png",
-    });
+    // ── Always add to in-app notification panel ──────────────────────────
+    addNotification(
+        "reminder",
+        `💊 Time to take ${med.name}`,
+        `${med.dosage} — scheduled at ${displayTime}`
+    );
 
-    notification.onclick = () => {
-        window.focus();
-        switchView("dashboard-view");
-        stopReminderAudio();
-    };
+    // ── Always show in-app toast as a visible fallback ───────────────────
+    showToast(`💊 Reminder: ${med.name} (${med.dosage}) at ${displayTime}`, "info", 8000);
 
-    // Delegate all audio logic to the hardened helper
+    // ── Browser Notification (if permission granted) ─────────────────────
+    if ("Notification" in window && Notification.permission === "granted") {
+        try {
+            const notification = new Notification("DoseBuddy Reminder 💊", {
+                body: `Time to take ${med.name} (${med.dosage})`,
+                icon: "https://cdn-icons-png.flaticon.com/512/2966/2966327.png",
+                tag: key,          // browser deduplication by OS
+                requireInteraction: false,
+            });
+
+            notification.onclick = () => {
+                window.focus();
+                switchView("dashboard-view");
+                stopReminderAudio();
+            };
+        } catch (e) {
+            console.warn("[DoseBuddy] Notification construction failed:", e.message);
+        }
+    }
+
+    // ── Sound ─────────────────────────────────────────────────────────────
     playReminderSound();
 }
 
@@ -2812,56 +2917,18 @@ function clearScheduledTimeouts() {
     scheduledTimeouts = [];
 }
 
-function scheduleNotificationsForToday() {
-    if (!currentUser) return;
-    if (!("Notification" in window)) return;
-    if (Notification.permission !== "granted") return;
-    if (!medsCache || medsCache.length === 0) return;
+// scheduleNotificationsForToday() has been removed.
+// scheduleMedicineReminders() is the single scheduling system.
+// See scheduleMedicineReminders() below.
 
-    clearScheduledTimeouts();
-
-    const now = new Date();
-    // Use the LOCAL date string so the comparison works in the user's timezone
-    const todayStr = [
-        now.getFullYear(),
-        String(now.getMonth() + 1).padStart(2, "0"),
-        String(now.getDate()).padStart(2, "0")
-    ].join("-");
-
-    if (medsCacheDate !== todayStr) return;
-
-    const nowMs = now.getTime();
-
-    medsCache.forEach((med) => {
-        // Skip medicines that are not active today (expiry guard)
-        if (!isMedicationActiveToday(med, todayStr)) return;
-
-        if (!Array.isArray(med.times)) return;
-
-        med.times.forEach((timeObj) => {
-            const rawTime = timeObj.timeOfDay || "";
-            const displayTime = rawTime.substring(0, 5);
-
-            const [h, m] = displayTime.split(":").map(Number);
-            const doseDate = new Date(now);
-            doseDate.setHours(h, m, 0, 0);
-
-            const delayMs = doseDate.getTime() - nowMs;
-            if (delayMs <= 0 || delayMs > 12 * 60 * 60 * 1000) return;
-
-            const alreadyTaken =
-                getDoseStatus(currentUser.id, med.id, todayStr, displayTime) === "TAKEN";
-            if (alreadyTaken) return;
-
-            const timeoutId = setTimeout(() => {
-                triggerDoseNotification(med, todayStr, displayTime);
-            }, delayMs);
-
-            scheduledTimeouts.push(timeoutId);
-        });
-    });
-}
-
+// ─── Interval-based safety net (every 30 s) ───────────────────────────────
+// Purpose: catch any doses that fell through the setTimeout cracks (e.g.,
+// the page was refreshed right before a dose time, or the system clock
+// drifted).  This does NOT replace the setTimeout scheduling — it's a
+// last-resort check only.
+// IMPORTANT: this function must NOT call renderDashboard() or
+// scheduleMedicineReminders() — that would clearScheduledTimeouts() and
+// destroy all pending timeouts for the day.
 function checkReminders() {
 
     if (!currentUser) return;
@@ -2878,7 +2945,6 @@ function checkReminders() {
     if (medsCacheDate !== todayStr) return;
 
     const nowMinutes = now.getHours() * 60 + now.getMinutes();
-    let changed = false;
     const toMarkMissed = [];
 
     for (const med of medsCache) {
@@ -2893,16 +2959,26 @@ function checkReminders() {
             const rawTime = timeObj.timeOfDay || "";
             const displayTime = rawTime.substring(0, 5);
 
-            const [h, m] = displayTime.split(":").map(Number);
-            const doseMinutes = h * 60 + m;
+            const parts = displayTime.split(":");
+            const h = parseInt(parts[0], 10);
+            const m = parseInt(parts[1], 10);
+            if (isNaN(h) || isNaN(m)) continue;
 
+            const doseMinutes = h * 60 + m;
             const diff = nowMinutes - doseMinutes;
 
-            if (diff >= 0 && diff <= 1) {
+            // Safety-net: fire a notification if the setTimeout was missed
+            // (page refresh, clock drift, etc.) and we're within the exact
+            // firing minute.  firedReminderKeys prevents double-firing when
+            // the setTimeout already ran at the same minute.
+            // Use diff === 0 only — diff === 1 means we're already 1 full
+            // minute past and the setTimeout would have fired correctly.
+            if (diff === 0) {
                 triggerDoseNotification(med, todayStr, displayTime);
-                changed = true;
             }
 
+            // Mark missed if more than 5 minutes past and still PENDING.
+            // Do NOT call renderDashboard here — that would clear all timeouts.
             if (diff > 5) {
                 const status = getDoseStatus(currentUser.id, med.id, todayStr, displayTime);
                 if (status !== "TAKEN" && status !== "MISSED") {
@@ -2912,29 +2988,53 @@ function checkReminders() {
                         date:         todayStr,
                         time:         displayTime
                     });
-                    changed = true;
                 }
             }
         }
     }
 
-    if (toMarkMissed.length > 0){
+    if (toMarkMissed.length > 0) {
         fetch(`${API_BASE}/logs/mark-missed-batch`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(toMarkMissed),
         })
         .then(() => {
-            renderDashboard();
+            // Update in-memory logs so getDoseStatus returns MISSED immediately,
+            // then refresh just the UI display — do NOT call renderDashboard()
+            // as that would wipe all scheduled timeouts.
+            toMarkMissed.forEach(entry => {
+                const existing = logs.find(
+                    l => (l.medId === entry.medicationId || l.medicationId === entry.medicationId)
+                      && l.date === entry.date && l.time === entry.time
+                );
+                if (!existing) {
+                    logs.push({
+                        medicationId: entry.medicationId,
+                        date: entry.date,
+                        time: entry.time,
+                        status: "MISSED"
+                    });
+                } else {
+                    existing.status = "MISSED";
+                }
+            });
+            updateMissedDoseNotifications(medsCache, todayStr);
             renderReports();
             refreshActivityFeed();
         })
-        .catch(err => console.error("checkReminders missed-batch error:", err));
-    } else if (changed){
-        renderDashboard();
+        .catch(err => console.error("[DoseBuddy] checkReminders missed-batch error:", err));
     }
 }
 
+// ─── Single source of truth for dose-time scheduling ─────────────────────────
+// Rules:
+//   1. Called once per renderDashboard() — after medsCache is populated.
+//   2. Clears all previous timeouts before registering new ones.
+//   3. Only schedules FUTURE doses (delay > 0).
+//   4. No upper cap — handles doses up to 23:59 correctly.
+//   5. Captures `today` at schedule time; timeout callback uses the same value.
+//   6. After firing the reminder, waits 5 min and auto-marks missed if still PENDING.
 function scheduleMedicineReminders() {
 
     clearScheduledTimeouts();
@@ -2942,12 +3042,29 @@ function scheduleMedicineReminders() {
     if (!medsCache || medsCache.length === 0) return;
 
     const now = new Date();
-    // Local date string to match the isMedicationActiveToday check
+    // Capture the LOCAL date string at scheduling time so the callback closure
+    // references the same day the schedule was built for.
     const today = [
         now.getFullYear(),
         String(now.getMonth() + 1).padStart(2, "0"),
         String(now.getDate()).padStart(2, "0")
     ].join("-");
+
+    // Day-rollover detection:
+    //   Only clear firedReminderKeys when we are genuinely scheduling for a NEW
+    //   calendar day.  _lastScheduledDate starts as "" so the very first call
+    //   (today !== "") correctly skips the clear and just sets the date.
+    //   Subsequent calls on the same day (e.g. from renderDashboard after marking
+    //   a dose taken) leave firedReminderKeys intact — that is the whole point.
+    if (_lastScheduledDate !== "" && _lastScheduledDate !== today) {
+        firedReminderKeys.clear();
+        console.log("[DoseBuddy] New calendar day — cleared fired reminder keys.");
+    }
+    _lastScheduledDate = today;
+    // Guard: only schedule if the cache is for today
+    if (medsCacheDate !== today) return;
+
+    const nowMs = now.getTime();
 
     for (const med of medsCache) {
 
@@ -2959,27 +3076,51 @@ function scheduleMedicineReminders() {
         for (const t of med.times) {
 
             const timeStr = (t.timeOfDay || "").substring(0, 5);
-            if (!timeStr) continue;
+            if (!timeStr || timeStr.length < 5) continue;
 
-            const [h, m] = timeStr.split(":").map(Number);
+            const parts = timeStr.split(":");
+            const h = parseInt(parts[0], 10);
+            const m = parseInt(parts[1], 10);
+            if (isNaN(h) || isNaN(m)) continue;
 
-            const reminderTime = new Date();
+            const reminderTime = new Date(now);
             reminderTime.setHours(h, m, 0, 0);
 
-            const delay = reminderTime.getTime() - now.getTime();
+            const delay = reminderTime.getTime() - nowMs;
 
+            // Skip past doses — checkReminders() handles missed detection
             if (delay <= 0) continue;
 
-            const timeoutId = setTimeout(() => {
-                triggerDoseNotification(med, today, timeStr);
+            // Capture loop variables explicitly for closure safety
+            const capturedMed     = med;
+            const capturedDate    = today;
+            const capturedTime    = timeStr;
 
+            const timeoutId = setTimeout(() => {
+                console.log(`[DoseBuddy] REMINDER FIRED: user=${currentUser && currentUser.id} med=${capturedMed.id} date=${capturedDate} time=${capturedTime} key=${currentUser ? currentUser.id + "-" + capturedMed.id + "-" + capturedDate + "-" + capturedTime : "?"}`);
+                triggerDoseNotification(capturedMed, capturedDate, capturedTime);
+
+                // 5-minute grace period, then auto-mark missed.
+                // Do NOT call renderDashboard() here — that would invoke
+                // scheduleMedicineReminders() → clearScheduledTimeouts() and
+                // destroy all other pending reminder timeouts for the day.
                 const missTimeout = setTimeout(() => {
                     if (!currentUser) return;
-                    const status = getDoseStatus(currentUser.id, med.id, today, timeStr);
+                    const status = getDoseStatus(currentUser.id, capturedMed.id, capturedDate, capturedTime);
                     if (status !== "TAKEN" && status !== "MISSED") {
-                        markDoseMissed(currentUser.id, med.id, today, timeStr)
+                        markDoseMissed(currentUser.id, capturedMed.id, capturedDate, capturedTime)
                             .then(() => {
-                                renderDashboard();
+                                // Update in-memory logs directly (same pattern as checkReminders)
+                                const existing = logs.find(
+                                    l => (l.medId === capturedMed.id || l.medicationId === capturedMed.id)
+                                      && l.date === capturedDate && l.time === capturedTime
+                                );
+                                if (!existing) {
+                                    logs.push({ medicationId: capturedMed.id, date: capturedDate, time: capturedTime, status: "MISSED" });
+                                } else {
+                                    existing.status = "MISSED";
+                                }
+                                updateMissedDoseNotifications(medsCache, capturedDate);
                                 renderReports();
                                 refreshActivityFeed();
                             });
@@ -2993,6 +3134,8 @@ function scheduleMedicineReminders() {
             scheduledTimeouts.push(timeoutId);
         }
     }
+
+    console.log(`[DoseBuddy] Scheduled ${scheduledTimeouts.length} reminder timeout(s) for ${today}.`);
 }
 
 // ─── AI request lock ────────────────────────────────────────────────────────
@@ -4083,6 +4226,106 @@ function setupPrescriptionUpload() {
 const PROFILE_PREFS_KEY = "dosebuddy_profile_prefs";
 const NOTIF_PREFS_KEY   = "dosebuddy_notif_prefs";
 
+// ─── Notification Permission Utilities ───────────────────────────────────────
+// Shows a non-intrusive banner asking the user to enable notifications.
+// This is called ONLY when permission is "default" (not yet decided).
+// We never auto-request — the browser requires a real user click.
+function showNotifPermissionBanner() {
+    // Don't show if user is not logged in yet
+    if (!currentUser) return;
+    // Don't show if already handled
+    if (!("Notification" in window)) return;
+    if (Notification.permission !== "default") return;
+    // Don't show if we already have a banner
+    if (document.getElementById("notif-permission-banner")) return;
+
+    const banner = document.createElement("div");
+    banner.id = "notif-permission-banner";
+    banner.setAttribute("role", "alert");
+    banner.innerHTML = `
+        <div class="notif-banner-content">
+            <span class="notif-banner-icon">🔔</span>
+            <p class="notif-banner-text">Enable browser notifications to get dose reminders on time.</p>
+            <div class="notif-banner-actions">
+                <button class="notif-banner-allow" id="notif-banner-allow-btn">Enable Notifications</button>
+                <button class="notif-banner-dismiss" id="notif-banner-dismiss-btn" aria-label="Dismiss">✕</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(banner);
+
+    // Animate in
+    requestAnimationFrame(() => banner.classList.add("notif-banner-visible"));
+
+    document.getElementById("notif-banner-allow-btn").addEventListener("click", () => {
+        requestNotificationPermission().then(permission => {
+            banner.classList.remove("notif-banner-visible");
+            setTimeout(() => banner.remove(), 300);
+            if (permission === "granted") {
+                showToast("🔔 Notifications enabled! You'll get dose reminders on time.", "success", 5000);
+                // Re-schedule now that we have permission
+                scheduleMedicineReminders();
+            } else if (permission === "denied") {
+                showToast("Notifications blocked. To enable, click the 🔒 icon in your browser's address bar.", "warning", 8000);
+            }
+        });
+    });
+
+    document.getElementById("notif-banner-dismiss-btn").addEventListener("click", () => {
+        banner.classList.remove("notif-banner-visible");
+        setTimeout(() => banner.remove(), 300);
+    });
+}
+
+// Requests notification permission — must be called from a user gesture.
+function requestNotificationPermission() {
+    if (!("Notification" in window)) {
+        return Promise.resolve("denied");
+    }
+    if (Notification.permission === "granted") {
+        return Promise.resolve("granted");
+    }
+    // Notification.requestPermission returns a Promise in modern browsers
+    // and uses a callback in old Safari. We normalise both here.
+    return new Promise(resolve => {
+        const result = Notification.requestPermission(permission => resolve(permission));
+        if (result && typeof result.then === "function") {
+            result.then(resolve).catch(() => resolve("denied"));
+        }
+    });
+}
+
+// Updates the permission status row inside the Notification Preferences modal.
+function updateNotifPermissionStatus() {
+    const statusRow   = document.getElementById("notif-perm-status-row");
+    const statusText  = document.getElementById("notif-perm-status-text");
+    const enableBtn   = document.getElementById("notif-perm-enable-btn");
+    if (!statusRow || !statusText || !enableBtn) return;
+
+    if (!("Notification" in window)) {
+        statusText.textContent  = "Not supported in this browser.";
+        statusText.className    = "notif-perm-text notif-perm-unsupported";
+        enableBtn.style.display = "none";
+        return;
+    }
+
+    const perm = Notification.permission;
+    if (perm === "granted") {
+        statusText.textContent  = "✅ Notifications are enabled.";
+        statusText.className    = "notif-perm-text notif-perm-granted";
+        enableBtn.style.display = "none";
+    } else if (perm === "denied") {
+        statusText.textContent  = "🚫 Notifications are blocked. Open your browser settings (🔒 in address bar) to allow them for this site.";
+        statusText.className    = "notif-perm-text notif-perm-denied";
+        enableBtn.style.display = "none";
+    } else {
+        statusText.textContent  = "⚠️ Notifications are not enabled yet.";
+        statusText.className    = "notif-perm-text notif-perm-default";
+        enableBtn.style.display = "inline-flex";
+    }
+}
+
 function openModal(id) {
     const modal    = document.getElementById(id);
     const backdrop = document.getElementById("modal-backdrop");
@@ -4186,6 +4429,12 @@ function setupProfileDropdown() {
 function doLogoutAction() {
     currentUser = null;
     saveToLS(LS_CURRENT_USER_KEY, null);
+    // Clear all notification dedup state so the next login starts fresh
+    firedReminderKeys.clear();
+    _lastScheduledDate = "";
+    clearScheduledTimeouts();
+    medsCache = [];
+    medsCacheDate = null;
     showAuthView();
 }
 
@@ -4357,6 +4606,9 @@ function openNotifPrefsModal() {
         btn.setAttribute("aria-checked", String(on));
     });
 
+    // Refresh the live permission status row each time the modal opens
+    updateNotifPermissionStatus();
+
     openModal("modal-notif");
 }
 
@@ -4376,6 +4628,23 @@ document.addEventListener("DOMContentLoaded", () => {
         saveToLS(NOTIF_PREFS_KEY, prefs);
         closeModal("modal-notif");
         showToast("Notification preferences saved!", "success");
+    });
+
+    // "Enable Notifications" button inside the preferences modal
+    document.getElementById("notif-perm-enable-btn")?.addEventListener("click", () => {
+        requestNotificationPermission().then(permission => {
+            updateNotifPermissionStatus();
+            if (permission === "granted") {
+                showToast("🔔 Notifications enabled! You'll get dose reminders on time.", "success", 5000);
+                // Remove the banner if it was showing
+                const banner = document.getElementById("notif-permission-banner");
+                if (banner) { banner.classList.remove("notif-banner-visible"); setTimeout(() => banner.remove(), 300); }
+                // Re-schedule now that we have permission
+                scheduleMedicineReminders();
+            } else if (permission === "denied") {
+                showToast("Notifications blocked. Click the 🔒 icon in your browser's address bar to allow them.", "warning", 8000);
+            }
+        });
     });
 });
 

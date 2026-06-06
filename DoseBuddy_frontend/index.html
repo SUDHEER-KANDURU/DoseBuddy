@@ -1528,7 +1528,6 @@
         </section>
 
         <section id="bmi-view" class="view app-view">
-
             <div class="page-header">
                 <div class="page-header-left">
                     <div class="page-icon-wrap">
@@ -1537,257 +1536,95 @@
                         </svg>
                     </div>
                     <div>
-                    <div class="rsc-icon blue-bg">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/>
-                        </svg>
-                    </div>
-                    <div class="rsc-body">
-                        <p class="rsc-label">Total Doses</p>
-                        <p class="rsc-value" id="rpt-total-doses">—</p>
-                        <p class="rsc-sub">All time</p>
-                    </div>
-                </div>
-
-                <div class="reports-stat-card rsc-green">
-                    <div class="rsc-icon green-bg">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                        </svg>
-                    </div>
-                    <div class="rsc-body">
-                        <p class="rsc-label">Doses Taken</p>
-                        <p class="rsc-value" id="rpt-taken-doses">—</p>
-                        <p class="rsc-sub">Confirmed</p>
-                    </div>
-                </div>
-
-                <div class="reports-stat-card rsc-red">
-                    <div class="rsc-icon red-bg">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/>
-                        </svg>
-                    </div>
-                    <div class="rsc-body">
-                        <p class="rsc-label">Doses Missed</p>
-                        <p class="rsc-value" id="rpt-missed-doses">—</p>
-                        <p class="rsc-sub">Needs attention</p>
-                    </div>
-                </div>
-
-                <div class="reports-stat-card rsc-purple">
-                    <div class="rsc-icon purple-bg">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M16 8v8m-4-5v5m-4-2v2m-2 4h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>
-                        </svg>
-                    </div>
-                    <div class="rsc-body">
-                        <p class="rsc-label">Adherence Rate</p>
-                        <p class="rsc-value" id="rpt-adherence">—</p>
-                        <p class="rsc-sub">Overall</p>
+                        <h2 class="page-title">BMI Calculator</h2>
+                        <p class="page-subtitle">Calculate and track your Body Mass Index over time</p>
                     </div>
                 </div>
             </div>
 
-            <div class="card mds-card" id="missed-doses-card" style="display:none;">
-
-                <div class="mds-header">
-                    <div class="mds-header-left">
-                        <div class="mds-header-icon">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/>
-                            </svg>
-                        </div>
+            <div class="bmi-layout">
+                <!-- Calculator Card -->
+                <div class="card bmi-calc-card">
+                    <div class="card-header">
                         <div>
-                            <h3 class="mds-title">Missed Doses Summary</h3>
-                            <p class="mds-subtitle">Track missed medications to improve adherence</p>
+                            <h3 class="card-title">Calculate BMI</h3>
+                            <p class="card-subtitle">Enter your measurements below</p>
                         </div>
                     </div>
-                    <span class="mds-badge">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="11" height="11">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9.303 3.376c.866 1.5-.217 3.374-1.948 3.374H2.645c-1.73 0-2.813-1.874-1.948-3.374L10.052 3.378c.866-1.5 3.032-1.5 3.898 0l7.353 12.748z"/>
-                        </svg>
-                        Needs Attention
-                    </span>
-                </div>
+                    <div class="bmi-form">
+                        <div class="form-group">
+                            <label for="bmi-height-view">Height (cm)</label>
+                            <input type="number" id="bmi-height-view" placeholder="e.g. 170" min="50" max="300" autocomplete="off">
+                        </div>
+                        <div class="form-group">
+                            <label for="bmi-weight-view">Weight (kg)</label>
+                            <input type="number" id="bmi-weight-view" placeholder="e.g. 70" min="20" max="500" autocomplete="off">
+                        </div>
+                        <button class="primary-btn full-width" id="calculate-bmi-view-btn" type="button">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                            Calculate BMI
+                        </button>
+                    </div>
 
-                <div class="mds-stats-row">
-                    <div class="mds-stat-card">
-                        <div class="mds-stat-icon mds-icon-today">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/>
-                            </svg>
+                    <!-- Result -->
+                    <div id="bmi-result-section-view" class="bmi-result-section" style="display:none;">
+                        <div class="bmi-result-display">
+                            <span class="bmi-result-label">Your BMI</span>
+                            <span class="bmi-result-value" id="bmi-value-display-view">—</span>
                         </div>
-                        <p class="mds-stat-value" id="missed-today">0</p>
-                        <p class="mds-stat-label">Today</p>
-                    </div>
-                    <div class="mds-stat-card">
-                        <div class="mds-stat-icon mds-icon-week">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5"/>
-                            </svg>
+                        <div class="bmi-status-badge" id="bmi-status-badge-view">
+                            <span id="bmi-status-icon-view"></span>
+                            <span id="bmi-status-text-view"></span>
                         </div>
-                        <p class="mds-stat-value" id="missed-week">0</p>
-                        <p class="mds-stat-label">This Week</p>
-                    </div>
-                    <div class="mds-stat-card">
-                        <div class="mds-stat-icon mds-icon-month">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5M12 12.75h.008v.008H12v-.008z"/>
-                            </svg>
-                        </div>
-                        <p class="mds-stat-value" id="missed-month">0</p>
-                        <p class="mds-stat-label">This Month</p>
-                    </div>
-                    <div class="mds-stat-card mds-stat-highlight">
-                        <div class="mds-stat-icon mds-icon-pill">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/>
-                            </svg>
-                        </div>
-                        <p class="mds-stat-value mds-most-missed-name" id="most-missed-med">—</p>
-                        <p class="mds-stat-label">Most Missed <span class="mds-most-missed-count" id="most-missed-count"></span></p>
                     </div>
                 </div>
 
-                <div class="mds-bottom-row">
-
-                    <div class="mds-chart-panel">
-                        <p class="mds-panel-label">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="13" height="13">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/>
-                            </svg>
-                            Weekly Missed Doses
-                        </p>
-                        <div class="mds-chart-wrap">
-                            <canvas id="missed-mini-chart"></canvas>
-                        </div>
-                    </div>
-
-                    <div class="mds-recommendation-panel" id="missed-alert-banner" style="display:none;">
-                        <div class="mds-rec-icon-wrap">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/>
-                            </svg>
-                        </div>
-                        <div class="mds-rec-body">
-                            <p class="mds-rec-title">Adherence Alert</p>
-                            <p class="mds-rec-text" id="missed-alert-text">Your adherence is below 70%. Consider setting reminders or consulting your healthcare provider.</p>
-                        </div>
-                    </div>
-
-                    <div class="mds-success-panel" id="mds-success-panel" style="display:none;">
-                        <div class="mds-success-icon">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                            </svg>
-                        </div>
-                        <div class="mds-rec-body">
-                            <p class="mds-rec-title mds-success-title">Good Adherence</p>
-                            <p class="mds-rec-text">Your adherence is above 70%. Keep up the great work and stay consistent.</p>
-                        </div>
-                    </div>
-
-                </div>
-            </div>
-
-            <div class="card reports-chart-card">
-                <div class="card-header">
-                    <div class="reports-chart-title-group">
-                        <div class="reports-chart-icon">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/>
-                            </svg>
-                        </div>
+                <!-- Health Insights Card -->
+                <div class="card bmi-insights-card">
+                    <div class="card-header">
                         <div>
-                            <h3 class="card-title">Weekly Adherence</h3>
-                            <p class="card-subtitle">Daily doses taken over the last 7 days</p>
+                            <h3 class="card-title">Health Insights</h3>
+                            <p class="card-subtitle">Personalised suggestions based on your BMI</p>
                         </div>
                     </div>
-                    <div class="reports-chart-legend">
-                        <span class="legend-dot" style="background:var(--primary)"></span>
-                        <span class="legend-label">Doses taken</span>
+                    <div id="health-insights-content-view" class="health-insights-content">
+                        <div class="bmi-insights-empty health-insights-empty">
+                            <div class="adash-empty-icon">❤️</div>
+                            <p class="adash-empty-title">No insights yet</p>
+                            <p class="adash-empty-sub">Calculate your BMI to see personalised health suggestions.</p>
+                        </div>
                     </div>
                 </div>
-
-                <div class="reports-chart-wrapper">
-                    <canvas id="weekly-chart-reports"></canvas>
-                </div>
-
-                <div id="reports-empty-page" class="reports-empty-state" style="display:none;">
-                    <div class="reports-empty-icon">📊</div>
-                    <p class="reports-empty-title">No data yet</p>
-                    <p class="reports-empty-sub">Mark some doses as taken on the dashboard to see your adherence chart here.</p>
-                    <button class="primary-btn nav-btn menu-link" data-view="dashboard-view" style="margin-top:12px;">
-                        Go to Dashboard →
-                    </button>
-                </div>
             </div>
 
-            <div class="reports-insight-strip">
-                <div class="insight-item">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="insight-icon">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 18v-5.25m0 0a6.01 6.01 0 001.5-.189m-1.5.189a6.01 6.01 0 01-1.5-.189m3.75 7.478a12.06 12.06 0 01-4.5 0m3.75 2.383a14.406 14.406 0 01-3 0M14.25 18v-.192c0-.983.658-1.823 1.508-2.316a7.5 7.5 0 10-7.517 0c.85.493 1.509 1.333 1.509 2.316V18"/>
-                    </svg>
-                    <span>Consistency is key — taking medicines at the same time each day improves effectiveness.</span>
-                </div>
-                <div class="insight-item">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="insight-icon">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                    </svg>
-                    <span>Aim for 90%+ adherence for best treatment outcomes.</span>
-                </div>
-            </div>
-
-            <div class="card rpt-streak-card">
+            <!-- BMI Scale reference -->
+            <div class="card bmi-scale-card">
                 <div class="card-header">
                     <div>
-                        <h3 class="card-title">🔥 Streak &amp; Achievements</h3>
-                        <p class="card-subtitle">Your consistency milestones and earned badges</p>
-                    </div>
-                    <span class="card-badge">Gamification</span>
-                </div>
-
-                <div class="rpt-streak-summary">
-                    <div class="rpt-streak-stat">
-                        <span class="rpt-streak-icon">🔥</span>
-                        <div>
-                            <p class="rpt-streak-val" id="rpt-current-streak">0</p>
-                            <p class="rpt-streak-lbl">Current Streak</p>
-                        </div>
-                    </div>
-                    <div class="rpt-streak-stat">
-                        <span class="rpt-streak-icon">🏆</span>
-                        <div>
-                            <p class="rpt-streak-val" id="rpt-longest-streak">0</p>
-                            <p class="rpt-streak-lbl">Best Streak</p>
-                        </div>
-                    </div>
-                    <div class="rpt-streak-stat">
-                        <span class="rpt-streak-icon">🌟</span>
-                        <div>
-                            <p class="rpt-streak-val" id="rpt-perfect-week">0/7</p>
-                            <p class="rpt-streak-lbl">Perfect Days (Week)</p>
-                        </div>
-                    </div>
-                    <div class="rpt-streak-stat">
-                        <span class="rpt-streak-icon">📅</span>
-                        <div>
-                            <p class="rpt-streak-val" id="rpt-perfect-month">0/30</p>
-                            <p class="rpt-streak-lbl">Perfect Days (Month)</p>
-                        </div>
+                        <h3 class="card-title">BMI Reference Scale</h3>
+                        <p class="card-subtitle">Standard BMI categories from WHO</p>
                     </div>
                 </div>
-
-                <div class="rpt-ai-insight" id="rpt-ai-insight" style="display:none;">
-                    <span class="rpt-ai-icon">✨</span>
-                    <p class="rpt-ai-text" id="rpt-ai-text"></p>
-                </div>
-
-                <div class="rpt-badges-section">
-                    <p class="rpt-badges-title">Earned Badges</p>
-                    <div class="rpt-badges-grid" id="rpt-badges-grid">
-                        <p class="empty-state" style="font-size:0.8rem;">No badges yet — keep taking your doses!</p>
+                <div class="bmi-scale-grid">
+                    <div class="bmi-scale-item bmi-scale-under">
+                        <span class="bmi-scale-icon">⚠️</span>
+                        <span class="bmi-scale-range">&lt; 18.5</span>
+                        <span class="bmi-scale-label">Underweight</span>
+                    </div>
+                    <div class="bmi-scale-item bmi-scale-normal">
+                        <span class="bmi-scale-icon">✅</span>
+                        <span class="bmi-scale-range">18.5 – 24.9</span>
+                        <span class="bmi-scale-label">Healthy Weight</span>
+                    </div>
+                    <div class="bmi-scale-item bmi-scale-over">
+                        <span class="bmi-scale-icon">⚡</span>
+                        <span class="bmi-scale-range">25 – 29.9</span>
+                        <span class="bmi-scale-label">Overweight</span>
+                    </div>
+                    <div class="bmi-scale-item bmi-scale-obese">
+                        <span class="bmi-scale-icon">🔴</span>
+                        <span class="bmi-scale-range">≥ 30</span>
+                        <span class="bmi-scale-label">Obese</span>
                     </div>
                 </div>
             </div>
@@ -2176,10 +2013,9 @@
     </main>
 </div>
 
-<audio id="notify-sound" preload="auto" crossorigin="anonymous"
+<audio id="notify-sound" preload="auto"
        onerror="console.error('[DoseBuddy] notify-sound.mp3 failed to load. Status:', this.error && this.error.code, '| src:', this.currentSrc)">
     <source src="./notify-sound.mp3" type="audio/mpeg">
-    <source src="./notify-sound.mp3" type="audio/mp3">
 </audio>
 
 <input type="checkbox" id="theme-toggle-checkbox" style="display:none;" aria-hidden="true">
@@ -2230,6 +2066,16 @@
     <div class="modal-box modal-box-sm">
         <div class="modal-header"><div class="modal-header-icon purple-bg"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"/></svg></div><div><h3 class="modal-title" id="modal-notif-title">Notification Preferences</h3><p class="modal-subtitle">Control how DoseBuddy alerts you</p></div><button class="modal-close" data-modal="modal-notif" aria-label="Close">&times;</button></div>
         <div class="modal-body">
+            <!-- Browser permission status row -->
+            <div class="modal-section-label">Browser Permission</div>
+            <div id="notif-perm-status-row" class="pref-row notif-perm-row">
+                <div class="pref-info">
+                    <span id="notif-perm-status-text" class="notif-perm-text">Checking…</span>
+                </div>
+                <button id="notif-perm-enable-btn" class="primary-btn notif-perm-btn" style="display:none;" type="button">
+                    Enable Notifications
+                </button>
+            </div>
             <div class="modal-section-label">Reminders</div>
             <div class="pref-list">
                 <div class="pref-row"><div class="pref-info"><p class="pref-title">Medicine Reminders</p><p class="pref-desc">Get notified when it is time to take your medicine</p></div><button class="toggle-switch active" data-pref="medicine-reminders" role="switch" aria-checked="true"><span class="toggle-knob"></span></button></div>
