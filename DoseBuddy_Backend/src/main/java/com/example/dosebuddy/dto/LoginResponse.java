@@ -13,6 +13,11 @@ public class LoginResponse {
     private String emergencyContact;
     private boolean acceptedTerms;
 
+    // JWT fields
+    private String accessToken;
+    private String refreshToken;
+    private long   expiresIn;   // access-token TTL in seconds
+
     public LoginResponse() {}
 
     public LoginResponse(Long id, String name, String email, String role, String patientEmail,
@@ -59,4 +64,13 @@ public class LoginResponse {
 
     public boolean isAcceptedTerms() { return acceptedTerms; }
     public void setAcceptedTerms(boolean acceptedTerms) { this.acceptedTerms = acceptedTerms; }
+
+    public String getAccessToken() { return accessToken; }
+    public void setAccessToken(String accessToken) { this.accessToken = accessToken; }
+
+    public String getRefreshToken() { return refreshToken; }
+    public void setRefreshToken(String refreshToken) { this.refreshToken = refreshToken; }
+
+    public long getExpiresIn() { return expiresIn; }
+    public void setExpiresIn(long expiresIn) { this.expiresIn = expiresIn; }
 }

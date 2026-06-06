@@ -3,6 +3,142 @@
     : "https://dosebuddy-production.up.railway.app/api";
 const LS_CURRENT_USER_KEY = "dosebuddy_current_user";
 
+// ═══════════════════════════════════════════════════════════════════════════════
+//  JWT AUTH MODULE
+//  Centralises all token handling:
+//    - Secure storage in localStorage (access + refresh tokens)
+//    - Automatic Bearer header injection on every protected request
+//    - Silent token refresh when access token expires
+//    - Logout / redirect to login on refresh token expiry (401)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const LS_ACCESS_TOKEN_KEY  = "dosebuddy_access_token";
+const LS_REFRESH_TOKEN_KEY = "dosebuddy_refresh_token";
+const LS_TOKEN_EXPIRES_KEY = "dosebuddy_token_expires"; // epoch ms
+
+/** Store tokens after login/signup/refresh */
+function storeTokens(accessToken, refreshToken, expiresInSeconds) {
+    localStorage.setItem(LS_ACCESS_TOKEN_KEY,  accessToken);
+    localStorage.setItem(LS_REFRESH_TOKEN_KEY, refreshToken);
+    // Record absolute expiry time (subtract 30 s buffer for early refresh)
+    const expiresAt = Date.now() + (expiresInSeconds - 30) * 1000;
+    localStorage.setItem(LS_TOKEN_EXPIRES_KEY, String(expiresAt));
+}
+
+/** Clear all auth tokens (called on logout) */
+function clearTokens() {
+    localStorage.removeItem(LS_ACCESS_TOKEN_KEY);
+    localStorage.removeItem(LS_REFRESH_TOKEN_KEY);
+    localStorage.removeItem(LS_TOKEN_EXPIRES_KEY);
+}
+
+function getAccessToken()  { return localStorage.getItem(LS_ACCESS_TOKEN_KEY); }
+function getRefreshToken() { return localStorage.getItem(LS_REFRESH_TOKEN_KEY); }
+
+function isAccessTokenExpired() {
+    const expiresAt = parseInt(localStorage.getItem(LS_TOKEN_EXPIRES_KEY) || "0", 10);
+    return Date.now() >= expiresAt;
+}
+
+// In-flight refresh promise — prevents parallel refresh races
+let _refreshPromise = null;
+
+/**
+ * Attempt to get a fresh access token using the refresh token.
+ * Returns the new access token string, or null if refresh fails.
+ */
+async function refreshAccessToken() {
+    if (_refreshPromise) return _refreshPromise;
+
+    const refreshToken = getRefreshToken();
+    if (!refreshToken) return null;
+
+    _refreshPromise = (async () => {
+        try {
+            const res = await fetch(`${API_BASE}/auth/refresh`, {
+                method:  "POST",
+                headers: { "Content-Type": "application/json" },
+                body:    JSON.stringify({ refreshToken })
+            });
+
+            if (!res.ok) {
+                // Refresh token is invalid/expired — force logout
+                _handleAuthExpiry();
+                return null;
+            }
+
+            const data = await res.json();
+            storeTokens(data.accessToken, data.refreshToken, data.expiresIn);
+            return data.accessToken;
+        } catch (err) {
+            console.error("[Auth] Token refresh failed:", err);
+            return null;
+        } finally {
+            _refreshPromise = null;
+        }
+    })();
+
+    return _refreshPromise;
+}
+
+/**
+ * Drop-in replacement for the native fetch() that:
+ *   1. Automatically adds Authorization: Bearer <token>
+ *   2. Refreshes the token if expired before sending
+ *   3. Retries once on 401 (handles race condition where server rejected
+ *      a token that was about to expire at request time)
+ *   4. Redirects to login if refresh fails
+ *
+ * Use authFetch() everywhere instead of fetch() for protected API calls.
+ * Public calls (login, signup, refresh) should still use raw fetch().
+ */
+async function authFetch(url, options = {}) {
+    // Refresh proactively if the token is about to expire
+    if (isAccessTokenExpired()) {
+        const newToken = await refreshAccessToken();
+        if (!newToken) {
+            _handleAuthExpiry();
+            throw new Error("Session expired. Please log in again.");
+        }
+    }
+
+    const token = getAccessToken();
+    const headers = {
+        ...(options.headers || {}),
+        ...(token ? { "Authorization": `Bearer ${token}` } : {})
+    };
+
+    let response = await fetch(url, { ...options, headers });
+
+    // On 401 attempt one refresh + retry (token might have expired mid-flight)
+    if (response.status === 401) {
+        const newToken = await refreshAccessToken();
+        if (!newToken) {
+            _handleAuthExpiry();
+            throw new Error("Session expired. Please log in again.");
+        }
+        const retryHeaders = { ...headers, "Authorization": `Bearer ${newToken}` };
+        response = await fetch(url, { ...options, headers: retryHeaders });
+    }
+
+    return response;
+}
+
+/** Called when refresh token is expired or invalid — logs the user out */
+function _handleAuthExpiry() {
+    // Guard: only fire the expiry flow if we actually have a session to expire.
+    // Prevents false "session expired" toasts during the signup/login flow
+    // before currentUser has been fully committed.
+    const hadSession = !!currentUser;
+    clearTokens();
+    currentUser = null;
+    saveToLS(LS_CURRENT_USER_KEY, null);
+    showAuthView();
+    if (hadSession) {
+        showToast("Your session has expired. Please log in again.", "warning", 5000);
+    }
+}
+
 let currentUser = null;
 let logs = [];
 let medsCache = [];
@@ -67,7 +203,7 @@ async function renderRecentActivity() {
     if (!container || !currentUser) return;
 
     try {
-        const response = await fetch(`${API_BASE}/activities/recent/${currentUser.id}?limit=10`);
+        const response = await authFetch(`${API_BASE}/activities/recent/${currentUser.id}?limit=10`);
         if (!response.ok) {
             throw new Error("Failed to fetch activities");
         }
@@ -192,7 +328,7 @@ async function logMissedDoseActivities(meds, todayStr) {
     if (missedEntries.length === 0) return;
 
     try {
-        await fetch(`${API_BASE}/logs/mark-missed-batch`, {
+        await authFetch(`${API_BASE}/logs/mark-missed-batch`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(missedEntries),
@@ -244,6 +380,15 @@ function showToast(message, type = "success", duration = 3000) {
 
 document.addEventListener("DOMContentLoaded", () => {
     currentUser = loadFromLS(LS_CURRENT_USER_KEY, null);
+
+    // ── JWT session guard ────────────────────────────────────────────────────
+    // A returning user is only considered authenticated if we also have a valid
+    // refresh token stored. If the refresh token is missing (cleared on logout
+    // or by browser), treat them as logged-out even if the user object is cached.
+    if (currentUser && !getRefreshToken()) {
+        currentUser = null;
+        saveToLS(LS_CURRENT_USER_KEY, null);
+    }
 
     // ── Audio unlock ────────────────────────────────────────────────────────
     // Browsers block audio until the user has interacted with the page.
@@ -320,6 +465,21 @@ document.addEventListener("DOMContentLoaded", () => {
         setThemeToggleVisible(false);
     }
     setInterval(checkReminders, 30000);
+
+    // ── Proactive token refresh ────────────────────────────────────────────
+    // Every 60 seconds, check whether the access token is within 60 seconds
+    // of expiry and silently refresh it.  This prevents any protected API call
+    // from hitting a 401 due to an expired token mid-session.
+    setInterval(async () => {
+        if (!currentUser || !getRefreshToken()) return;
+        if (isAccessTokenExpired()) {
+            const newToken = await refreshAccessToken();
+            if (!newToken) {
+                // Refresh token has also expired — force logout
+                _handleAuthExpiry();
+            }
+        }
+    }, 60000);
 });
 
 window.addEventListener("beforeunload", () => {
@@ -348,6 +508,20 @@ function saveToLS(key, value) {
 }
 
 function switchView(viewId) {
+
+    // ── Route protection guard ──────────────────────────────────────────────
+    // Protected views require an authenticated session (user object + valid
+    // refresh token).  If either is missing, force the user to the login screen.
+    const protectedViews = [
+        "dashboard-view", "add-medicine-view", "reports-view",
+        "history-view", "bmi-view", "vitals-view",
+        "ai-view", "profile-view", "notifications-view"
+    ];
+    if (protectedViews.includes(viewId) && (!currentUser || !getRefreshToken())) {
+        showAuthView();
+        showToast("Please log in to access this page.", "warning", 3000);
+        return;
+    }
 
     stopReminderAudio();
     
@@ -805,21 +979,43 @@ async function handleSignupApi(body, errorElem) {
 
     const user = await res.json();
 
-    try {
-        const fullProfile = await fetchFullProfile(user.id);
-        currentUser = fullProfile || user;
-        saveToLS(LS_CURRENT_USER_KEY, currentUser);
-        showAppViews();
-        switchView("dashboard-view");
-        showToast(`Welcome to DoseBuddy, ${currentUser.name || ""}! 🎉`, "success", 4000);
-    } catch (err) {
-        console.error("Post-signup processing error:", err);
-        currentUser = user;
-        saveToLS(LS_CURRENT_USER_KEY, currentUser);
-        showAppViews();
-        switchView("dashboard-view");
-        showToast(`Welcome to DoseBuddy, ${currentUser.name || ""}! 🎉`, "success", 4000);
+    // ── Step 1: Store tokens FIRST, before any protected call ─────────────
+    // This must happen before fetchFullProfile so authFetch has a valid token.
+    if (user.accessToken && user.refreshToken) {
+        storeTokens(user.accessToken, user.refreshToken, user.expiresIn || 900);
+    } else {
+        // Backend didn't return tokens — signup failed silently
+        if (errorElem) errorElem.textContent = "Signup error: no authentication token received.";
+        return;
     }
+
+    // ── Step 2: Set currentUser from the signup response immediately ───────
+    // This prevents the route guard from firing before fetchFullProfile returns.
+    currentUser = user;
+    saveToLS(LS_CURRENT_USER_KEY, currentUser);
+
+    // ── Step 3: Show the app shell before the async profile fetch ──────────
+    // The user is now authenticated (tokens + currentUser set), so showAppViews
+    // and switchView can both proceed safely without hitting the route guard.
+    showAppViews();
+    switchView("dashboard-view");
+    showToast(`Welcome to DoseBuddy, ${currentUser.name || ""}! 🎉`, "success", 4000);
+
+    // ── Step 4: Enrich with full profile in the background ─────────────────
+    // Do NOT await this before showing the dashboard. If it fails, the user
+    // is already logged in with the signup response data — no harm done.
+    fetchFullProfile(user.id).then(fullProfile => {
+        if (fullProfile) {
+            currentUser = { ...currentUser, ...fullProfile };
+            saveToLS(LS_CURRENT_USER_KEY, currentUser);
+            updateUserMenuInfo();
+            updateProfileDropdown();
+        }
+    }).catch(err => {
+        // Profile enrichment failed — user is still logged in, just with
+        // signup-response data. Silent failure is acceptable here.
+        console.warn("[Signup] fetchFullProfile failed (non-fatal):", err.message);
+    });
 }
 
 // ── Unlock audio using the login button press as the user gesture ─────────────
@@ -859,45 +1055,60 @@ async function handleLoginApi(email, password, errorElem) {
 
     const user = await res.json();
 
-    // Login button press = confirmed user gesture — unlock audio now so
-    // reminder sounds work immediately after without autoplay restrictions.
+    // ── Step 1: Store tokens FIRST ─────────────────────────────────────────
+    if (user.accessToken && user.refreshToken) {
+        storeTokens(user.accessToken, user.refreshToken, user.expiresIn || 900);
+    } else {
+        errorElem.textContent = "Login error: no authentication token received.";
+        return;
+    }
+
+    // Login button press = confirmed user gesture — unlock audio now.
     unlockAudioOnLogin();
 
-    try {
-        const fullProfile = await fetchFullProfile(user.id);
-        currentUser = fullProfile || user;
-        saveToLS(LS_CURRENT_USER_KEY, currentUser);
-        showAppViews();
-        switchView("dashboard-view");
-        showToast(`Welcome back, ${currentUser.name || ""}!`, "success", 3000);
-        // Prompt for notification permission after login (user gesture already happened)
-        if ("Notification" in window && Notification.permission === "default") {
-            setTimeout(() => showNotifPermissionBanner(), 2000);
-        }
-    } catch (err) {
-        console.error("Post-login processing error:", err);
-        currentUser = user;
-        saveToLS(LS_CURRENT_USER_KEY, currentUser);
-        showAppViews();
-        switchView("dashboard-view");
-        showToast(`Welcome back, ${currentUser.name || ""}!`, "success", 3000);
-        if ("Notification" in window && Notification.permission === "default") {
-            setTimeout(() => showNotifPermissionBanner(), 2000);
-        }
+    // ── Step 2: Set currentUser immediately from login response ────────────
+    currentUser = user;
+    saveToLS(LS_CURRENT_USER_KEY, currentUser);
+
+    // ── Step 3: Show app and navigate — tokens + user already set ──────────
+    showAppViews();
+    switchView("dashboard-view");
+    showToast(`Welcome back, ${currentUser.name || ""}!`, "success", 3000);
+
+    // Prompt for notification permission (user gesture already happened)
+    if ("Notification" in window && Notification.permission === "default") {
+        setTimeout(() => showNotifPermissionBanner(), 2000);
     }
+
+    // ── Step 4: Enrich profile in background (non-blocking) ────────────────
+    fetchFullProfile(user.id).then(fullProfile => {
+        if (fullProfile) {
+            currentUser = { ...currentUser, ...fullProfile };
+            saveToLS(LS_CURRENT_USER_KEY, currentUser);
+            updateUserMenuInfo();
+            updateProfileDropdown();
+        }
+    }).catch(err => {
+        console.warn("[Login] fetchFullProfile failed (non-fatal):", err.message);
+    });
 }
 
 async function fetchFullProfile(userId) {
     if (!userId) return null;
     try {
-        const res = await fetch(`${API_BASE}/user/profile/${userId}`);
+        const res = await authFetch(`${API_BASE}/user/profile/${userId}`);
         if (!res.ok) {
+            // 401/403 after retry means auth genuinely failed — don't crash the
+            // calling flow, just return null so the caller falls back gracefully.
             console.warn("fetchFullProfile: server returned", res.status);
             return null;
         }
         return await res.json();
     } catch (e) {
-        console.error("fetchFullProfile error:", e);
+        // authFetch throws when _handleAuthExpiry fires (session genuinely dead)
+        // OR on network failure. Either way, return null — the caller decides
+        // whether this is fatal.
+        console.warn("fetchFullProfile error (non-fatal during login/signup):", e.message);
         return null;
     }
 }
@@ -927,6 +1138,7 @@ function setupNav() {
         stopReminderAudio(); // Stop any active reminder audio
         currentUser = null;
         saveToLS(LS_CURRENT_USER_KEY, null);
+        clearTokens(); // Clear JWT tokens
         // Clear all notification dedup state so the next login starts fresh
         firedReminderKeys.clear();
         _lastScheduledDate = "";
@@ -1078,7 +1290,7 @@ function setupMedicineForm() {
         };
 
         try {
-            const res = await fetch(`${API_BASE}/medications/add`, {
+            const res = await authFetch(`${API_BASE}/medications/add`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(payload)
@@ -1243,10 +1455,10 @@ async function renderDashboard() {
     scheduleTable.style.display = window.innerWidth <= 767 ? "block" : "table";
 
     try {
-        const logsRes = await fetch(`${API_BASE}/logs/history/${currentUser.id}`);
+        const logsRes = await authFetch(`${API_BASE}/logs/history/${currentUser.id}`);
         logs = logsRes.ok ? await logsRes.json() : [];
 
-        const medsRes = await fetch(medsUrl);
+        const medsRes = await authFetch(medsUrl);
         if (!medsRes.ok) throw new Error("Failed to load medicines");
         const meds = await medsRes.json();
 
@@ -1469,7 +1681,7 @@ async function deleteMedication(medId) {
     if (!confirm("Delete this medicine and all its doses?")) return;
 
     try {
-        const res = await fetch(`${API_BASE}/medications/${medId}`, {
+        const res = await authFetch(`${API_BASE}/medications/${medId}`, {
             method: "DELETE",
         });
         if (!res.ok) {
@@ -1495,7 +1707,7 @@ async function renderHistory() {
     tbody.innerHTML = "";
 
     try {
-        const res = await fetch(`${API_BASE}/logs/history/${currentUser.id}`);
+        const res = await authFetch(`${API_BASE}/logs/history/${currentUser.id}`);
         if (!res.ok) throw new Error("Failed to load history");
         const items = await res.json();
 
@@ -1608,7 +1820,7 @@ async function markDoseTaken(userId, medId, dateStr, timeStr, medName = "") {
     };
 
     try {
-        const res = await fetch(`${API_BASE}/logs/mark`, {
+        const res = await authFetch(`${API_BASE}/logs/mark`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body),
@@ -1627,7 +1839,7 @@ async function markDoseTaken(userId, medId, dateStr, timeStr, medName = "") {
 async function markDoseMissed(userId, medId, dateStr, timeStr) {
     if (!userId || !medId || !dateStr || !timeStr) return;
     try {
-        await fetch(`${API_BASE}/logs/mark-missed-batch`, {
+        await authFetch(`${API_BASE}/logs/mark-missed-batch`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify([{ userId, medicationId: medId, date: dateStr, time: timeStr }]),
@@ -1720,7 +1932,7 @@ async function renderReports() {
         // client-side based on the selected period.  This avoids needing a
         // new backend endpoint while keeping results perfectly consistent
         // across every widget on the page.
-        const histRes = await fetch(`${API_BASE}/logs/history/${currentUser.id}`);
+        const histRes = await authFetch(`${API_BASE}/logs/history/${currentUser.id}`);
         // Graceful degradation: if history fails, proceed with empty data so
         // the chart and stat cards still render (showing zeros) instead of
         // going completely blank.
@@ -1883,7 +2095,7 @@ async function renderReports() {
         // which require server-side aggregation we can't easily replicate here.
         const statsApiDays = periodDays === 0 ? 0 : periodDays;
         try {
-            const statsRes = await fetch(
+            const statsRes = await authFetch(
                 `${API_BASE}/logs/adherence/stats/${currentUser.id}?days=${statsApiDays}`
             );
             if (statsRes.ok) {
@@ -2007,12 +2219,12 @@ async function renderAnalyticsDashboard() {
         vitalsHistResult,
         streakResult
     ] = await Promise.allSettled([
-        fetch(`${API_BASE}/medications/today/${uid}`),
-        fetch(`${API_BASE}/logs/adherence/stats/${uid}`),
-        fetch(`${API_BASE}/logs/today/${uid}`),
-        fetch(`${API_BASE}/bmi/history/${uid}`),
-        fetch(`${API_BASE}/vitals/history/${uid}`),
-        fetch(`${API_BASE}/streaks/${uid}`)
+        authFetch(`${API_BASE}/medications/today/${uid}`),
+        authFetch(`${API_BASE}/logs/adherence/stats/${uid}`),
+        authFetch(`${API_BASE}/logs/today/${uid}`),
+        authFetch(`${API_BASE}/bmi/history/${uid}`),
+        authFetch(`${API_BASE}/vitals/history/${uid}`),
+        authFetch(`${API_BASE}/streaks/${uid}`)
     ]);
 
     // Helper: safely extract JSON from a settled fetch result
@@ -2587,7 +2799,7 @@ Patient data:
 Return ONLY a valid JSON array. No markdown, no code blocks. Example:
 [{"title":"Great Adherence","message":"Your 85% rate exceeds the 80% target.","type":"success","icon":"✅"}]`;
 
-        const res = await fetch(`${API_BASE}/medicine/ai-info?name=${encodeURIComponent(prompt)}&userId=${currentUser.id}`,
+        const res = await authFetch(`${API_BASE}/medicine/ai-info?name=${encodeURIComponent(prompt)}&userId=${currentUser.id}`,
             { signal: AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined });
         if (!res.ok) throw new Error(`AI request failed (HTTP ${res.status})`);
 
@@ -2740,7 +2952,7 @@ function setupVitalsPeriodTabs() {
             adashCurrentVitalsPeriod = this.dataset.vperiod;
 
             if (!currentUser) return;
-            fetch(`${API_BASE}/vitals/history/${currentUser.id}`)
+            authFetch(`${API_BASE}/vitals/history/${currentUser.id}`)
                 .then(r => r.ok ? r.json() : [])
                 .then(vitalsHist => adashRenderVitalsCharts(vitalsHist, adashCurrentVitalsPeriod))
                 .catch(err => console.warn("[Analytics] Vitals period reload error:", err));
@@ -2757,10 +2969,10 @@ function setupAdashAiRefresh() {
         btn.disabled = true;
         try {
             const [statsRes, bmiRes, vitalsRes, streakRes] = await Promise.all([
-                fetch(`${API_BASE}/logs/adherence/stats/${currentUser.id}`),
-                fetch(`${API_BASE}/bmi/history/${currentUser.id}`),
-                fetch(`${API_BASE}/vitals/history/${currentUser.id}`),
-                fetch(`${API_BASE}/streaks/${currentUser.id}`)
+                authFetch(`${API_BASE}/logs/adherence/stats/${currentUser.id}`),
+                authFetch(`${API_BASE}/bmi/history/${currentUser.id}`),
+                authFetch(`${API_BASE}/vitals/history/${currentUser.id}`),
+                authFetch(`${API_BASE}/streaks/${currentUser.id}`)
             ]);
             const stats      = statsRes.ok  ? await statsRes.json()  : {};
             const bmiHistory = bmiRes.ok    ? await bmiRes.json()    : [];
@@ -2981,7 +3193,7 @@ function checkReminders() {
     }
 
     if (toMarkMissed.length > 0) {
-        fetch(`${API_BASE}/logs/mark-missed-batch`, {
+        authFetch(`${API_BASE}/logs/mark-missed-batch`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(toMarkMissed),
@@ -3303,7 +3515,7 @@ async function checkSymptomsView() {
     setButtonLoading(submitBtn, true, "Analyzing...");
 
     try {
-        const res = await fetch(`${API_BASE}/medicine/symptom-check`, {
+        const res = await authFetch(`${API_BASE}/medicine/symptom-check`, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json"
@@ -3347,7 +3559,7 @@ document.addEventListener("click", async function(e){
 
         try{
 
-            const res = await fetch(`${API_BASE}/medicine/symptom-check`,{
+            const res = await authFetch(`${API_BASE}/medicine/symptom-check`,{
                 method:"POST",
                 headers:{
                     "Content-Type":"application/json"
@@ -3488,7 +3700,7 @@ async function calculateBmi() {
     setButtonLoading(calculateBtn, true, "Calculating...");
 
     try {
-        const response = await fetch(`${API_BASE}/bmi/calculate`, {
+        const response = await authFetch(`${API_BASE}/bmi/calculate`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -3552,7 +3764,7 @@ async function calculateBmiView() {
     setButtonLoading(calculateBtn, true, "Calculating...");
 
     try {
-        const response = await fetch(`${API_BASE}/bmi/calculate`, {
+        const response = await authFetch(`${API_BASE}/bmi/calculate`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -3585,7 +3797,7 @@ async function loadLatestBmi() {
     if (!currentUser) return;
 
     try {
-        const response = await fetch(`${API_BASE}/bmi/latest/${currentUser.id}`);
+        const response = await authFetch(`${API_BASE}/bmi/latest/${currentUser.id}`);
         
         if (response.ok) {
             const data = await response.json();
@@ -4069,11 +4281,10 @@ function setupPrescriptionUpload() {
             const formData = new FormData();
             formData.append("file", selectedFile);
 
-            const uploadRes = await fetch(`${API_BASE}/prescription/upload`, {
+            const uploadRes = await authFetch(`${API_BASE}/prescription/upload`, {
                 method: "POST",
                 body:   formData
             });
-
 
             if (!uploadRes.ok) {
                 const errData = await uploadRes.json().catch(() => ({}));
@@ -4134,12 +4345,11 @@ function setupPrescriptionUpload() {
 
 
                 try {
-                    const saveRes = await fetch(`${API_BASE}/medications/add`, {
+                    const saveRes = await authFetch(`${API_BASE}/medications/add`, {
                         method:  "POST",
                         headers: { "Content-Type": "application/json" },
                         body:    JSON.stringify(payload)
                     });
-
 
                     if (saveRes.ok) {
                         savedCount++;
@@ -4416,6 +4626,7 @@ function setupProfileDropdown() {
 function doLogoutAction() {
     currentUser = null;
     saveToLS(LS_CURRENT_USER_KEY, null);
+    clearTokens(); // Clear JWT tokens
     // Clear all notification dedup state so the next login starts fresh
     firedReminderKeys.clear();
     _lastScheduledDate = "";
@@ -4451,7 +4662,7 @@ async function openProfileSettingsModal() {
     }
 
     try {
-        const res = await fetch(`${API_BASE}/user/profile/${currentUser.id}`);
+        const res = await authFetch(`${API_BASE}/user/profile/${currentUser.id}`);
         if (!res.ok) throw new Error("Failed to fetch profile");
         const profile = await res.json();
 
@@ -4548,7 +4759,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = "Saving..."; }
 
         try {
-            const res = await fetch(`${API_BASE}/user/profile/${currentUser.id}`, {
+            const res = await authFetch(`${API_BASE}/user/profile/${currentUser.id}`, {
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(updateData)
@@ -4709,7 +4920,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         try {
-            const res = await fetch(`${API_BASE}/user/change-password/${currentUser.id}`, {
+            const res = await authFetch(`${API_BASE}/user/change-password/${currentUser.id}`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -5018,7 +5229,7 @@ async function renderVitalsView() {
 async function loadVitalsLatest() {
     if (!currentUser) return;
     try {
-        const res = await fetch(`${API_BASE}/vitals/latest/${currentUser.id}`);
+        const res = await authFetch(`${API_BASE}/vitals/latest/${currentUser.id}`);
         if (!res.ok) { clearVitalsSummaryCards(); return; }
         const data = await res.json();
         renderVitalsSummaryCards(data);
@@ -5031,7 +5242,7 @@ async function loadVitalsLatest() {
 async function loadVitalsHistory() {
     if (!currentUser) return;
     try {
-        const res = await fetch(`${API_BASE}/vitals/history/${currentUser.id}`);
+        const res = await authFetch(`${API_BASE}/vitals/history/${currentUser.id}`);
         if (!res.ok) { renderVitalsTable([]); return; }
         const data = await res.json();
         renderVitalsTable(data);
@@ -5044,7 +5255,7 @@ async function loadVitalsHistory() {
 async function loadVitalsTrend(period) {
     if (!currentUser) return;
     try {
-        const res = await fetch(`${API_BASE}/vitals/trend/${currentUser.id}?period=${period}`);
+        const res = await authFetch(`${API_BASE}/vitals/trend/${currentUser.id}?period=${period}`);
         if (!res.ok) { renderVitalsCharts([]); return; }
         const data = await res.json();
         renderVitalsCharts(data);
@@ -5113,7 +5324,7 @@ async function submitVitals() {
     setButtonLoading(btn, true, "Saving...");
 
     try {
-        const res = await fetch(`${API_BASE}/vitals/add`, {
+        const res = await authFetch(`${API_BASE}/vitals/add`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body)
@@ -5288,7 +5499,7 @@ function dotClass(status) {
 
 async function deleteVitalRecord(id) {
     try {
-        const res = await fetch(`${API_BASE}/vitals/${id}`, { method: "DELETE" });
+        const res = await authFetch(`${API_BASE}/vitals/${id}`, { method: "DELETE" });
         if (res.ok || res.status === 204) {
             showToast("Record deleted", "success");
             await renderVitalsView();
@@ -5536,7 +5747,7 @@ async function renderStreakPanel() {
     if (!currentUser) return;
 
     try {
-        const res = await fetch(`${API_BASE}/streaks/${currentUser.id}`);
+        const res = await authFetch(`${API_BASE}/streaks/${currentUser.id}`);
         if (!res.ok) return;
         const data = await res.json();
         applyStreakToUI(data, false);
@@ -5549,7 +5760,7 @@ async function recalculateStreak() {
     if (!currentUser) return;
 
     try {
-        const res = await fetch(`${API_BASE}/streaks/recalculate/${currentUser.id}`, {
+        const res = await authFetch(`${API_BASE}/streaks/recalculate/${currentUser.id}`, {
             method: "POST"
         });
         if (!res.ok) return;
@@ -5691,7 +5902,7 @@ async function renderReportsStreak() {
     if (!currentUser) return;
 
     try {
-        const res = await fetch(`${API_BASE}/streaks/recalculate/${currentUser.id}`, {
+        const res = await authFetch(`${API_BASE}/streaks/recalculate/${currentUser.id}`, {
             method: "POST"
         });
         if (!res.ok) return;
@@ -5977,11 +6188,11 @@ async function exportReportsPDF() {
         const now = new Date();
 
         const [histRes, statsRes, bmiRes, vitalsRes, streakRes] = await Promise.all([
-            fetch(`${API_BASE}/logs/history/${currentUser.id}`),
-            fetch(`${API_BASE}/logs/adherence/stats/${currentUser.id}`),
-            fetch(`${API_BASE}/bmi/latest/${currentUser.id}`),
-            fetch(`${API_BASE}/vitals/history/${currentUser.id}`),
-            fetch(`${API_BASE}/streaks/${currentUser.id}`)
+            authFetch(`${API_BASE}/logs/history/${currentUser.id}`),
+            authFetch(`${API_BASE}/logs/adherence/stats/${currentUser.id}`),
+            authFetch(`${API_BASE}/bmi/latest/${currentUser.id}`),
+            authFetch(`${API_BASE}/vitals/history/${currentUser.id}`),
+            authFetch(`${API_BASE}/streaks/${currentUser.id}`)
         ]);
 
         const history  = histRes.ok  ? await histRes.json()  : [];
@@ -6152,7 +6363,7 @@ async function exportHistoryPDF() {
     const restore = setExportLoading(btn, "Generating…");
 
     try {
-        const res = await fetch(`${API_BASE}/logs/history/${currentUser.id}`);
+        const res = await authFetch(`${API_BASE}/logs/history/${currentUser.id}`);
         if (!res.ok) throw new Error("Failed to fetch history");
         const history = await res.json();
         const now = new Date();
@@ -6222,8 +6433,8 @@ async function exportVitalsPDF() {
 
     try {
         const [vitalsRes, bmiRes] = await Promise.all([
-            fetch(`${API_BASE}/vitals/history/${currentUser.id}`),
-            fetch(`${API_BASE}/bmi/latest/${currentUser.id}`)
+            authFetch(`${API_BASE}/vitals/history/${currentUser.id}`),
+            authFetch(`${API_BASE}/bmi/latest/${currentUser.id}`)
         ]);
         const vitals = vitalsRes.ok ? await vitalsRes.json() : [];
         const bmi    = bmiRes.ok   ? await bmiRes.json()    : null;

@@ -5,9 +5,12 @@ import com.example.dosebuddy.dto.ProfileUpdateRequest;
 import com.example.dosebuddy.dto.UserProfileResponse;
 import com.example.dosebuddy.model.User;
 import com.example.dosebuddy.repository.UserRepository;
+import com.example.dosebuddy.security.UserPrincipal;
 import com.example.dosebuddy.service.ActivityService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
@@ -20,28 +23,41 @@ import java.util.Optional;
 @CrossOrigin(origins = "*")
 public class UserController {
 
-    private final UserRepository userRepository;
+    private final UserRepository  userRepository;
     private final ActivityService activityService;
+    private final PasswordEncoder passwordEncoder;
 
-    public UserController(UserRepository userRepository, ActivityService activityService) {
-        this.userRepository = userRepository;
+    public UserController(UserRepository  userRepository,
+                          ActivityService activityService,
+                          PasswordEncoder passwordEncoder) {
+        this.userRepository  = userRepository;
         this.activityService = activityService;
+        this.passwordEncoder = passwordEncoder;
     }
 
     @GetMapping("/profile/{userId}")
-    public ResponseEntity<?> getProfile(@PathVariable Long userId) {
+    public ResponseEntity<?> getProfile(@PathVariable Long userId,
+                                        @AuthenticationPrincipal UserPrincipal principal) {
+        if (!principal.getUserId().equals(userId)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("message", "Access denied"));
+        }
         Optional<User> userOpt = userRepository.findById(userId);
         if (userOpt.isEmpty()) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
                     .body(Map.of("message", "User not found"));
         }
-        User user = userOpt.get();
-        return ResponseEntity.ok(buildProfileResponse(user));
+        return ResponseEntity.ok(buildProfileResponse(userOpt.get()));
     }
 
     @PutMapping("/profile/{userId}")
     public ResponseEntity<?> updateProfile(@PathVariable Long userId,
-                                           @RequestBody ProfileUpdateRequest request) {
+                                           @RequestBody ProfileUpdateRequest request,
+                                           @AuthenticationPrincipal UserPrincipal principal) {
+        if (!principal.getUserId().equals(userId)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("message", "Access denied"));
+        }
         Optional<User> userOpt = userRepository.findById(userId);
         if (userOpt.isEmpty()) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
@@ -81,7 +97,12 @@ public class UserController {
 
     @PostMapping("/change-password/{userId}")
     public ResponseEntity<?> changePassword(@PathVariable Long userId,
-                                            @RequestBody ChangePasswordRequest request) {
+                                            @RequestBody ChangePasswordRequest request,
+                                            @AuthenticationPrincipal UserPrincipal principal) {
+        if (!principal.getUserId().equals(userId)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("message", "Access denied"));
+        }
         Optional<User> userOpt = userRepository.findById(userId);
         if (userOpt.isEmpty()) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
@@ -90,16 +111,21 @@ public class UserController {
 
         User user = userOpt.get();
 
-        if (!user.getPasswordHash().equals(request.getCurrentPassword())) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("message", "Current password is incorrect"));
+        // Verify current password (BCrypt-aware; handles legacy plaintext)
+        boolean currentMatches = passwordEncoder.matches(request.getCurrentPassword(), user.getPasswordHash());
+        if (!currentMatches) {
+            // Legacy plaintext fallback for accounts not yet migrated
+            if (!user.getPasswordHash().equals(request.getCurrentPassword())) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(Map.of("message", "Current password is incorrect"));
+            }
         }
         if (request.getNewPassword() == null || request.getNewPassword().length() < 8) {
             return ResponseEntity.badRequest()
                     .body(Map.of("message", "New password must be at least 8 characters"));
         }
 
-        user.setPasswordHash(request.getNewPassword());
+        user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
         userRepository.save(user);
         activityService.logActivity(user, "PASSWORD_CHANGED", "Password changed successfully", "USER", user.getId());
         return ResponseEntity.ok(Map.of("message", "Password changed successfully"));

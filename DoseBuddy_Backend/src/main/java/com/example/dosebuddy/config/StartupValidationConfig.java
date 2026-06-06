@@ -6,44 +6,49 @@ import org.springframework.context.annotation.Configuration;
 
 /**
  * Validates that required credentials are present at startup.
- * Gives a clear, actionable error instead of a confusing Hibernate/MySQL failure.
+ * Gives a clear, actionable error instead of a confusing failure.
  */
 @Configuration
 public class StartupValidationConfig {
 
-    /**
-     * Fails fast with a readable message if DB_PASSWORD is missing,
-     * before Hibernate attempts to connect and produces a cryptic error.
-     */
     @Bean
     public String validateCredentials(
             @Value("${spring.datasource.password:}") String dbPassword,
-            @Value("${spring.datasource.username:root}") String dbUsername) {
+            @Value("${spring.datasource.username:root}") String dbUsername,
+            @Value("${jwt.secret:}") String jwtSecret) {
 
         if (dbPassword == null || dbPassword.isBlank()) {
-            String message = """
+            throw new IllegalStateException("""
                     
                     ╔══════════════════════════════════════════════════════════════╗
                     ║           DoseBuddy — STARTUP CONFIGURATION ERROR           ║
                     ╠══════════════════════════════════════════════════════════════╣
-                    ║  DB_PASSWORD is not set. The application cannot connect     ║
-                    ║  to MySQL without a database password.                      ║
-                    ║                                                             ║
-                    ║  Fix: open this file and add your credentials:              ║
-                    ║    src/main/resources/application-local.properties          ║
-                    ║                                                             ║
-                    ║    DB_USERNAME=root                                         ║
-                    ║    DB_PASSWORD=your-mysql-password                          ║
-                    ║    GROQ_API_KEY=your-groq-key      (chat / symptoms)        ║
-                    ║    GEMINI_API_KEY=your-gemini-key  (prescription OCR)       ║
-                    ║                                                             ║
-                    ║  That file is git-ignored and safe to store credentials in. ║
+                    ║  DB_PASSWORD is not set. Application cannot connect to DB.  ║
+                    ║  Fix: add DB_PASSWORD to application-local.properties       ║
                     ╚══════════════════════════════════════════════════════════════╝
-                    """;
-            throw new IllegalStateException(message);
+                    """);
+        }
+
+        if (jwtSecret == null || jwtSecret.isBlank()) {
+            throw new IllegalStateException("""
+                    
+                    ╔══════════════════════════════════════════════════════════════╗
+                    ║           DoseBuddy — STARTUP CONFIGURATION ERROR           ║
+                    ╠══════════════════════════════════════════════════════════════╣
+                    ║  JWT_SECRET is not set. JWT authentication cannot work.     ║
+                    ║  Fix: add JWT_SECRET to application-local.properties or     ║
+                    ║  as a Railway environment variable (min 32 characters).     ║
+                    ╚══════════════════════════════════════════════════════════════╝
+                    """);
+        }
+
+        if (jwtSecret.length() < 32) {
+            throw new IllegalStateException(
+                    "[DoseBuddy] JWT_SECRET must be at least 32 characters for HS256.");
         }
 
         System.out.println("[DoseBuddy] DB credentials loaded for user: " + dbUsername);
+        System.out.println("[DoseBuddy] JWT secret validated (" + jwtSecret.length() + " chars).");
         return "credentials-validated";
     }
 }
