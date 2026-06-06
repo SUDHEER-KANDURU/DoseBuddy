@@ -5672,31 +5672,6 @@ body.dark-mode .rpt-badge-chip { background: rgba(255,255,255,0.06); border-colo
   flex-wrap: wrap;
 }
 
-.export-period-select {
-  height: 36px;
-  padding: 0 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-  color: var(--text-primary);
-  font-size: 0.78rem;
-  font-family: inherit;
-  font-weight: 500;
-  cursor: pointer;
-  outline: none;
-  transition: border-color var(--transition), background var(--transition);
-  -webkit-appearance: none;
-  appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238c8278' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 10px center;
-  padding-right: 30px;
-}
-.export-period-select:focus {
-  border-color: #00A19B;
-  box-shadow: 0 0 0 3px rgba(0, 161, 155, 0.15);
-}
-
 .export-btn {
   display: inline-flex;
   align-items: center;
@@ -5730,19 +5705,6 @@ body.dark-mode .rpt-badge-chip { background: rgba(255,255,255,0.06); border-colo
   border-color: #008f89;
 }
 
-body.dark-mode .export-period-select {
-  background: #1c1c1c;
-  border-color: #383838;
-  color: #e8e8e8;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 10px center;
-}
-body.dark-mode .export-period-select:focus {
-  border-color: #00A19B;
-  box-shadow: 0 0 0 3px rgba(0, 161, 155, 0.2);
-}
-
 body.dark-mode .export-btn-pdf {
   background: #00A19B;
   border-color: #00A19B;
@@ -5763,7 +5725,6 @@ body.dark-mode .export-btn-pdf:hover {
   }
   .export-controls { gap: 8px; }
   .export-btn { padding: 0 12px; font-size: 0.72rem; height: 32px; }
-  .export-period-select { font-size: 0.72rem; height: 32px; padding-right: 28px; }
   .export-controls-vitals { margin-top: 8px; }
   .vitals-period-tabs { flex-wrap: wrap; }
   .vitals-header-right { flex-wrap: wrap; gap: 8px; }

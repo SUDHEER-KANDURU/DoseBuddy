@@ -1699,20 +1699,7 @@ async function renderReports() {
     const periodLabel = periodDays === 0 ? "All Time" : `Last ${periodDays} Days`;
 
     // Sync the export dropdown to match the active tab so PDF exports are consistent
-    const exportSelect = document.getElementById("reports-export-period");
-    if (exportSelect) {
-        if (period === "all") {
-            exportSelect.value = "all";
-        } else if (periodDays <= 7) {
-            exportSelect.value = "7";
-        } else if (periodDays <= 30) {
-            exportSelect.value = "30";
-        } else if (periodDays <= 90) {
-            exportSelect.value = "90";
-        } else {
-            exportSelect.value = "all";
-        }
-    }
+    // (dropdown removed — period is now read directly from adashCurrentPeriod in exportReportsPDF)
 
     const dashEmpty = document.getElementById("reports-empty");
     const dashCtx   = document.getElementById("weekly-chart");
@@ -5984,7 +5971,9 @@ async function exportReportsPDF() {
     const restore = setExportLoading(btn, "Generating…");
 
     try {
-        const period = document.getElementById("reports-export-period")?.value || "all";
+        const period = adashCurrentPeriod !== undefined
+            ? (adashCurrentPeriod === "all" ? "all" : String(adashCurrentPeriod))
+            : "all";
         const now = new Date();
 
         const [histRes, statsRes, bmiRes, vitalsRes, streakRes] = await Promise.all([

@@ -274,11 +274,9 @@ img, canvas, svg, video { max-width: 100%; }
   }
   .export-controls      { gap: 8px; flex-wrap: wrap; }
   .export-btn           { height: 36px; padding: 0 12px; font-size: 0.75rem; }
-  .export-period-select { height: 36px; font-size: 0.75rem; }
 }
 @media (max-width: 480px) {
   .export-btn           { height: 38px; font-size: 0.72rem; }
-  .export-period-select { height: 38px; }
 }
 
 /* ── History page ────────────────────────────────────────── */
@@ -507,15 +505,15 @@ img, canvas, svg, video { max-width: 100%; }
   .upload-browse-btn,
   .autofill-btn,
   .tab-btn,
-  .sidebar-link,
   .vitals-period-btn,
   .hist-add-btn,
   .ai-search-btn,
   .calculate-btn         { min-height: 44px; }
 
+  /* sidebar-link sizing is handled in FIX 2 with compact values */
+
   .icon-btn          { width: 40px; height: 40px; }
   .user-avatar-btn   { width: 36px; height: 36px; }
-  .sidebar-link      { padding: 11px var(--space-3); }
   .action-btn        { min-height: 36px; }
 
   /* inputs are easy to tap */
@@ -882,42 +880,128 @@ img, canvas, svg, video { max-width: 100%; }
 }
 
 
-/* ── FIX 2: Sidebar — sticky footer, independent scroll ───── */
+/* ── FIX 2: Sidebar — no-scroll fit on all mobile phones ───────── */
 /*
-   .sidebar already has height:100vh + overflow:hidden (fixed in
-   style.css).  Here we ensure the footer never gets pushed off
-   screen on very small phones.
+   ROOT CAUSE:
+   1. `height: 100vh` on the sidebar measures the full browser viewport
+      including the browser's address bar and navigation chrome. On Android
+      Chrome this leaves ~128px less visible space, so the sidebar footer
+      can fall off-screen while overflow:hidden hides it.
+   2. `min-height: 44px` on every sidebar-link (from the touch-target rule
+      in style.css) makes each of the 9 links tall enough that the total
+      content height can exceed the visible drawer area.
+
+   FIX:
+   - Switch to `100dvh` (dynamic viewport height — excludes browser chrome).
+   - Reduce sidebar link height to 40px on mobile (still fully accessible).
+   - Tighten nav/footer padding and gaps so all 9 items fit in ≤ 600px.
+   - Keep `.sidebar-footer` pinned with `flex-shrink: 0` so it never scrolls.
+   - Desktop layout (≥ 1025px) is completely unchanged.
 */
 @media (max-width: 1024px) {
 
+  /* ── 1. Use dynamic viewport height so browser chrome is excluded ── */
   .sidebar {
-    height: 100vh !important;         /* guarantee full viewport */
-    overflow: hidden !important;       /* sidebar itself never scrolls */
+    height: 100dvh !important;
+    overflow: hidden !important;
     display: flex;
     flex-direction: column;
   }
 
-  /* Nav section scrolls independently */
+  /* ── 2. Nav occupies remaining space and scrolls only if truly needed ── */
   .sidebar-nav {
     flex: 1 1 auto;
+    min-height: 0;           /* critical — lets flex shrink below content size */
     overflow-y: auto;
     overflow-x: hidden;
     -webkit-overflow-scrolling: touch;
-    /* thin scrollbar on WebKit */
     scrollbar-width: thin;
     scrollbar-color: var(--border) transparent;
-    /* ensure it doesn't grow past the available space */
-    min-height: 0;
   }
 
-  /* Footer always sticks to the bottom — never hidden */
+  /* ── 3. Footer always pinned — never scrolls away ── */
   .sidebar-footer {
     flex-shrink: 0;
-    position: relative;   /* static in flex column = sticks to bottom */
     z-index: 1;
-    background: var(--surface);  /* covers any scroll-behind content */
+    background: var(--surface);
     border-top: 1px solid var(--border);
   }
+}
+
+/* ── Mobile phones (≤ 768px): compact sizing to fit all items on screen ── */
+/*
+   Height budget for 360×800 (worst case — ~660px usable after browser chrome):
+     Nav padding top/bottom:  10 + 8  = 18px
+     7 nav links × 40px       = 280px
+     6 gaps × 2px             = 12px
+     Footer border + padding: = 29px  (1 + 10 + 8 + 10)
+     2 footer links × 40px    = 80px
+     1 footer gap × 2px       = 2px
+     TOTAL                    ≈ 421px  ← well within 660px
+*/
+@media (max-width: 768px) {
+
+  /* Compact nav padding */
+  .sidebar-nav {
+    padding: 10px var(--space-3) 8px;
+    gap: 2px;
+  }
+
+  /* Reduce each nav link height: 40px is large enough to tap comfortably */
+  .sidebar-link {
+    padding: 8px var(--space-3) !important;
+    min-height: 40px !important;
+    font-size: 0.8rem;
+    gap: var(--space-2);
+  }
+
+  /* Icons: 15px saves 2px per link while remaining readable */
+  .nav-icon {
+    width: 15px;
+    height: 15px;
+  }
+
+  /* Compact footer padding */
+  .sidebar-footer {
+    padding: 8px var(--space-3) 10px;
+    gap: 2px;
+  }
+
+  /* Dark mode toggle row mirrors nav link sizing */
+  .sidebar-theme-row {
+    padding: 8px var(--space-3) !important;
+    min-height: 40px !important;
+    font-size: 0.8rem;
+    gap: var(--space-2);
+  }
+
+  .sidebar-theme-label {
+    font-size: 0.8rem;
+  }
+
+  /* Section label (if any): tighter margins */
+  .nav-section-label {
+    padding: var(--space-2) var(--space-2) var(--space-1);
+    margin-top: var(--space-2);
+    margin-bottom: 0;
+    font-size: 0.6rem;
+  }
+}
+
+/* ── Extra compact for shortest common Android screen (360×640) ── */
+@media (max-width: 768px) and (max-height: 680px) {
+  .sidebar-link,
+  .sidebar-theme-row {
+    padding: 6px var(--space-3) !important;
+    min-height: 36px !important;
+    font-size: 0.76rem;
+  }
+
+  .sidebar-nav { padding: 8px var(--space-3) 6px; gap: 1px; }
+  .sidebar-footer { padding: 6px var(--space-3) 8px; gap: 1px; }
+
+  .nav-icon { width: 14px; height: 14px; }
+  .sidebar-theme-label { font-size: 0.76rem; }
 }
 
 /* Scrollbar styling for webkit (Chrome, Safari, Edge) */
@@ -1342,16 +1426,15 @@ img, canvas, svg, video { max-width: 100%; }
     gap: var(--space-2);
   }
 
-  .export-btn,
-  .export-period-select {
-    flex: 1 1 calc(50% - var(--space-2));
-    min-width: 120px;
+  /* Export button takes full width on narrow phones */
+  .export-btn {
+    flex: 1 1 100%;
+    justify-content: center;
   }
 }
 
 @media (max-width: 480px) {
-  .export-btn,
-  .export-period-select {
+  .export-btn {
     flex: 1 1 100%;
   }
 }
@@ -1492,10 +1575,9 @@ img, canvas, svg, video { max-width: 100%; }
     flex-shrink: 0;
   }
 
-  /* Ensure sidebar opens fully even when keyboard is visible */
+  /* Sidebar open: use 100dvh so virtual keyboard doesn't affect height */
   .sidebar.open {
-    height: 100dvh;   /* dynamic viewport height accounts for
-                         virtual keyboard on mobile browsers */
+    height: 100dvh !important;
   }
 }
 
