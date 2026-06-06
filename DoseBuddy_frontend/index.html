@@ -449,7 +449,7 @@
                     <span class="legal-section-icon">🗑️</span>
                     <h4>Your Rights</h4>
                 </div>
-                <p>You have the right to access, correct, or delete your personal data at any time through your profile settings. You may also request complete account deletion by contacting our support team at dosebuddySupport@gmail.com.</p>
+                <p>You have the right to access, correct, or delete your personal data at any time through your profile settings. You may also request complete account deletion by contacting our support team at dosebuddy.health@gmail.com.</p>
             </div>
         </div>
         <div class="legal-modal-footer">
@@ -1085,6 +1085,8 @@
                     <div>
                         <h2 class="page-title">Analytics &amp; Reports</h2>
                         <p class="page-subtitle">Track your medication adherence and health patterns</p>
+                        <!-- Period badge — updated by renderReports() when tab changes -->
+                        <span class="reports-period-badge" id="reports-period-badge">Last 7 Days</span>
                     </div>
                 </div>
                 <div class="reports-header-right">
@@ -1100,6 +1102,7 @@
                         <select class="export-period-select" id="reports-export-period" aria-label="Export period">
                             <option value="7">Last 7 days</option>
                             <option value="30">Last 30 days</option>
+                            <option value="90">Last 90 days</option>
                             <option value="all">All time</option>
                         </select>
                         <button class="export-btn export-btn-pdf" id="export-reports-pdf" title="Export PDF report">
@@ -1791,97 +1794,6 @@
 
         </section>
 
-        <section id="bmi-view" class="view app-view">
-
-            <div class="page-header">
-                <div class="page-header-left">
-                    <div class="page-icon-wrap">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="page-icon">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/>
-                        </svg>
-                    </div>
-                    <div>
-                        <h1 class="page-title">BMI Calculator</h1>
-                        <p class="page-subtitle">Track your Body Mass Index and health metrics</p>
-                    </div>
-                </div>
-            </div>
-
-            <div class="card bmi-card">
-                <div class="card-header">
-                    <div>
-                        <h3 class="card-title">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="18" height="18" style="display:inline-block;vertical-align:middle;margin-right:8px;">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 15.75V18m-7.5-6.75h.008v.008H8.25v-.008zm0 2.25h.008v.008H8.25V13.5zm0 2.25h.008v.008H8.25v-.008zm0 2.25h.008v.008H8.25V18zm2.498-6.75h.007v.008h-.007v-.008zm0 2.25h.007v.008h-.007V13.5zm0 2.25h.007v.008h-.007v-.008zm0 2.25h.007v.008h-.007V18zm2.504-6.75h.008v.008h-.008v-.008zm0 2.25h.008v.008h-.008V13.5zm0 2.25h.008v.008h-.008v-.008zm0 2.25h.008v.008h-.008V18zm2.498-6.75h.008v.008h-.008v-.008zm0 2.25h.008v.008h-.008V13.5zM8.25 6h7.5v2.25h-7.5V6zM12 2.25c-1.892 0-3.758.11-5.593.322C5.307 2.7 4.5 3.65 4.5 4.757V19.5a2.25 2.25 0 002.25 2.25h10.5a2.25 2.25 0 002.25-2.25V4.757c0-1.108-.806-2.057-1.907-2.185A48.507 48.507 0 0012 2.25z"/>
-                            </svg>
-                            Calculate Your BMI
-                        </h3>
-                        <p class="card-subtitle">Enter your height and weight to calculate your Body Mass Index</p>
-                    </div>
-                </div>
-
-                <div class="bmi-input-section">
-                    <div class="bmi-input-row">
-                        <div class="bmi-input-group">
-                            <label for="bmi-height-view" class="bmi-label">Height (cm)</label>
-                            <input type="number" id="bmi-height-view" class="bmi-input" placeholder="170" min="50" max="300" step="0.1">
-                        </div>
-                        <div class="bmi-input-group">
-                            <label for="bmi-weight-view" class="bmi-label">Weight (kg)</label>
-                            <input type="number" id="bmi-weight-view" class="bmi-input" placeholder="70" min="20" max="500" step="0.1">
-                        </div>
-                    </div>
-                    <button id="calculate-bmi-view-btn" class="primary-btn full-width">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 15.75V18m-7.5-6.75h.008v.008H8.25v-.008zm0 2.25h.008v.008H8.25V13.5zm0 2.25h.008v.008H8.25v-.008zm0 2.25h.008v.008H8.25V18zm2.498-6.75h.007v.008h-.007v-.008zm0 2.25h.007v.008h-.007V13.5zm0 2.25h.007v.008h-.007v-.008zm0 2.25h.007v.008h-.007V18zm2.504-6.75h.008v.008h-.008v-.008zm0 2.25h.008v.008h-.008V13.5zm0 2.25h.008v.008h-.008v-.008zm0 2.25h.008v.008h-.008V18zm2.498-6.75h.008v.008h-.008v-.008zm0 2.25h.008v.008h-.008V13.5zM8.25 6h7.5v2.25h-7.5V6zM12 2.25c-1.892 0-3.758.11-5.593.322C5.307 2.7 4.5 3.65 4.5 4.757V19.5a2.25 2.25 0 002.25 2.25h10.5a2.25 2.25 0 002.25-2.25V4.757c0-1.108-.806-2.057-1.907-2.185A48.507 48.507 0 0012 2.25z"/>
-                        </svg>
-                        Calculate BMI
-                    </button>
-                </div>
-
-                <div id="bmi-result-section-view" class="bmi-result-section" style="display:none;">
-                    <div class="bmi-result-card">
-                        <div class="bmi-value-display">
-                            <span class="bmi-value-label">Your BMI</span>
-                            <h2 class="bmi-value-number" id="bmi-value-display-view">0.0</h2>
-                        </div>
-                        <div class="bmi-status-badge" id="bmi-status-badge-view">
-                            <span class="bmi-status-icon" id="bmi-status-icon-view">✓</span>
-                            <span class="bmi-status-text" id="bmi-status-text-view">Healthy Weight</span>
-                        </div>
-                    </div>
-                </div>
-
-                <p class="bmi-disclaimer">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="14" height="14">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z"/>
-                    </svg>
-                    BMI is a general indicator. Consult healthcare professionals for personalized advice.
-                </p>
-            </div>
-
-            <div class="card health-insights-card">
-                <div class="card-header">
-                    <div>
-                        <h3 class="card-title">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="18" height="18" style="display:inline-block;vertical-align:middle;margin-right:8px;">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M12 18v-5.25m0 0a6.01 6.01 0 001.5-.189m-1.5.189a6.01 6.01 0 01-1.5-.189m3.75 7.478a12.06 12.06 0 01-4.5 0m3.75 2.383a14.406 14.406 0 01-3 0M14.25 18v-.192c0-.983.658-1.823 1.508-2.316a7.5 7.5 0 10-7.517 0c.85.493 1.509 1.333 1.509 2.316V18"/>
-                            </svg>
-                            Health Insights
-                        </h3>
-                        <p class="card-subtitle">Personalized recommendations based on your BMI</p>
-                    </div>
-                </div>
-                <div id="health-insights-content-view">
-                    <div class="health-insights-empty">
-                        <span class="empty-icon">💡</span>
-                        <p class="empty-text">Calculate your BMI to receive personalized health suggestions and diet recommendations.</p>
-                    </div>
-                </div>
-            </div>
-
-        </section>
-
         <section id="vitals-view" class="view app-view">
 
             <div class="page-header">
@@ -2337,7 +2249,7 @@
     <div class="modal-box modal-box-sm">
         <div class="modal-header"><div class="modal-header-icon green-bg"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z"/></svg></div><div><h3 class="modal-title" id="modal-help-title">Help &amp; Support</h3><p class="modal-subtitle">We are here to help you</p></div><button class="modal-close" data-modal="modal-help" aria-label="Close">&times;</button></div>
         <div class="modal-body">
-            <div class="help-contact-card"><div class="help-contact-icon">&#x2709;</div><div><p class="help-contact-label">Support Email</p><p class="help-contact-email">dosebuddySupport@gmail.com</p></div><button class="help-copy-btn" id="help-copy-email" title="Copy email"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="15" height="15"><path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184"/></svg></button><a class="help-mailto-btn" href="mailto:dosebuddySupport@gmail.com">Send Email</a></div>
+            <div class="help-contact-card"><div class="help-contact-icon">&#x2709;</div><div><p class="help-contact-label">Support Email</p><p class="help-contact-email">dosebuddy.health@gmail.com</p></div><button class="help-copy-btn" id="help-copy-email" title="Copy email"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="15" height="15"><path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184"/></svg></button><a class="help-mailto-btn" href="mailto:dosebuddy.health@gmail.com">Send Email</a></div>
             <div class="modal-section-label">Frequently Asked Questions</div>
             <div class="faq-list">
                 <details class="faq-item"><summary class="faq-question">How do I add a medicine?</summary><p class="faq-answer">Go to <strong>Add Medicine</strong> in the sidebar. Fill in the medicine name, dosage, instructions, start/end dates, and reminder times. You can also upload a prescription image to auto-fill the form using AI.</p></details>

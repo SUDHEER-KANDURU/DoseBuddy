@@ -242,8 +242,19 @@ public class IntakeLogController {
         return ResponseEntity.ok(Map.of("created", created));
     }
 
+    /**
+     * Returns adherence statistics for a user over the requested period.
+     *
+     * @param userId  the user whose stats are calculated
+     * @param days    number of days to look back (7, 30, 90, …).
+     *                Pass 0 or omit to get all-time stats (bounded to
+     *                a 3650-day window to keep queries sane).
+     */
     @GetMapping("/adherence/stats/{userId}")
-    public ResponseEntity<?> getAdherenceStats(@PathVariable Long userId) {
+    public ResponseEntity<?> getAdherenceStats(
+            @PathVariable Long userId,
+            @RequestParam(name = "days", defaultValue = "0") int days) {
+
         User marker = userRepo.findById(userId).orElse(null);
         if (marker == null) {
             return ResponseEntity.badRequest().body("User not found");
@@ -253,7 +264,13 @@ public class IntakeLogController {
         LocalDate weekStart  = today.minusDays(6);
         LocalDate monthStart = today.minusDays(29);
 
-        LocalDate statsStart = today.minusDays(89);
+        // Determine the stats window.
+        // days == 0  → "All Time"  (use a large but bounded window)
+        // days > 0   → exactly that many calendar days back from today
+        LocalDate statsStart = (days > 0)
+                ? today.minusDays(days - 1)   // inclusive: e.g. days=7 → last 7 days
+                : today.minusDays(3649);       // ~10 years — effectively "all time"
+
         List<IntakeLog> allLogs   = logRepo.findByMarkerAndDateBetween(marker, statsStart, today);
         List<IntakeLog> todayLogs = logRepo.findByMarkerAndDate(marker, today);
         List<IntakeLog> weekLogs  = logRepo.findByMarkerAndDateBetween(marker, weekStart, today);

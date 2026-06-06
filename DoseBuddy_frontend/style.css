@@ -234,7 +234,7 @@ p  { color: var(--text-secondary); }
   border-right: 1px solid var(--border);
   display: flex; flex-direction: column;
   z-index: 200;
-  overflow-y: auto; overflow-x: hidden;
+  overflow: hidden; /* nav section handles its own scroll */
   transition: background var(--transition), border-color var(--transition), transform var(--transition);
 }
 
@@ -242,6 +242,11 @@ p  { color: var(--text-secondary); }
   flex: 1;
   padding: var(--space-4) var(--space-3) var(--space-3);
   display: flex; flex-direction: column; gap: 2px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  /* Hide scrollbar visually but keep it scrollable */
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
 }
 
 .nav-section-label {
@@ -2605,14 +2610,14 @@ body.dark-mode .sidebar-theme-knob {
   border: 1px solid var(--border);
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-lg);
-  width: 100%; max-width: 580px;
+  width: 100%; max-width: min(580px, 95vw);
   max-height: 90vh;
   display: flex; flex-direction: column;
   overflow: hidden;
 }
 
-.modal-box-sm { max-width: 480px; }
-.modal-box-xs { max-width: 380px; }
+.modal-box-sm { max-width: min(480px, 95vw); }
+.modal-box-xs { max-width: min(380px, 95vw); }
 
 .modal-header {
   display: flex; align-items: center; gap: var(--space-3);
@@ -5875,7 +5880,6 @@ body.dark-mode .analytics-filter-tabs { background: #111; border-color: #2a2a2a;
   margin-bottom: var(--space-5);
 }
 
-.adash-health-score-card { }
 
 .adash-score-badge {
   padding: 5px 14px;
@@ -5948,7 +5952,7 @@ body.dark-mode .analytics-filter-tabs { background: #111; border-color: #2a2a2a;
 .adash-score-row-val { font-size: 0.75rem; font-weight: 700; color: var(--text-primary); white-space: nowrap; min-width: 28px; text-align: right; }
 
 /* Donut card */
-.adash-donut-card { }
+
 .adash-donut-body {
   display: flex; align-items: center;
   gap: var(--space-6); padding-top: var(--space-4);
@@ -6005,7 +6009,6 @@ body.dark-mode .analytics-filter-tabs { background: #111; border-color: #2a2a2a;
   margin-bottom: var(--space-5);
 }
 
-.adash-bmi-card { }
 
 .adash-bmi-category-row {
   display: flex; gap: var(--space-2); flex-wrap: wrap;
@@ -6025,7 +6028,7 @@ body.dark-mode .analytics-filter-tabs { background: #111; border-color: #2a2a2a;
 .adash-bmi-cat-pill.adash-bmi-cat-active.cat-obese       { background: var(--danger-light);    color: var(--danger);  border-color: rgba(220,38,38,0.3); }
 
 /* Vitals trend card */
-.adash-vitals-trends-card { }
+
 .adash-vitals-period-tabs {
   display: flex; gap: 4px;
   background: var(--bg); border: 1px solid var(--border);
@@ -6045,7 +6048,7 @@ body.dark-mode .adash-vp-btn.active { color: #000; }
   display: grid; grid-template-columns: 1fr 1fr;
   gap: var(--space-4); margin-top: var(--space-4);
 }
-.adash-vt-block { }
+
 .adash-vt-label {
   font-size: 0.72rem; font-weight: 600; color: var(--text-secondary);
   margin-bottom: var(--space-2);

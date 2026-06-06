@@ -1130,6 +1130,38 @@ function updateGreeting() {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  isMedicationActiveToday
+//
+//  Returns true when a medication should appear in "Today's Medicines":
+//    startDate <= todayStr  AND  endDate >= todayStr
+//
+//  The backend enforces this with the same inclusive query, but we also apply
+//  it client-side so the analytics stat-card "Active Medicines" count is always
+//  accurate — even if the meds array was populated from a cache or from an
+//  endpoint that doesn't filter by date (e.g. a future "all meds" list).
+//
+//  Same-day medicines (startDate === endDate === today) remain active for the
+//  full calendar day and become inactive starting the next day.  This mirrors
+//  the JPA query:
+//      startDate <= today  AND  endDate >= today
+//
+//  @param {Object} med        - medication object with startDate / endDate fields
+//  @param {string} todayStr   - "YYYY-MM-DD" string for today in LOCAL time
+//  @returns {boolean}
+// ─────────────────────────────────────────────────────────────────────────────
+function isMedicationActiveToday(med, todayStr) {
+    if (!med) return false;
+    const start = med.startDate || "";
+    const end   = med.endDate   || "";
+    // Missing dates → treat as active (backward-compat with older records)
+    if (!start && !end) return true;
+    // String comparison works for ISO "YYYY-MM-DD" format
+    if (start && start > todayStr) return false; // hasn't started yet
+    if (end   && end   < todayStr) return false; // already expired
+    return true;
+}
+
 async function renderDashboard() {
     if (!currentUser) return;
 
@@ -1145,7 +1177,14 @@ async function renderDashboard() {
     if (!dateElem || !tbody || !scheduleTable || !noMedsMsg) return;
 
     const today = new Date();
-    const todayStr = today.toISOString().split("T")[0];
+    // Use LOCAL date (not UTC via toISOString) so the date string matches the
+    // user's timezone rather than the UTC offset.  e.g. at 11 PM UTC+5:30 the
+    // local date is still "today" even though UTC rolled to the next day.
+    const todayStr = [
+        today.getFullYear(),
+        String(today.getMonth() + 1).padStart(2, "0"),
+        String(today.getDate()).padStart(2, "0")
+    ].join("-");
 
     let medsUrl;
 
@@ -1351,10 +1390,13 @@ function updateMissedDoseNotifications(meds, todayStr) {
 
     const newItems = [];
     meds.forEach(med => {
+        // Do not generate notifications for expired medicines
+        if (!isMedicationActiveToday(med, todayStr)) return;
+
         if (!Array.isArray(med.times)) return;
         med.times.forEach(t => {
-            const time       = (t.timeOfDay || "").substring(0, 5);
-            const [h, m]     = time.split(":").map(Number);
+            const time        = (t.timeOfDay || "").substring(0, 5);
+            const [h, m]      = time.split(":").map(Number);
             const doseMinutes = h * 60 + m;
             if (doseMinutes < nowMinutes) {
                 const taken = getDoseStatus(currentUser.id, med.id, todayStr, time) === "TAKEN";
@@ -1613,32 +1655,94 @@ function renderMissedMiniChart(labels, missedValues) {
 async function renderReports() {
     if (!currentUser) return;
 
+    // ── Determine the active period from the selected tab ─────────────────
+    // adashCurrentPeriod is set by setupAnalyticsFilterTabs().
+    // Default 7 on first load; "all" for All Time.
+    const period      = adashCurrentPeriod; // number of days, or "all"
+    const periodDays  = (period === "all" || !period) ? 0 : Number(period);
+    const periodLabel = periodDays === 0 ? "All Time" : `Last ${periodDays} Days`;
+
+    // Sync the export dropdown to match the active tab so PDF exports are consistent
+    const exportSelect = document.getElementById("reports-export-period");
+    if (exportSelect) {
+        if (period === "all") {
+            exportSelect.value = "all";
+        } else if (periodDays <= 7) {
+            exportSelect.value = "7";
+        } else if (periodDays <= 30) {
+            exportSelect.value = "30";
+        } else if (periodDays <= 90) {
+            exportSelect.value = "90";
+        } else {
+            exportSelect.value = "all";
+        }
+    }
+
     const dashEmpty = document.getElementById("reports-empty");
     const dashCtx   = document.getElementById("weekly-chart");
-
     const rptCtx    = document.getElementById("weekly-chart-reports");
     const rptEmpty  = document.getElementById("reports-empty-page");
 
     if (!dashCtx) return;
 
+    // ── Update the period badge in the reports header ─────────────────────
+    const periodBadgeEl = document.getElementById("reports-period-badge");
+    if (periodBadgeEl) periodBadgeEl.textContent = periodLabel;
+
     try {
-        const res = await fetch(`${API_BASE}/logs/summary/week/${currentUser.id}`);
-        if (!res.ok) throw new Error("Failed to load summary");
-        const data = await res.json();
+        // ── Fetch the full intake-log history (date-indexed) ──────────────
+        // We use /logs/history which returns all records, then slice
+        // client-side based on the selected period.  This avoids needing a
+        // new backend endpoint while keeping results perfectly consistent
+        // across every widget on the page.
+        const histRes = await fetch(`${API_BASE}/logs/history/${currentUser.id}`);
+        if (!histRes.ok) throw new Error("Failed to load history");
+        const allHistory = histRes.ok ? await histRes.json() : [];
 
-        const labels      = data.map((d) => d.date.substring(5)); // MM-DD
-        const takenValues  = data.map((d) => d.takenCount  || 0);
-        const missedValues = data.map((d) => d.missedCount || 0);
-        const hasData = takenValues.some((v) => v > 0) || missedValues.some((v) => v > 0);
+        // Filtered subset for the selected period (date field = "date")
+        const filtered = filterByPeriod(allHistory, period === "all" ? "all" : periodDays, "date");
 
+        // ── Build daily buckets for the chart ─────────────────────────────
+        // Determine the date range to display
+        let chartDays;
+        if (period === "all") {
+            // Show up to 90 days of history in the chart (more makes it unreadable)
+            chartDays = 90;
+        } else {
+            chartDays = periodDays;
+        }
+
+        const today   = new Date();
+        today.setHours(0, 0, 0, 0);
+        const buckets = {}; // "YYYY-MM-DD" → { taken:0, missed:0 }
+        for (let i = chartDays - 1; i >= 0; i--) {
+            const d = new Date(today);
+            d.setDate(d.getDate() - i);
+            buckets[d.toISOString().split("T")[0]] = { taken: 0, missed: 0 };
+        }
+
+        // Tally the filtered logs into buckets
+        filtered.forEach(log => {
+            const dateKey = (log.date || "").substring(0, 10);
+            if (!buckets[dateKey]) return; // outside our display window
+            const status = (log.status || "").toUpperCase();
+            if (status === "TAKEN")  buckets[dateKey].taken++;
+            else if (status === "MISSED") buckets[dateKey].missed++;
+        });
+
+        const sortedKeys   = Object.keys(buckets).sort();
+        const labels       = sortedKeys.map(k => k.substring(5)); // MM-DD
+        const takenValues  = sortedKeys.map(k => buckets[k].taken);
+        const missedValues = sortedKeys.map(k => buckets[k].missed);
+        const hasData      = takenValues.some(v => v > 0) || missedValues.some(v => v > 0);
+
+        // ── Dashboard mini chart (Weekly Adherence card on dashboard) ──────
         if (dashEmpty) {
             dashEmpty.style.display = hasData ? "none" : "block";
             if (!hasData) dashEmpty.textContent = "Chart will appear after you mark some doses as taken.";
         }
-
         if (weeklyChart) weeklyChart.destroy();
-
-        const chartConfig = {
+        weeklyChart = new Chart(dashCtx, {
             type: "bar",
             data: {
                 labels,
@@ -1670,19 +1774,17 @@ async function renderReports() {
                     legend: { display: true, position: "top", labels: { boxWidth: 12, font: { size: 11 }, color: "#4a4540" } },
                 },
                 scales: {
-                    x: { grid: { color: "rgba(0,0,0,0.05)" }, ticks: { color: "#8c8278" } },
+                    x: { grid: { color: "rgba(0,0,0,0.05)" }, ticks: { color: "#8c8278", maxTicksLimit: 10 } },
                     y: { beginAtZero: true, ticks: { precision: 0, color: "#8c8278" }, grid: { color: "rgba(0,0,0,0.05)" } },
                 },
             },
-        };
+        });
 
-        weeklyChart = new Chart(dashCtx, chartConfig);
-
+        // ── Reports page chart ─────────────────────────────────────────────
         if (rptCtx) {
             if (rptEmpty) rptEmpty.style.display = hasData ? "none" : "flex";
             const existing = Chart.getChart(rptCtx);
             if (existing) existing.destroy();
-
             new Chart(rptCtx, {
                 type: "bar",
                 data: {
@@ -1720,68 +1822,82 @@ async function renderReports() {
                         },
                     },
                     scales: {
-                        x: { grid: { display: false }, ticks: { color: "#8c8278" } },
+                        x: { grid: { display: false }, ticks: { color: "#8c8278", maxTicksLimit: 10 } },
                         y: { beginAtZero: true, ticks: { precision: 0, color: "#8c8278" }, grid: { color: "rgba(0,0,0,0.05)" } },
                     },
                 },
             });
         }
 
+        // ── Stat cards — calculated from the filtered client-side data ──────
+        // We compute totals directly from the filtered history so the numbers
+        // match the chart exactly for any period.
+        const filteredTaken  = filtered.filter(l => (l.status || "").toUpperCase() === "TAKEN").length;
+        const filteredMissed = filtered.filter(l => (l.status || "").toUpperCase() === "MISSED").length;
+        const filteredTotal  = filtered.length;
+        const filteredAdher  = filteredTotal > 0
+            ? Math.round((filteredTaken / filteredTotal) * 1000) / 10  // one decimal
+            : 0;
+
+        // Also fetch the server-side stats with the correct period for
+        // the breakdown fields (missedToday, missedThisWeek, mostMissed…)
+        // which require server-side aggregation we can't easily replicate here.
+        const statsApiDays = periodDays === 0 ? 0 : periodDays;
         try {
-            const statsRes = await fetch(`${API_BASE}/logs/adherence/stats/${currentUser.id}`);
+            const statsRes = await fetch(
+                `${API_BASE}/logs/adherence/stats/${currentUser.id}?days=${statsApiDays}`
+            );
             if (statsRes.ok) {
                 const stats = await statsRes.json();
 
-                const totalEl = document.getElementById("rpt-total-doses");
-                const takenEl = document.getElementById("rpt-taken-doses");
+                // Override totals with client-computed values so they always
+                // match the chart for the selected period.
+                const totalEl  = document.getElementById("rpt-total-doses");
+                const takenEl  = document.getElementById("rpt-taken-doses");
                 const missedEl = document.getElementById("rpt-missed-doses");
-                const adherEl = document.getElementById("rpt-adherence");
+                const adherEl  = document.getElementById("rpt-adherence");
 
-                if (totalEl) totalEl.textContent = stats.totalDoses || 0;
-                if (takenEl) takenEl.textContent = stats.takenDoses || 0;
-                if (missedEl) missedEl.textContent = stats.missedDoses || 0;
-                if (adherEl) adherEl.textContent = (stats.adherencePercentage || 0) + "%";
+                if (totalEl)  totalEl.textContent  = filteredTotal;
+                if (takenEl)  takenEl.textContent   = filteredTaken;
+                if (missedEl) missedEl.textContent  = filteredMissed;
+                if (adherEl)  adherEl.textContent   = filteredAdher + "%";
 
-                const missedCard = document.getElementById("missed-doses-card");
-                const missedTodayEl = document.getElementById("missed-today");
-                const missedWeekEl = document.getElementById("missed-week");
-                const missedMonthEl = document.getElementById("missed-month");
-                const mostMissedMedEl = document.getElementById("most-missed-med");
+                // Missed-doses detail card
+                const missedCard        = document.getElementById("missed-doses-card");
+                const missedTodayEl     = document.getElementById("missed-today");
+                const missedWeekEl      = document.getElementById("missed-week");
+                const missedMonthEl     = document.getElementById("missed-month");
+                const mostMissedMedEl   = document.getElementById("most-missed-med");
                 const mostMissedCountEl = document.getElementById("most-missed-count");
                 const missedAlertBanner = document.getElementById("missed-alert-banner");
-                const mdsSuccessPanel = document.getElementById("mds-success-panel");
+                const mdsSuccessPanel   = document.getElementById("mds-success-panel");
 
-                if (missedCard && stats.missedDoses > 0) {
+                if (missedCard && filteredMissed > 0) {
                     missedCard.style.display = "block";
-
-                    if (missedTodayEl) missedTodayEl.textContent = stats.missedToday || 0;
-                    if (missedWeekEl) missedWeekEl.textContent = stats.missedThisWeek || 0;
-                    if (missedMonthEl) missedMonthEl.textContent = stats.missedThisMonth || 0;
-
-                    if (mostMissedMedEl) {
-                        mostMissedMedEl.textContent = stats.mostMissedMedicine || "\u2014";
-                    }
+                    // These sub-counts always refer to absolute today/week/month
+                    // (they're independent of the selected period).
+                    if (missedTodayEl)  missedTodayEl.textContent  = stats.missedToday       || 0;
+                    if (missedWeekEl)   missedWeekEl.textContent   = stats.missedThisWeek    || 0;
+                    if (missedMonthEl)  missedMonthEl.textContent  = stats.missedThisMonth   || 0;
+                    if (mostMissedMedEl) mostMissedMedEl.textContent = stats.mostMissedMedicine || "—";
                     if (mostMissedCountEl) {
-                        const count = stats.mostMissedCount || 0;
-                        mostMissedCountEl.textContent = count > 0 ? `${count} time${count > 1 ? 's' : ''}` : "";
+                        const cnt = stats.mostMissedCount || 0;
+                        mostMissedCountEl.textContent = cnt > 0 ? `${cnt} time${cnt > 1 ? "s" : ""}` : "";
                     }
 
-                    const adherence = stats.adherencePercentage || 0;
                     if (missedAlertBanner && mdsSuccessPanel) {
-                        if (adherence < 70) {
+                        if (filteredAdher < 70) {
                             missedAlertBanner.style.display = "flex";
-                            mdsSuccessPanel.style.display = "none";
+                            mdsSuccessPanel.style.display   = "none";
                             const alertTextEl = document.getElementById("missed-alert-text");
                             if (alertTextEl) {
-                                if (adherence < 50) {
-                                    alertTextEl.textContent = `Your adherence is critically low at ${adherence}%. Please consult your healthcare provider and enable stronger reminders.`;
-                                } else {
-                                    alertTextEl.textContent = `Your adherence dropped to ${adherence}%. Try enabling reminders or adjusting your medication schedule.`;
-                                }
+                                alertTextEl.textContent = filteredAdher < 50
+                                    ? `Your adherence is critically low at ${filteredAdher}% for ${periodLabel}. Please consult your healthcare provider and enable stronger reminders.`
+                                    : `Your adherence dropped to ${filteredAdher}% for ${periodLabel}. Try enabling reminders or adjusting your medication schedule.`;
                             }
                         } else {
                             missedAlertBanner.style.display = "none";
-                            mdsSuccessPanel.style.display = "flex";
+                            mdsSuccessPanel.style.display   = "flex";
                         }
                     }
 
@@ -1792,15 +1908,25 @@ async function renderReports() {
                 }
             }
         } catch (statsErr) {
-            console.warn("Could not load adherence stats:", statsErr);
+            // Stats detail failed — still show the client-computed totals above
+            console.warn("Could not load adherence stats detail:", statsErr);
+
+            const totalEl  = document.getElementById("rpt-total-doses");
+            const takenEl  = document.getElementById("rpt-taken-doses");
+            const missedEl = document.getElementById("rpt-missed-doses");
+            const adherEl  = document.getElementById("rpt-adherence");
+            if (totalEl)  totalEl.textContent  = filteredTotal;
+            if (takenEl)  takenEl.textContent   = filteredTaken;
+            if (missedEl) missedEl.textContent  = filteredMissed;
+            if (adherEl)  adherEl.textContent   = filteredAdher + "%";
         }
 
         // Render streak analytics in reports
         renderReportsStreak();
 
     } catch (err) {
-        console.error(err);
-        if (dashEmpty) { dashEmpty.style.display = "block"; dashEmpty.textContent = "Could not load weekly summary."; }
+        console.error("[renderReports]", err);
+        if (dashEmpty) { dashEmpty.style.display = "block"; dashEmpty.textContent = "Could not load report data."; }
         if (rptEmpty)  { rptEmpty.style.display  = "flex"; }
     }
 
@@ -1882,8 +2008,20 @@ async function renderAnalyticsDashboard() {
 // ── 1. Stat Cards ─────────────────────────────────────────────────────────────
 function adashRenderStatCards(meds, stats, todayLogs, bmiHistory, vitalsHist) {
     // Medications
-    const totalMeds  = meds.length;
-    const activeMeds = meds.filter(m => m.active !== false).length;
+    const totalMeds = meds.length;
+
+    // "Active" means: today's date is within [startDate, endDate] inclusive.
+    // The backend already filters meds via startDate<=today AND endDate>=today,
+    // so every med in this array should technically be active.  We re-check
+    // client-side using the same inclusive logic so the count is accurate even
+    // if the array was sourced from a slightly stale cache.
+    const _now      = new Date();
+    const todayStr  = [
+        _now.getFullYear(),
+        String(_now.getMonth() + 1).padStart(2, "0"),
+        String(_now.getDate()).padStart(2, "0")
+    ].join("-"); // local "YYYY-MM-DD"
+    const activeMeds = meds.filter(m => isMedicationActiveToday(m, todayStr)).length;
 
     setText("adash-total-meds", totalMeds);
     setText("adash-active-meds", activeMeds);
@@ -2499,38 +2637,37 @@ function adashGenerateFallbackInsights(stats, bmiHistory, vitalsHist, streak) {
     return insights.slice(0, 4);
 }
 
-// ── Period filter helper ───────────────────────────────────────────────────────
+// ── Period filter helper (alias — delegates to the canonical filterByPeriod) ──
+// All call sites that previously used adashFilterByPeriod now go through
+// the single implementation above.
 function adashFilterByPeriod(items, period, dateField) {
-    if (period === "all" || !period) return items;
-    const days = parseInt(period, 10);
-    if (isNaN(days)) return items;
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - days);
-    cutoff.setHours(0, 0, 0, 0);
-    return items.filter(item => {
-        const d = new Date(item[dateField]);
-        return !isNaN(d) && d >= cutoff;
-    });
+    return filterByPeriod(items, period, dateField);
 }
 
 // ── Analytics filter tab wiring ───────────────────────────────────────────────
+// When the user clicks a period tab (7 Days / 30 Days / 90 Days / All Time):
+//  1. Update the active tab highlight
+//  2. Store the new period in adashCurrentPeriod
+//  3. Re-run renderReports() — this rebuilds the chart + stat cards + badge
+//  4. Re-render the BMI trend and vitals charts inside renderAnalyticsDashboard
+//     (they are called by renderAnalyticsDashboard → already triggered inside renderReports)
 function setupAnalyticsFilterTabs() {
     document.querySelectorAll(".analytics-filter-btn").forEach(btn => {
         btn.addEventListener("click", function () {
+            // Active highlight
             document.querySelectorAll(".analytics-filter-btn").forEach(b => b.classList.remove("active"));
             this.classList.add("active");
-            const period = this.dataset.period;
-            adashCurrentPeriod = period === "all" ? "all" : parseInt(period, 10);
 
-            // Re-render period-sensitive charts
+            // Persist the new period
+            const raw = this.dataset.period;
+            adashCurrentPeriod = raw === "all" ? "all" : parseInt(raw, 10);
+
             if (!currentUser) return;
-            Promise.all([
-                fetch(`${API_BASE}/bmi/history/${currentUser.id}`).then(r => r.ok ? r.json() : []),
-                fetch(`${API_BASE}/vitals/history/${currentUser.id}`).then(r => r.ok ? r.json() : [])
-            ]).then(([bmiHistory, vitalsHist]) => {
-                adashRenderBmiChart(bmiHistory);
-                adashRenderVitalsCharts(vitalsHist, adashCurrentVitalsPeriod || "week");
-            }).catch(err => console.warn("[Analytics] Filter reload error:", err));
+
+            // Re-render the full reports page with the new period — this is
+            // the single trigger that updates chart, stat cards, alert banners,
+            // mini chart, streak, AND the analytics dashboard below.
+            renderReports();
         });
     });
 }
@@ -2684,12 +2821,21 @@ function scheduleNotificationsForToday() {
     clearScheduledTimeouts();
 
     const now = new Date();
-    const todayStr = now.toISOString().split("T")[0];
+    // Use the LOCAL date string so the comparison works in the user's timezone
+    const todayStr = [
+        now.getFullYear(),
+        String(now.getMonth() + 1).padStart(2, "0"),
+        String(now.getDate()).padStart(2, "0")
+    ].join("-");
+
     if (medsCacheDate !== todayStr) return;
 
     const nowMs = now.getTime();
 
     medsCache.forEach((med) => {
+        // Skip medicines that are not active today (expiry guard)
+        if (!isMedicationActiveToday(med, todayStr)) return;
+
         if (!Array.isArray(med.times)) return;
 
         med.times.forEach((timeObj) => {
@@ -2704,8 +2850,7 @@ function scheduleNotificationsForToday() {
             if (delayMs <= 0 || delayMs > 12 * 60 * 60 * 1000) return;
 
             const alreadyTaken =
-                getDoseStatus(currentUser.id, med.id, todayStr, displayTime) ===
-                "TAKEN";
+                getDoseStatus(currentUser.id, med.id, todayStr, displayTime) === "TAKEN";
             if (alreadyTaken) return;
 
             const timeoutId = setTimeout(() => {
@@ -2717,13 +2862,18 @@ function scheduleNotificationsForToday() {
     });
 }
 
-function checkReminders(){
+function checkReminders() {
 
     if (!currentUser) return;
     if (!medsCache || medsCache.length === 0) return;
 
     const now = new Date();
-    const todayStr = now.toISOString().split("T")[0];
+    // Use local date string (matches how medsCacheDate is set in renderDashboard)
+    const todayStr = [
+        now.getFullYear(),
+        String(now.getMonth() + 1).padStart(2, "0"),
+        String(now.getDate()).padStart(2, "0")
+    ].join("-");
 
     if (medsCacheDate !== todayStr) return;
 
@@ -2731,33 +2881,36 @@ function checkReminders(){
     let changed = false;
     const toMarkMissed = [];
 
-    for (const med of medsCache){
+    for (const med of medsCache) {
+
+        // Skip medicines that are not active today (end-date expiry guard)
+        if (!isMedicationActiveToday(med, todayStr)) continue;
 
         if (!Array.isArray(med.times)) continue;
 
-        for (const timeObj of med.times){
+        for (const timeObj of med.times) {
 
             const rawTime = timeObj.timeOfDay || "";
-            const displayTime = rawTime.substring(0,5);
+            const displayTime = rawTime.substring(0, 5);
 
-            const [h,m] = displayTime.split(":").map(Number);
-            const doseMinutes = h*60 + m;
+            const [h, m] = displayTime.split(":").map(Number);
+            const doseMinutes = h * 60 + m;
 
             const diff = nowMinutes - doseMinutes;
 
-            if (diff >= 0 && diff <= 1){
+            if (diff >= 0 && diff <= 1) {
                 triggerDoseNotification(med, todayStr, displayTime);
                 changed = true;
             }
 
-            if (diff > 5){
+            if (diff > 5) {
                 const status = getDoseStatus(currentUser.id, med.id, todayStr, displayTime);
-                if (status !== "TAKEN" && status !== "MISSED"){
+                if (status !== "TAKEN" && status !== "MISSED") {
                     toMarkMissed.push({
-                        userId: currentUser.id,
+                        userId:       currentUser.id,
                         medicationId: med.id,
-                        date: todayStr,
-                        time: displayTime
+                        date:         todayStr,
+                        time:         displayTime
                     });
                     changed = true;
                 }
@@ -2782,41 +2935,48 @@ function checkReminders(){
     }
 }
 
-function scheduleMedicineReminders(){
+function scheduleMedicineReminders() {
 
     clearScheduledTimeouts();
 
-    if(!medsCache || medsCache.length === 0) return;
+    if (!medsCache || medsCache.length === 0) return;
 
     const now = new Date();
-    const today = now.toISOString().split("T")[0];
+    // Local date string to match the isMedicationActiveToday check
+    const today = [
+        now.getFullYear(),
+        String(now.getMonth() + 1).padStart(2, "0"),
+        String(now.getDate()).padStart(2, "0")
+    ].join("-");
 
-    for(const med of medsCache){
+    for (const med of medsCache) {
 
-        if(!Array.isArray(med.times)) continue;
+        // Skip medicines whose end date has passed (expiry guard)
+        if (!isMedicationActiveToday(med, today)) continue;
 
-        for(const t of med.times){
+        if (!Array.isArray(med.times)) continue;
 
-            const timeStr = (t.timeOfDay || "").substring(0,5);
-            if(!timeStr) continue;
+        for (const t of med.times) {
 
-            const [h,m] = timeStr.split(":").map(Number);
+            const timeStr = (t.timeOfDay || "").substring(0, 5);
+            if (!timeStr) continue;
+
+            const [h, m] = timeStr.split(":").map(Number);
 
             const reminderTime = new Date();
-            reminderTime.setHours(h,m,0,0);
+            reminderTime.setHours(h, m, 0, 0);
 
             const delay = reminderTime.getTime() - now.getTime();
 
-            if(delay <= 0) continue;
+            if (delay <= 0) continue;
 
-            const timeoutId = setTimeout(()=>{
+            const timeoutId = setTimeout(() => {
                 triggerDoseNotification(med, today, timeStr);
 
-                
-                const missTimeout = setTimeout(()=>{
+                const missTimeout = setTimeout(() => {
                     if (!currentUser) return;
                     const status = getDoseStatus(currentUser.id, med.id, today, timeStr);
-                    if(status !== "TAKEN" && status !== "MISSED"){
+                    if (status !== "TAKEN" && status !== "MISSED") {
                         markDoseMissed(currentUser.id, med.id, today, timeStr)
                             .then(() => {
                                 renderDashboard();
@@ -2824,7 +2984,7 @@ function scheduleMedicineReminders(){
                                 refreshActivityFeed();
                             });
                     }
-                }, 5 * 60 * 1000); 
+                }, 5 * 60 * 1000);
 
                 scheduledTimeouts.push(missTimeout);
 
@@ -5403,15 +5563,30 @@ function triggerConfetti() {
     setTimeout(() => container.remove(), 2500);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  SINGLE SOURCE OF TRUTH: period filter helper
+//
+//  Replaces the old duplicate adashFilterByPeriod / filterByPeriod functions.
+//  Both call sites now use this one function.
+//
+//  @param {Array}  items      - array of objects to filter
+//  @param {string|number} period
+//                 "all" → return everything
+//                 number or numeric string → return items from last N days
+//  @param {string} dateField  - key on each item whose value is a date string
+//  @returns {Array} filtered subset
+// ─────────────────────────────────────────────────────────────────────────────
 function filterByPeriod(items, period, dateField) {
-    if (period === "all") return items;
+    if (period === "all" || !period) return items;
     const days = parseInt(period, 10);
+    if (isNaN(days) || days <= 0) return items;
+    // Start of the cutoff day (midnight, local time)
     const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - days);
+    cutoff.setDate(cutoff.getDate() - (days - 1));
     cutoff.setHours(0, 0, 0, 0);
     return items.filter(item => {
         const d = new Date(item[dateField]);
-        return d >= cutoff;
+        return !isNaN(d) && d >= cutoff;
     });
 }
 

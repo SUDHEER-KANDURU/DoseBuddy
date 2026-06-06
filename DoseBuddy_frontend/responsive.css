@@ -667,3 +667,783 @@ img, canvas, svg, video { max-width: 100%; }
   .app-shell    { display: block; }
   .card         { box-shadow: none; border: 1px solid #ccc; }
 }
+
+/* ============================================================
+   MOBILE AUDIT FIXES — v2
+   Issues addressed:
+   1. Today's Medicines — stacked cards, no horizontal scroll
+   2. Sidebar — sticky footer, nav scrolls, 100vh enforced
+   3. Auth pages — icon overlap fix for all inputs
+   4. Profile modal — 95vw cap, vertical scroll, stacked buttons
+   5. Full audit pass — Dashboard, Reports, Profile, Notif, Sidebar
+   ============================================================ */
+
+
+/* ── FIX 1: Today's Medicines — Card layout on mobile ─────── */
+/*
+   On screens ≤ 767px the <table> is hidden and each <tr> in
+   #schedule-body is reflowed as a self-contained card.
+   The JS table still builds standard <tr>/<td> rows — we use
+   CSS display overrides so no JS changes are needed.
+*/
+@media (max-width: 767px) {
+
+  /* Hide the table wrapper's horizontal overflow; the card
+     layout needs none of it */
+  .table-wrapper {
+    overflow-x: visible;
+  }
+
+  /* Turn the table, thead and tbody into block containers */
+  #schedule-table,
+  #schedule-table thead,
+  #schedule-table tbody,
+  #schedule-table tr,
+  #schedule-table td,
+  #schedule-table th {
+    display: block;
+  }
+
+  /* Completely hide the header row — labels come from
+     data-label attributes set via CSS content */
+  #schedule-table thead tr {
+    position: absolute;
+    top: -9999px;
+    left: -9999px;
+  }
+
+  /* Each table row becomes a card */
+  #schedule-table tbody tr {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--space-3);
+    padding: var(--space-3);
+    box-shadow: var(--shadow-sm);
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* Each cell: flex row with a label on the left */
+  #schedule-table tbody td {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-2);
+    padding: 4px 0;
+    font-size: 0.82rem;
+    border: none;
+    width: 100%;
+    min-height: unset;
+  }
+
+  /* Pseudo-element labels from data attributes */
+  #schedule-table tbody td::before {
+    content: attr(data-label);
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+    min-width: 86px;
+    flex-shrink: 0;
+    padding-top: 2px;
+  }
+
+  /* Action cell: wrap buttons below the info, full width */
+  #schedule-table tbody td:last-child {
+    flex-direction: column;
+    align-items: stretch;
+    padding-top: var(--space-2);
+    margin-top: var(--space-1);
+    border-top: 1px solid var(--border-light);
+  }
+
+  #schedule-table tbody td:last-child::before {
+    display: none; /* no label for action cell */
+  }
+
+  /* Action cell buttons stack vertically */
+  #schedule-table tbody td:last-child .action-cell {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    width: 100%;
+  }
+
+  #schedule-table tbody td:last-child .action-btn {
+    width: 100%;
+    justify-content: center;
+    text-align: center;
+    min-height: 40px;
+    font-size: 0.8rem;
+  }
+
+  /* Status pill inside a cell */
+  #schedule-table tbody td .status-pill {
+    font-size: 0.72rem;
+    padding: 3px 10px;
+  }
+}
+
+
+/* ── FIX 1b: JS data-label injection helper ───────────────── */
+/*
+   The JS-built rows don't have data-label attributes; we target
+   them by nth-child order instead so the labels always appear.
+*/
+@media (max-width: 767px) {
+  #schedule-table tbody td:nth-child(1)::before { content: "Time"; }
+  #schedule-table tbody td:nth-child(2)::before { content: "Medicine"; }
+  #schedule-table tbody td:nth-child(3)::before { content: "Dosage"; }
+  #schedule-table tbody td:nth-child(4)::before { content: "Instructions"; }
+  #schedule-table tbody td:nth-child(5)::before { content: "Status"; }
+  #schedule-table tbody td:nth-child(6)::before { content: ""; }
+}
+
+
+/* ── FIX 2: Sidebar — sticky footer, independent scroll ───── */
+/*
+   .sidebar already has height:100vh + overflow:hidden (fixed in
+   style.css).  Here we ensure the footer never gets pushed off
+   screen on very small phones.
+*/
+@media (max-width: 1024px) {
+
+  .sidebar {
+    height: 100vh !important;         /* guarantee full viewport */
+    overflow: hidden !important;       /* sidebar itself never scrolls */
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Nav section scrolls independently */
+  .sidebar-nav {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    /* thin scrollbar on WebKit */
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+    /* ensure it doesn't grow past the available space */
+    min-height: 0;
+  }
+
+  /* Footer always sticks to the bottom — never hidden */
+  .sidebar-footer {
+    flex-shrink: 0;
+    position: relative;   /* static in flex column = sticks to bottom */
+    z-index: 1;
+    background: var(--surface);  /* covers any scroll-behind content */
+    border-top: 1px solid var(--border);
+  }
+}
+
+/* Scrollbar styling for webkit (Chrome, Safari, Edge) */
+.sidebar-nav::-webkit-scrollbar { width: 4px; }
+.sidebar-nav::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+.sidebar-nav::-webkit-scrollbar-track { background: transparent; }
+
+
+/* ── FIX 3: Auth pages — icon overlap on email/password ───── */
+/*
+   Issue: on some devices the icon and the input text overlap.
+   Root cause: height:42px on the input but top-centering of the
+   icon via position:absolute relies on the parent flex alignment.
+   Fix: force absolute vertical centering and ensure left padding
+   is always enough for the icon.
+*/
+.input-icon-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+/* Icon: always vertically centred, never moves */
+.input-icon {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  left: 12px;
+  width: 16px;
+  height: 16px;
+  color: var(--text-muted);
+  pointer-events: none;
+  flex-shrink: 0;
+  z-index: 2;
+}
+
+/* All icon-wrapped inputs: guaranteed left padding */
+.input-icon-wrap input,
+.input-icon-wrap input[type="email"],
+.input-icon-wrap input[type="password"],
+.input-icon-wrap input[type="text"],
+.input-icon-wrap input[type="date"],
+.input-icon-wrap input[type="tel"] {
+  padding-left: 40px !important;
+  padding-right: 13px;
+}
+
+/* Mobile: bigger touch target, keep 16px font to prevent iOS zoom */
+@media (max-width: 768px) {
+  .input-icon-wrap input,
+  .input-icon-wrap input[type="email"],
+  .input-icon-wrap input[type="password"],
+  .input-icon-wrap input[type="text"],
+  .input-icon-wrap input[type="date"],
+  .input-icon-wrap input[type="tel"] {
+    min-height: 48px;
+    font-size: 16px;            /* prevent iOS auto-zoom */
+    padding-top: 12px;
+    padding-bottom: 12px;
+    padding-left: 42px !important;
+  }
+
+  .input-icon {
+    left: 13px;
+    width: 17px;
+    height: 17px;
+  }
+}
+
+@media (max-width: 375px) {
+  .input-icon-wrap input,
+  .input-icon-wrap input[type="email"],
+  .input-icon-wrap input[type="password"],
+  .input-icon-wrap input[type="text"],
+  .input-icon-wrap input[type="date"],
+  .input-icon-wrap input[type="tel"] {
+    padding-left: 40px !important;
+    font-size: 16px;
+  }
+}
+
+/* Auth card itself must never overflow the viewport */
+@media (max-width: 540px) {
+  .auth-page {
+    padding: var(--space-4) var(--space-3);
+    min-height: 100dvh;          /* dvh = dynamic viewport height (iOS) */
+  }
+
+  .auth-card {
+    width: 100%;
+    max-width: 100%;
+    padding: var(--space-5) var(--space-4);
+    border-radius: var(--radius-lg);
+    box-sizing: border-box;
+  }
+
+  /* Forgot password link — ensure it stays on its own line */
+  .auth-forgot-row {
+    flex-wrap: wrap;
+    gap: var(--space-1);
+  }
+
+  /* Auth submit button — full width, easy tap */
+  .auth-submit-btn,
+  .signup-submit-btn {
+    width: 100%;
+    min-height: 48px;
+    font-size: 1rem;
+  }
+
+  /* Tabs strip on auth page */
+  .tabs {
+    width: 100%;
+  }
+
+  .tab-btn {
+    flex: 1;
+    min-height: 44px;
+  }
+}
+
+
+/* ── FIX 4: Profile Settings modal — viewport safety ─────── */
+/*
+   .modal-box already has max-width: min(580px, 95vw) (fixed in
+   style.css). Here we reinforce the mobile behaviour and ensure
+   the modal scrolls if its content is taller than the screen.
+*/
+@media (max-width: 768px) {
+
+  /* Modal overlay: allow it to stick to the bottom on mobile
+     (sheet-style) — already set by existing rule, we reinforce */
+  .modal {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .modal-box {
+    width: 100% !important;
+    max-width: 100% !important;       /* override the min() on small phones */
+    max-height: 92vh;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    overflow: hidden;                  /* outer clip */
+  }
+
+  /* Body section scrolls independently */
+  .modal-body {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  /* Footer buttons always visible, stacked vertically */
+  .modal-footer {
+    flex-direction: column-reverse;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-4);
+    flex-shrink: 0;
+    background: var(--surface);   /* cover scrolled content */
+  }
+
+  .modal-btn-primary,
+  .modal-btn-secondary,
+  .modal-btn-danger {
+    width: 100%;
+    min-height: 48px;
+    justify-content: center;
+    text-align: center;
+  }
+
+  /* Profile form grid: single column on mobile */
+  .modal-form-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Larger phones/small tablets: allow a comfortable sheet */
+@media (min-width: 480px) and (max-width: 768px) {
+  .modal-box {
+    max-width: 95vw !important;
+    border-radius: var(--radius-xl);
+    margin: auto;
+  }
+  .modal { align-items: center; }
+}
+
+@media (max-width: 480px) {
+  .modal-header {
+    padding: var(--space-3) var(--space-4);
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .modal-header-icon {
+    width: 36px;
+    height: 36px;
+  }
+
+  .modal-title    { font-size: 0.9rem; }
+  .modal-subtitle { font-size: 0.7rem; }
+
+  .modal-body {
+    padding: var(--space-3) var(--space-4);
+  }
+}
+
+@media (max-width: 375px) {
+  .modal-box { max-height: 96vh; }
+  .modal-header,
+  .modal-body,
+  .modal-footer { padding-left: var(--space-3); padding-right: var(--space-3); }
+}
+
+
+/* ── FIX 5: Full audit — Dashboard ───────────────────────── */
+
+/* Greeting row: never overflows */
+@media (max-width: 767px) {
+  .greeting-row {
+    word-break: break-word;
+    overflow-wrap: break-word;
+  }
+
+  /* Stats row: 2 columns on all small phones */
+  .stats-row {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: var(--space-3);
+  }
+
+  /* Ensure stat cards never shrink text to illegibility */
+  .stat-card {
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .stat-value { font-size: clamp(0.9rem, 4vw, 1.5rem); }
+  .stat-label { font-size: clamp(0.58rem, 2.5vw, 0.72rem); }
+}
+
+@media (max-width: 380px) {
+  .stats-row { gap: var(--space-2); }
+  .stat-card { padding: var(--space-2); }
+}
+
+/* Dashboard main grid single column */
+@media (max-width: 767px) {
+  .dashboard-main-grid {
+    grid-template-columns: 1fr !important;
+    gap: var(--space-4);
+  }
+
+  /* Chart height must be explicit to prevent collapse */
+  .chart-container canvas {
+    max-height: 200px;
+  }
+}
+
+
+/* ── FIX 5b: Full audit — Medicines page ─────────────────── */
+@media (max-width: 767px) {
+  /* "Add medicine" page: header row wraps cleanly */
+  .addmed-page-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-3);
+  }
+
+  /* Upload zone: never causes horizontal scroll */
+  .upload-dropzone {
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  /* Form sections: single column */
+  .form-grid-2,
+  .form-grid-3 {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Submit button full width */
+  .submit-med-btn {
+    width: 100%;
+    min-height: 48px;
+  }
+}
+
+
+/* ── FIX 5c: Full audit — Reports page ───────────────────── */
+@media (max-width: 767px) {
+  .reports-page-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-3);
+  }
+
+  .reports-header-right {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  /* Period tabs: scrollable strip */
+  .reports-period-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    gap: var(--space-1);
+    padding-bottom: 2px; /* room for scrollbar */
+    scrollbar-width: none; /* hide thin scrollbar */
+  }
+  .reports-period-tabs::-webkit-scrollbar { display: none; }
+
+  .reports-stat-card { min-width: 0; overflow: hidden; }
+
+  /* Charts never overflow card */
+  .reports-chart-wrapper {
+    width: 100%;
+    overflow: hidden;
+  }
+
+  .export-controls {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .export-btn,
+  .export-period-select {
+    flex: 1 1 calc(50% - var(--space-2));
+    min-width: 120px;
+  }
+}
+
+@media (max-width: 480px) {
+  .export-btn,
+  .export-period-select {
+    flex: 1 1 100%;
+  }
+}
+
+
+/* ── FIX 5d: Full audit — Profile modal (all sub-sections) ── */
+@media (max-width: 767px) {
+
+  /* Profile avatar row: centre and stack */
+  .profile-avatar-row {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: var(--space-3);
+  }
+
+  /* Profile form sections */
+  .profile-form-section {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Emergency contact wrap on small screens */
+  .phone-input-wrap {
+    flex-wrap: wrap;
+  }
+
+  .phone-code-select {
+    min-width: 90px;
+    flex-shrink: 0;
+  }
+}
+
+
+/* ── FIX 5e: Full audit — Notification Preferences ────────── */
+@media (max-width: 767px) {
+  /* Preference row: keep toggle always visible */
+  .pref-row {
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: var(--space-3);
+  }
+
+  .pref-info {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .pref-title { font-size: 0.82rem; }
+  .pref-desc  { font-size: 0.7rem; word-break: break-word; }
+
+  /* Toggle switch: never wrap below text */
+  .toggle-switch {
+    flex-shrink: 0;
+  }
+}
+
+
+/* ── FIX 5f: Full audit — Login / Signup / Forgot Password ── */
+@media (max-width: 540px) {
+
+  /* Forgot password page specific */
+  #forgot-password-view .auth-card,
+  .forgot-card {
+    padding: var(--space-4);
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  /* Step nav row in signup: stack on tiny screens */
+  .step-nav-row {
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .step-nav-row .primary-btn,
+  .step-nav-row .secondary-btn {
+    width: 100%;
+    min-height: 48px;
+    justify-content: center;
+  }
+
+  /* Role cards: allow wrapping on 320px */
+  .role-cards {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .role-card {
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  /* Gender cards: 2-column grid */
+  .gender-cards {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+
+  /* Auth disclaimer: wrap text */
+  .auth-disclaimer {
+    font-size: 0.72rem;
+    flex-wrap: wrap;
+    text-align: center;
+  }
+}
+
+@media (max-width: 380px) {
+  .auth-card {
+    padding: var(--space-3);
+    border-radius: var(--radius-md);
+  }
+
+  .auth-brand-name { font-size: 1.2rem; }
+  .auth-tagline    { font-size: 0.7rem; }
+}
+
+
+/* ── FIX 5g: Full audit — Sidebar Navigation ─────────────── */
+@media (max-width: 1024px) {
+
+  /* Hamburger button: large enough tap target */
+  .hamburger-fab {
+    width: 40px !important;
+    height: 40px !important;
+    min-width: 40px;
+  }
+
+  /* When sidebar is open, the overlay catches backdrop taps */
+  .menu-overlay.open {
+    cursor: pointer;
+  }
+
+  /* Sidebar brand/logo area: compact but readable */
+  .sidebar-brand {
+    padding: var(--space-4) var(--space-3);
+    flex-shrink: 0;
+  }
+
+  /* Ensure sidebar opens fully even when keyboard is visible */
+  .sidebar.open {
+    height: 100dvh;   /* dynamic viewport height accounts for
+                         virtual keyboard on mobile browsers */
+  }
+}
+
+
+/* ── FIX 5h: Global overflow guardrails ──────────────────── */
+/*
+   Belt-and-braces: no element inside the app shell should ever
+   force horizontal scroll on screens from 320 px up.
+*/
+@media (max-width: 767px) {
+  .app-view,
+  .card,
+  .page-header,
+  .two-col-grid,
+  .dashboard-main-grid {
+    max-width: 100%;
+    overflow-x: hidden;
+    box-sizing: border-box;
+  }
+
+  /* Any inline flex/grid that hasn't been individually fixed */
+  .card-header {
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .card-badge {
+    flex-shrink: 0;
+  }
+
+  /* Ensure all buttons never cause horizontal overflow */
+  button {
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  /* Breadcrumb-style page icons */
+  .page-icon-wrap { flex-shrink: 0; }
+
+  /* Activity feed items */
+  .activity-item {
+    flex-wrap: wrap;
+  }
+
+  /* Milestone list items wrap cleanly */
+  .milestone-meta {
+    flex-wrap: wrap;
+    gap: var(--space-1);
+  }
+
+  .milestone-name {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
+
+/* ── FIX 5i: History table — card layout on mobile ────────── */
+/*
+   Same treatment as the schedule table above, applied to
+   the dose-history table on the History page.
+*/
+@media (max-width: 767px) {
+  .history-table,
+  .history-table thead,
+  .history-table tbody,
+  .history-table tr,
+  .history-table td,
+  .history-table th {
+    display: block;
+  }
+
+  .history-table thead tr {
+    position: absolute;
+    top: -9999px;
+    left: -9999px;
+  }
+
+  .history-table tbody tr {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--space-3);
+    padding: var(--space-3);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .history-table tbody td {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-2);
+    padding: 4px 0;
+    font-size: 0.82rem;
+    border: none;
+    width: 100%;
+  }
+
+  .history-table tbody td::before {
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+    min-width: 86px;
+    flex-shrink: 0;
+    padding-top: 2px;
+  }
+
+  /* nth-child labels for history table */
+  .history-table tbody td:nth-child(1)::before { content: "Date"; }
+  .history-table tbody td:nth-child(2)::before { content: "Medicine"; }
+  .history-table tbody td:nth-child(3)::before { content: "Time"; }
+  .history-table tbody td:nth-child(4)::before { content: "Status"; }
+  .history-table tbody td:nth-child(5)::before { content: "Notes"; }
+}
+
+
+/* ── 320 px safety pass (augments existing rules) ─────────── */
+@media (max-width: 320px) {
+  .auth-card      { padding: var(--space-2); }
+  .modal-box      { border-radius: var(--radius-md) var(--radius-md) 0 0; }
+  .action-btn     { font-size: 0.7rem; padding: 6px 8px; }
+  .input-icon-wrap input { padding-left: 38px !important; }
+  .pref-row { gap: var(--space-2); }
+}
