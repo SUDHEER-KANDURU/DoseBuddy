@@ -3,15 +3,6 @@
     : "https://dosebuddy-production.up.railway.app/api";
 const LS_CURRENT_USER_KEY = "dosebuddy_current_user";
 
-// ═══════════════════════════════════════════════════════════════════════════════
-//  JWT AUTH MODULE
-//  Centralises all token handling:
-//    - Secure storage in localStorage (access + refresh tokens)
-//    - Automatic Bearer header injection on every protected request
-//    - Silent token refresh when access token expires
-//    - Logout / redirect to login on refresh token expiry (401)
-// ═══════════════════════════════════════════════════════════════════════════════
-
 const LS_ACCESS_TOKEN_KEY  = "dosebuddy_access_token";
 const LS_REFRESH_TOKEN_KEY = "dosebuddy_refresh_token";
 const LS_TOKEN_EXPIRES_KEY = "dosebuddy_token_expires"; // epoch ms
@@ -81,17 +72,6 @@ async function refreshAccessToken() {
     return _refreshPromise;
 }
 
-/**
- * Drop-in replacement for the native fetch() that:
- *   1. Automatically adds Authorization: Bearer <token>
- *   2. Refreshes the token if expired before sending
- *   3. Retries once on 401 (handles race condition where server rejected
- *      a token that was about to expire at request time)
- *   4. Redirects to login if refresh fails
- *
- * Use authFetch() everywhere instead of fetch() for protected API calls.
- * Public calls (login, signup, refresh) should still use raw fetch().
- */
 async function authFetch(url, options = {}) {
     // Refresh proactively if the token is about to expire
     if (isAccessTokenExpired()) {
@@ -1621,6 +1601,15 @@ async function renderDashboard() {
 
         renderRecentActivity();
         renderStreakPanel();
+        // FIX Issue 1: draw the Weekly Adherence chart on the dashboard.
+        // switchView("dashboard-view") only calls renderDashboard(), which
+        // never drew the #weekly-chart canvas.  renderReports() is the
+        // function that builds the Chart.js bar chart; it already guards
+        // itself with `dashboardIsVisible` so it only writes to #weekly-chart
+        // when the dashboard view is active.
+        // We do NOT await it — the chart is a visual enhancement and must
+        // not block the dashboard from finishing its own render.
+        renderReports().catch(e => console.warn("[Dashboard] weekly-chart renderReports error:", e));
     } catch (err) {
         console.error(err);
         noMedsMsg.style.display = "block";
@@ -1926,13 +1915,23 @@ async function renderReports() {
     const periodBadgeEl = document.getElementById("reports-period-badge");
     if (periodBadgeEl) periodBadgeEl.textContent = periodLabel;
 
+    // Hoisted so the try block can populate them and the finally call below
+    // can pass them into renderAnalyticsDashboard(), eliminating duplicate
+    // network requests.
+    let _rptStats  = undefined;  // adherence/stats response object
+    let _rptStreak = undefined;  // recalculated streak DTO
+
     try {
-        // ── Fetch the full intake-log history (date-indexed) ──────────────
-        // We use /logs/history which returns all records, then slice
-        // client-side based on the selected period.  This avoids needing a
-        // new backend endpoint while keeping results perfectly consistent
-        // across every widget on the page.
-        const histRes = await authFetch(`${API_BASE}/logs/history/${currentUser.id}`);
+        // FIX Issue 2: fetch history and adherence stats in parallel instead
+        // of sequentially.  The original code awaited the history fetch, then
+        // later in the function awaited the stats fetch — two round-trips in
+        // series added the full RTT of the second request to the render delay.
+        const statsApiDays = periodDays === 0 ? 0 : periodDays;
+        const [histRes, statsRes] = await Promise.all([
+            authFetch(`${API_BASE}/logs/history/${currentUser.id}`),
+            authFetch(`${API_BASE}/logs/adherence/stats/${currentUser.id}?days=${statsApiDays}`)
+        ]);
+
         // Graceful degradation: if history fails, proceed with empty data so
         // the chart and stat cards still render (showing zeros) instead of
         // going completely blank.
@@ -2090,16 +2089,15 @@ async function renderReports() {
             ? Math.round((filteredTaken / filteredTotal) * 1000) / 10  // one decimal
             : 0;
 
-        // Also fetch the server-side stats with the correct period for
-        // the breakdown fields (missedToday, missedThisWeek, mostMissed…)
-        // which require server-side aggregation we can't easily replicate here.
-        const statsApiDays = periodDays === 0 ? 0 : periodDays;
+        // FIX Issue 2: use the statsRes already fetched in parallel at the top
+        // of this function. The original code made a second sequential fetch
+        // here, doubling the network round-trips and causing the noticeable
+        // render delay.
         try {
-            const statsRes = await authFetch(
-                `${API_BASE}/logs/adherence/stats/${currentUser.id}?days=${statsApiDays}`
-            );
             if (statsRes.ok) {
                 const stats = await statsRes.json();
+                // Capture for renderAnalyticsDashboard() — avoids a second fetch
+                _rptStats = stats;
 
                 // Override totals with client-computed values so they always
                 // match the chart for the selected period.
@@ -2172,8 +2170,10 @@ async function renderReports() {
             if (adherEl)  adherEl.textContent   = filteredAdher + "%";
         }
 
-        // Render streak analytics in reports
-        renderReportsStreak();
+        // Render streak analytics in reports and capture the recalculated
+        // streak so we can pass it into renderAnalyticsDashboard() below,
+        // avoiding the stale GET /streaks/{id} call that returns perfectDays=0.
+        _rptStreak = await renderReportsStreak();
 
     } catch (err) {
         console.error("[renderReports]", err);
@@ -2182,7 +2182,13 @@ async function renderReports() {
     }
 
     // ── Analytics dashboard extra sections ─────────────────────────────────
-    renderAnalyticsDashboard();
+    // Pass the already-fetched stats and freshly recalculated streak so
+    // renderAnalyticsDashboard() can skip its duplicate adherence/stats fetch
+    // and the stale GET /streaks fetch.  Both variables are hoisted to function
+    // scope and populated inside the try block above; fall back to undefined
+    // (which makes renderAnalyticsDashboard use its own fetches) if the try
+    // block threw before they were set.
+    renderAnalyticsDashboard(_rptStats, _rptStreak);
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -2203,29 +2209,64 @@ let adashWeightChart   = null;
 /**
  * Main entry point — called whenever reports view opens or period changes.
  * Fires all data loads in parallel.
+ *
+ * @param {object|undefined} preloadedStats  - Already-fetched adherence/stats
+ *     object from renderReports().  When provided, the duplicate
+ *     GET /logs/adherence/stats fetch is skipped entirely and the stat-card
+ *     elements that renderReports() already wrote are NOT overwritten.
+ * @param {object|undefined} preloadedStreak - Already-recalculated streak DTO
+ *     from renderReportsStreak().  When provided, the stale
+ *     GET /streaks/{id} fetch (which always returns perfectDaysThisWeek=0)
+ *     is replaced with this live recalculated value.
  */
-async function renderAnalyticsDashboard() {
+async function renderAnalyticsDashboard(preloadedStats, preloadedStreak) {
     if (!currentUser) return;
     const uid = currentUser.id;
 
-    // Use Promise.allSettled so a single failed fetch never aborts the
-    // entire analytics dashboard.  Each result is { status, value } or
-    // { status, reason }.
+    // When called from renderReports(), stats and streak are already available.
+    // Skip those two fetches to avoid duplicate network requests and stat-card
+    // overwrites.  For the remaining four endpoints fire them in parallel as before.
     const [
         medsResult,
-        statsResult,
         todayLogsResult,
         bmiHistResult,
-        vitalsHistResult,
-        streakResult
+        vitalsHistResult
     ] = await Promise.allSettled([
         authFetch(`${API_BASE}/medications/today/${uid}`),
-        authFetch(`${API_BASE}/logs/adherence/stats/${uid}`),
         authFetch(`${API_BASE}/logs/today/${uid}`),
         authFetch(`${API_BASE}/bmi/history/${uid}`),
-        authFetch(`${API_BASE}/vitals/history/${uid}`),
-        authFetch(`${API_BASE}/streaks/${uid}`)
+        authFetch(`${API_BASE}/vitals/history/${uid}`)
     ]);
+
+    // Also fetch stats and streak when NOT called from renderReports()
+    // (e.g. direct navigation to analytics-view, period tab changes).
+    // Fire them in parallel with each other when both are needed.
+    let statsResult, streakResult;
+    const needStats  = preloadedStats  === undefined;
+    const needStreak = preloadedStreak === undefined;
+
+    if (needStats && needStreak) {
+        // Both needed — fetch in parallel
+        [statsResult, streakResult] = await Promise.all([
+            authFetch(`${API_BASE}/logs/adherence/stats/${uid}`),
+            authFetch(`${API_BASE}/streaks/recalculate/${uid}`, { method: "POST" })
+        ]);
+    } else if (needStats) {
+        statsResult  = await authFetch(`${API_BASE}/logs/adherence/stats/${uid}`);
+    } else if (needStreak) {
+        // Use the recalculate endpoint so perfectDaysThisWeek/Month are correct.
+        streakResult = await authFetch(`${API_BASE}/streaks/recalculate/${uid}`, { method: "POST" });
+    }
+
+    // Helper: safely extract JSON from a fetch response
+    async function safeJson(res, fallback) {
+        try {
+            if (!res || !res.ok) return fallback;
+            return await res.json();
+        } catch (e) {
+            return fallback;
+        }
+    }
 
     // Helper: safely extract JSON from a settled fetch result
     async function settled(result, fallback) {
@@ -2240,16 +2281,23 @@ async function renderAnalyticsDashboard() {
     }
 
     const meds       = await settled(medsResult,      []);
-    const stats      = await settled(statsResult,     {});
     const todayLogs  = await settled(todayLogsResult, []);
     const bmiHistory = await settled(bmiHistResult,   []);
     const vitalsHist = await settled(vitalsHistResult,[]);
-    const streak     = await settled(streakResult,    {});
+
+    // Use preloaded values when available; otherwise parse the fetched responses.
+    const stats  = preloadedStats  !== undefined ? preloadedStats  : await safeJson(statsResult,  {});
+    const streak = preloadedStreak !== undefined ? preloadedStreak : await safeJson(streakResult, {});
 
     // ── 1. Stat cards ──────────────────────────────────────────────────────
     // Each render step is individually guarded so one DOM error can't
     // cascade and blank out the rest of the page.
-    try { adashRenderStatCards(meds, stats, todayLogs, bmiHistory, vitalsHist); }
+    // Pass skipReportCards=true when we were called from renderReports() so
+    // adashRenderStatCards does NOT overwrite the period-filtered values that
+    // renderReports() already wrote into rpt-taken-doses / rpt-missed-doses /
+    // rpt-adherence.
+    const _skipRptCards = preloadedStats !== undefined;
+    try { adashRenderStatCards(meds, stats, todayLogs, bmiHistory, vitalsHist, _skipRptCards); }
     catch (e) { console.warn("[Analytics] stat cards error:", e); }
 
     // ── 2. Health Score ────────────────────────────────────────────────────
@@ -2276,7 +2324,13 @@ async function renderAnalyticsDashboard() {
 }
 
 // ── 1. Stat Cards ─────────────────────────────────────────────────────────────
-function adashRenderStatCards(meds, stats, todayLogs, bmiHistory, vitalsHist) {
+/**
+ * @param {boolean} skipReportCards - When true, skip writing rpt-taken-doses,
+ *   rpt-missed-doses, and rpt-adherence.  These elements are owned by
+ *   renderReports() which writes period-filtered values; overwriting them
+ *   here with all-time backend stats would break the period filter UI.
+ */
+function adashRenderStatCards(meds, stats, todayLogs, bmiHistory, vitalsHist, skipReportCards) {
     // Medications
     const totalMeds = meds.length;
 
@@ -2303,9 +2357,16 @@ function adashRenderStatCards(meds, stats, todayLogs, bmiHistory, vitalsHist) {
     const missed = stats.missedDoses || 0;
     const adher  = stats.adherencePercentage || 0;
 
-    setText("rpt-taken-doses", taken);
-    setText("rpt-missed-doses", missed);
-    setText("rpt-adherence", adher + "%");
+    // Only write the report-card dose elements when we are NOT in the
+    // reports-path call (i.e. skipReportCards is false/undefined).
+    // When called from renderReports(), these elements already contain
+    // period-filtered values; overwriting with all-time backend totals
+    // would break the period filter display.
+    if (!skipReportCards) {
+        setText("rpt-taken-doses", taken);
+        setText("rpt-missed-doses", missed);
+        setText("rpt-adherence", adher + "%");
+    }
 
     // Adherence trend text
     const takenTrend = document.getElementById("adash-taken-trend");
@@ -2972,7 +3033,9 @@ function setupAdashAiRefresh() {
                 authFetch(`${API_BASE}/logs/adherence/stats/${currentUser.id}`),
                 authFetch(`${API_BASE}/bmi/history/${currentUser.id}`),
                 authFetch(`${API_BASE}/vitals/history/${currentUser.id}`),
-                authFetch(`${API_BASE}/streaks/${currentUser.id}`)
+                // Use recalculate so the streak fed to AI insights has accurate
+                // perfectDaysThisWeek / perfectDaysThisMonth values.
+                authFetch(`${API_BASE}/streaks/recalculate/${currentUser.id}`, { method: "POST" })
             ]);
             const stats      = statsRes.ok  ? await statsRes.json()  : {};
             const bmiHistory = bmiRes.ok    ? await bmiRes.json()    : [];
@@ -3436,8 +3499,13 @@ async function searchAiMedicineInfo() {
     resultBox.textContent = "Thinking with AI...";
 
     try {
-        const res = await fetch(
-            `${API_BASE}/medicine/ai-info?name=${encodeURIComponent(name)}`
+        // FIX: use authFetch so the JWT Authorization header is included.
+        // Raw fetch() was sending the request without a token, causing the
+        // backend to return 401 (Spring Security requires auth on all /api/**
+        // endpoints except /api/auth/**), which the frontend displayed as
+        // "Could not get information."
+        const res = await authFetch(
+            `${API_BASE}/medicine/ai-info?name=${encodeURIComponent(name)}&userId=${currentUser ? currentUser.id : ""}`
         );
 
         if (!res.ok) {
@@ -3475,8 +3543,11 @@ async function searchAiMedicineInfoView() {
     setButtonLoading(submitBtn, true, "Processing...");
 
     try {
-        const res = await fetch(
-            `${API_BASE}/medicine/ai-info?name=${encodeURIComponent(query)}`
+        // FIX: use authFetch so the JWT Authorization header is included.
+        // Raw fetch() was sending the request without a token, causing 401
+        // which the frontend displayed as "Could not get information."
+        const res = await authFetch(
+            `${API_BASE}/medicine/ai-info?name=${encodeURIComponent(query)}&userId=${currentUser ? currentUser.id : ""}`
         );
 
         if (!res.ok) {
@@ -5747,7 +5818,14 @@ async function renderStreakPanel() {
     if (!currentUser) return;
 
     try {
-        const res = await authFetch(`${API_BASE}/streaks/${currentUser.id}`);
+        // FIX: call the recalculate endpoint (POST) instead of the read-only
+        // GET endpoint.  The GET endpoint returns the last persisted value which
+        // stays at 0 until an explicit recalculate is triggered.  By always
+        // recalculating on dashboard load we guarantee the streak reflects the
+        // actual intake-log history, including doses marked since the last save.
+        const res = await authFetch(`${API_BASE}/streaks/recalculate/${currentUser.id}`, {
+            method: "POST"
+        });
         if (!res.ok) return;
         const data = await res.json();
         applyStreakToUI(data, false);
@@ -5899,13 +5977,13 @@ function renderBadgesGrid(containerId, allBadges, newlyUnlocked) {
 
 
 async function renderReportsStreak() {
-    if (!currentUser) return;
+    if (!currentUser) return null;
 
     try {
         const res = await authFetch(`${API_BASE}/streaks/recalculate/${currentUser.id}`, {
             method: "POST"
         });
-        if (!res.ok) return;
+        if (!res.ok) return null;
         const data = await res.json();
 
         const currentStreak = data.currentStreak  || 0;
@@ -5945,8 +6023,13 @@ async function renderReportsStreak() {
                 ).join("");
             }
         }
+
+        // Return the live streak DTO so renderReports() can thread it into
+        // renderAnalyticsDashboard(), eliminating the stale GET /streaks call.
+        return data;
     } catch (err) {
         console.warn("Reports streak load failed:", err);
+        return null;
     }
 }
 

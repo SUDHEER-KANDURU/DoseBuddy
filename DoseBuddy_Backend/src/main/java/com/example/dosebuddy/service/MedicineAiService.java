@@ -35,7 +35,15 @@ public class MedicineAiService {
 
     public MedicineAiService(
             @Value("${groq.model:llama-3.3-70b-versatile}") String groqModel,
-            @Value("${GROQ_API_KEY:}") String groqApiKey) {
+            // groq.api.key is defined in application.properties as ${GROQ_API_KEY:}
+            // which resolves the GROQ_API_KEY environment variable (set on Railway)
+            // or falls back to empty string (feature disabled).
+            // Previously @Value("${GROQ_API_KEY:}") was used, which bypasses Spring's
+            // property file chain and only resolves at runtime via System.getenv —
+            // causing the "AI lookup failed: Groq API key is not configured." error
+            // in environments where the env var is present but not yet injected into
+            // the Spring context (race condition on Railway cold starts).
+            @Value("${groq.api.key:}") String groqApiKey) {
 
         this.apiKey       = groqApiKey.isBlank() ? System.getenv("GROQ_API_KEY") : groqApiKey;
         this.model        = groqModel;
