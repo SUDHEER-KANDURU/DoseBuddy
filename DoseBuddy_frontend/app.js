@@ -1209,7 +1209,12 @@ function setupMedicineForm() {
     const startInput = document.getElementById("med-start-date");
     const endInput = document.getElementById("med-end-date");
 
-    const todayStr = new Date().toISOString().split("T")[0];
+    const _now = new Date();
+    const todayStr = [
+        _now.getFullYear(),
+        String(_now.getMonth() + 1).padStart(2, "0"),
+        String(_now.getDate()).padStart(2, "0")
+    ].join("-");
     if (startInput) { startInput.value = todayStr; startInput.min = todayStr; }
     if (endInput) { endInput.value = todayStr; endInput.min = todayStr; }
 
@@ -1435,10 +1440,16 @@ async function renderDashboard() {
     scheduleTable.style.display = window.innerWidth <= 767 ? "block" : "table";
 
     try {
-        const logsRes = await authFetch(`${API_BASE}/logs/history/${currentUser.id}`);
+        // FIX Issue 1: fetch logs and medicines in parallel — they are independent
+        // requests. The original sequential awaits added the full RTT of the logs
+        // request before the meds request even started, causing Today's Medicines
+        // to appear noticeably late on every dashboard open.
+        const [logsRes, medsRes] = await Promise.all([
+            authFetch(`${API_BASE}/logs/history/${currentUser.id}`),
+            authFetch(medsUrl)
+        ]);
         logs = logsRes.ok ? await logsRes.json() : [];
 
-        const medsRes = await authFetch(medsUrl);
         if (!medsRes.ok) throw new Error("Failed to load medicines");
         const meds = await medsRes.json();
 
@@ -1959,7 +1970,19 @@ async function renderReports() {
         for (let i = chartDays - 1; i >= 0; i--) {
             const d = new Date(today);
             d.setDate(d.getDate() - i);
-            buckets[d.toISOString().split("T")[0]] = { taken: 0, missed: 0 };
+            // Use local year/month/day — NOT toISOString() which returns UTC.
+            // In UTC+ timezones toISOString() at local midnight gives the previous
+            // calendar day, so bucket keys end up one day behind the local dates
+            // stored by the backend (which uses LocalDate = server local date).
+            // That mismatch causes every log whose local date > UTC date to be
+            // silently dropped by the "if (!buckets[dateKey]) return" guard,
+            // producing under-counts (e.g. 4 taken doses showing as 0 or 1).
+            const key = [
+                d.getFullYear(),
+                String(d.getMonth() + 1).padStart(2, "0"),
+                String(d.getDate()).padStart(2, "0")
+            ].join("-");
+            buckets[key] = { taken: 0, missed: 0 };
         }
 
         // Tally the filtered logs into buckets
@@ -2182,13 +2205,18 @@ async function renderReports() {
     }
 
     // ── Analytics dashboard extra sections ─────────────────────────────────
-    // Pass the already-fetched stats and freshly recalculated streak so
-    // renderAnalyticsDashboard() can skip its duplicate adherence/stats fetch
-    // and the stale GET /streaks fetch.  Both variables are hoisted to function
-    // scope and populated inside the try block above; fall back to undefined
-    // (which makes renderAnalyticsDashboard use its own fetches) if the try
-    // block threw before they were set.
-    renderAnalyticsDashboard(_rptStats, _rptStreak);
+    // Pass the already-fetched stats, freshly recalculated streak, AND the
+    // current medsCache so renderAnalyticsDashboard() can skip its duplicate
+    // /medications/today fetch.  Using medsCache here guarantees the medicine
+    // count in the analytics stat cards is identical to what the dashboard
+    // already displayed — eliminating the count mismatch (Issue 3) and the
+    // flash of wrong medicines (Issue 4) that occurred when the second fetch
+    // raced with the first and returned a slightly different result.
+    // Pass undefined for medsCache when it hasn't been populated yet (e.g.
+    // direct navigation to reports view before the dashboard ever loaded) so
+    // renderAnalyticsDashboard falls back to its own fetch gracefully.
+    const _medsForAnalytics = (medsCache && medsCache.length > 0) ? medsCache : undefined;
+    renderAnalyticsDashboard(_rptStats, _rptStreak, _medsForAnalytics);
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -2218,25 +2246,43 @@ let adashWeightChart   = null;
  *     from renderReportsStreak().  When provided, the stale
  *     GET /streaks/{id} fetch (which always returns perfectDaysThisWeek=0)
  *     is replaced with this live recalculated value.
+ * @param {Array|undefined} preloadedMeds - Already-fetched today's medications
+ *     array.  When provided (e.g. passed from renderDashboard via renderReports),
+ *     the duplicate GET /medications/today fetch is skipped — eliminating the
+ *     race condition where a second fetch could return a different (stale) set
+ *     and briefly show wrong medicines (Issue 4) with an incorrect count (Issue 3).
  */
-async function renderAnalyticsDashboard(preloadedStats, preloadedStreak) {
+async function renderAnalyticsDashboard(preloadedStats, preloadedStreak, preloadedMeds) {
     if (!currentUser) return;
     const uid = currentUser.id;
+
+    // FIX Issue 3 & 4: When called from renderReports() → renderDashboard(),
+    // medsCache is already populated with the definitive today's-medicines set.
+    // Skipping the duplicate /medications/today fetch prevents:
+    //   • Issue 3 — wrong count: two fetches can return different active-med
+    //     sets if an add/delete races between the two requests.
+    //   • Issue 4 — random medicines appear then disappear: the second
+    //     independent fetch could return a slightly different array (e.g. a
+    //     medicine just deleted still in flight), causing a flash of wrong data
+    //     before the UI settles.
+    const needMeds = preloadedMeds === undefined;
 
     // When called from renderReports(), stats and streak are already available.
     // Skip those two fetches to avoid duplicate network requests and stat-card
     // overwrites.  For the remaining four endpoints fire them in parallel as before.
+    const parallelFetches = [
+        needMeds ? authFetch(`${API_BASE}/medications/today/${uid}`) : Promise.resolve(null),
+        authFetch(`${API_BASE}/logs/today/${uid}`),
+        authFetch(`${API_BASE}/bmi/history/${uid}`),
+        authFetch(`${API_BASE}/vitals/history/${uid}`)
+    ];
+
     const [
         medsResult,
         todayLogsResult,
         bmiHistResult,
         vitalsHistResult
-    ] = await Promise.allSettled([
-        authFetch(`${API_BASE}/medications/today/${uid}`),
-        authFetch(`${API_BASE}/logs/today/${uid}`),
-        authFetch(`${API_BASE}/bmi/history/${uid}`),
-        authFetch(`${API_BASE}/vitals/history/${uid}`)
-    ]);
+    ] = await Promise.allSettled(parallelFetches);
 
     // Also fetch stats and streak when NOT called from renderReports()
     // (e.g. direct navigation to analytics-view, period tab changes).
@@ -2280,7 +2326,7 @@ async function renderAnalyticsDashboard(preloadedStats, preloadedStreak) {
         }
     }
 
-    const meds       = await settled(medsResult,      []);
+    const meds       = preloadedMeds !== undefined ? preloadedMeds : await settled(medsResult, []);
     const todayLogs  = await settled(todayLogsResult, []);
     const bmiHistory = await settled(bmiHistResult,   []);
     const vitalsHist = await settled(vitalsHistResult,[]);
@@ -4382,10 +4428,19 @@ function setupPrescriptionUpload() {
 
             fillMedicineForm(medicines[0]);
 
-            const todayStr = new Date().toISOString().split("T")[0];
+            const _nowPrx = new Date();
+            const todayStr = [
+                _nowPrx.getFullYear(),
+                String(_nowPrx.getMonth() + 1).padStart(2, "0"),
+                String(_nowPrx.getDate()).padStart(2, "0")
+            ].join("-");
             const endDate  = new Date();
             endDate.setDate(endDate.getDate() + 30);
-            const endDateStr = endDate.toISOString().split("T")[0];
+            const endDateStr = [
+                endDate.getFullYear(),
+                String(endDate.getMonth() + 1).padStart(2, "0"),
+                String(endDate.getDate()).padStart(2, "0")
+            ].join("-");
 
             let savedCount = 0;
             let failCount  = 0;
@@ -4732,14 +4787,12 @@ async function openProfileSettingsModal() {
         return;
     }
 
-    try {
-        const res = await authFetch(`${API_BASE}/user/profile/${currentUser.id}`);
-        if (!res.ok) throw new Error("Failed to fetch profile");
-        const profile = await res.json();
-
-        currentUser = { ...currentUser, ...profile };
-        saveToLS(LS_CURRENT_USER_KEY, currentUser);
-
+    // FIX Issue 2: Populate the modal immediately from the in-memory
+    // currentUser (already enriched on login/page-load via fetchFullProfile).
+    // This makes the profile settings appear instantly — no network wait.
+    // A background refresh then silently updates the form if anything changed
+    // since the last fetch.
+    function _populateProfileForm(profile) {
         const preview = document.getElementById("profile-avatar-preview");
         const pName   = document.getElementById("profile-avatar-name");
         const pRole   = document.getElementById("profile-avatar-role");
@@ -4781,11 +4834,29 @@ async function openProfileSettingsModal() {
                 if (pName)   pName.textContent   = v || "User";
             });
         }
+    }
 
-        openModal("modal-profile");
+    // Step 1 — show immediately from cached currentUser (zero latency)
+    _populateProfileForm(currentUser);
+    openModal("modal-profile");
+
+    // Step 2 — background refresh: silently re-fetch and update the form
+    // if the server has newer data. Never blocks the modal from opening.
+    try {
+        const res = await authFetch(`${API_BASE}/user/profile/${currentUser.id}`);
+        if (!res.ok) return; // stale data already shown — that's fine
+        const profile = await res.json();
+
+        currentUser = { ...currentUser, ...profile };
+        saveToLS(LS_CURRENT_USER_KEY, currentUser);
+
+        // Only update the form if the modal is still open
+        if (document.getElementById("modal-profile")?.classList.contains("modal-open")) {
+            _populateProfileForm(profile);
+        }
     } catch (err) {
-        console.error("Error fetching profile:", err);
-        showToast("Failed to load profile data.", "error");
+        // Background refresh failed — user is still looking at cached data, fine
+        console.warn("[Profile] Background refresh failed (non-fatal):", err.message);
     }
 }
 
@@ -6130,13 +6201,26 @@ function filterByPeriod(items, period, dateField) {
     if (period === "all" || !period) return items;
     const days = parseInt(period, 10);
     if (isNaN(days) || days <= 0) return items;
-    // Start of the cutoff day (midnight, local time)
+    // Start of the cutoff day (midnight, local time).
+    // "days=7" covers today + the 6 preceding calendar days.
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - (days - 1));
     cutoff.setHours(0, 0, 0, 0);
+
+    // Build a "YYYY-MM-DD" string for the cutoff so we can compare date
+    // strings directly.  Using string comparison on ISO dates avoids the
+    // UTC-vs-local pitfall: new Date("2026-06-07") is parsed as UTC midnight,
+    // so comparing it to a local-midnight Date object fails for UTC+ zones —
+    // today's logs would be incorrectly excluded.
+    const cutoffStr = [
+        cutoff.getFullYear(),
+        String(cutoff.getMonth() + 1).padStart(2, "0"),
+        String(cutoff.getDate()).padStart(2, "0")
+    ].join("-"); // "YYYY-MM-DD"
+
     return items.filter(item => {
-        const d = new Date(item[dateField]);
-        return !isNaN(d) && d >= cutoff;
+        const dateStr = (item[dateField] || "").substring(0, 10); // "YYYY-MM-DD"
+        return dateStr >= cutoffStr;
     });
 }
 
