@@ -90,7 +90,6 @@ async function authFetch(url, options = {}) {
 
     let response = await fetch(url, { ...options, headers });
 
-    // On 401 attempt one refresh + retry (token might have expired mid-flight)
     if (response.status === 401) {
         const newToken = await refreshAccessToken();
         if (!newToken) {
@@ -318,7 +317,8 @@ async function logMissedDoseActivities(meds, todayStr) {
     }
 }
 
-let scheduledTimeouts = [];
+let scheduledTimeouts  = [];   // reminder-fire timeouts — cleared on reschedule
+let activeMissTimeouts = [];   // 5-min miss-window timers — NOT cleared on reschedule
 let activeReminderAudio = null;
 let audioUnlocked = false; // tracks whether browser autoplay has been unblocked
 
@@ -1123,6 +1123,7 @@ function setupNav() {
         firedReminderKeys.clear();
         _lastScheduledDate = "";
         clearScheduledTimeouts();
+        clearMissTimeouts(); // Stop any pending 5-min miss-window timers
         medsCache = [];
         medsCacheDate = null;
         showAuthView();
@@ -1298,7 +1299,8 @@ function setupMedicineForm() {
             const firstTime = times[0] || "";
 
             await renderDashboard();
-            await renderReports();
+            // Pass freshly-fetched logs[] from renderDashboard — avoids duplicate /logs/history fetch.
+            await renderReports(logs);
             await refreshActivityFeed();
         } catch (err) {
             console.error(err);
@@ -1544,7 +1546,9 @@ async function renderDashboard() {
                             med.name
                         );
                         await renderDashboard();
-                        await renderReports();
+                        // Pass the freshly-fetched logs[] from renderDashboard to
+                        // renderReports so it doesn't make a duplicate /logs/history fetch.
+                        await renderReports(logs);
                         await refreshActivityFeed();
                     });
                 }
@@ -1606,21 +1610,20 @@ async function renderDashboard() {
         // source of truth for dose-time timeouts.
         scheduleMedicineReminders();
 
-        await logMissedDoseActivities(meds, todayStr);
+        // Fire-and-forget: this is a write-side-effect (marks past doses missed
+        // on the server).  It does NOT need to complete before the dashboard
+        // finishes rendering — removing the await cuts one full server RTT from
+        // every dashboard open.
+        logMissedDoseActivities(meds, todayStr);
 
         loadLatestBmi();
 
         renderRecentActivity();
-        renderStreakPanel();
-        // FIX Issue 1: draw the Weekly Adherence chart on the dashboard.
-        // switchView("dashboard-view") only calls renderDashboard(), which
-        // never drew the #weekly-chart canvas.  renderReports() is the
-        // function that builds the Chart.js bar chart; it already guards
-        // itself with `dashboardIsVisible` so it only writes to #weekly-chart
-        // when the dashboard view is active.
-        // We do NOT await it — the chart is a visual enhancement and must
-        // not block the dashboard from finishing its own render.
-        renderReports().catch(e => console.warn("[Dashboard] weekly-chart renderReports error:", e));
+        // renderStreakPanel() REMOVED — renderReports() already calls
+        // renderReportsStreak() which calls applyStreakToUI().  Having both
+        // fire a POST /streaks/recalculate simultaneously created a race where
+        // two concurrent mutations could overwrite each other.
+        renderReports(logs).catch(e => console.warn("[Dashboard] weekly-chart renderReports error:", e));
     } catch (err) {
         console.error(err);
         noMedsMsg.style.display = "block";
@@ -1690,7 +1693,8 @@ async function deleteMedication(medId) {
         }
 
         try { await renderDashboard(); } catch(e) { console.warn("Dashboard refresh failed"); }
-        try { await renderReports();   } catch(e) { console.warn("Reports refresh failed"); }
+        // Pass freshly-fetched logs[] from renderDashboard — avoids duplicate /logs/history fetch.
+        try { await renderReports(logs);   } catch(e) { console.warn("Reports refresh failed"); }
         try { await refreshActivityFeed(); } catch(e) { console.warn("Activity refresh failed"); }
     } catch (err) {
         console.error(err);
@@ -1711,7 +1715,12 @@ async function renderHistory() {
         if (!res.ok) throw new Error("Failed to load history");
         const items = await res.json();
 
-        logs = items;
+        // Do NOT overwrite the global logs[] here.  The global is the shared
+        // source of truth for getDoseStatus() which the dashboard table reads.
+        // Overwriting it from renderHistory() creates a race: if the user
+        // navigates History → Dashboard quickly, getDoseStatus() would read
+        // history-view data and show wrong status pills until renderDashboard()
+        // fires its own fetch.  Use a local variable for all History rendering.
 
         if (items.length === 0) {
             empty.style.display = "flex";
@@ -1900,7 +1909,7 @@ function renderMissedMiniChart(labels, missedValues) {
     });
 }
 
-async function renderReports() {
+async function renderReports(preloadedHistory) {
     if (!currentUser) return;
 
     // ── Determine the active period from the selected tab ─────────────────
@@ -1933,22 +1942,36 @@ async function renderReports() {
     let _rptStreak = undefined;  // recalculated streak DTO
 
     try {
-        // FIX Issue 2: fetch history and adherence stats in parallel instead
-        // of sequentially.  The original code awaited the history fetch, then
-        // later in the function awaited the stats fetch — two round-trips in
-        // series added the full RTT of the second request to the render delay.
+        // FIX Issue 5 (History slowness) + Issue 8 (Weekly Adherence race condition):
+        // When called from renderDashboard(), the logs array is already populated
+        // and passed in as preloadedHistory. Reusing it eliminates:
+        //   1. The duplicate GET /logs/history fetch (saves one full RTT)
+        //   2. The race condition where renderReports fetches history before
+        //      logMissedDoseActivities' server write has fully committed
+        //
+        // When called directly (tab navigation, period change, checkReminders),
+        // preloadedHistory is undefined so we fetch fresh data as before.
         const statsApiDays = periodDays === 0 ? 0 : periodDays;
-        const [histRes, statsRes] = await Promise.all([
-            authFetch(`${API_BASE}/logs/history/${currentUser.id}`),
-            authFetch(`${API_BASE}/logs/adherence/stats/${currentUser.id}?days=${statsApiDays}`)
-        ]);
 
-        // Graceful degradation: if history fails, proceed with empty data so
-        // the chart and stat cards still render (showing zeros) instead of
-        // going completely blank.
-        const allHistory = histRes.ok ? await histRes.json() : [];
-        if (!histRes.ok) {
-            console.warn("[renderReports] History endpoint returned", histRes.status, "— rendering with empty data");
+        let allHistory;
+        let statsRes;
+
+        if (preloadedHistory !== undefined) {
+            // Reuse history already in memory — no network round-trip needed
+            allHistory = preloadedHistory;
+            // Still need stats; fetch independently
+            statsRes = await authFetch(`${API_BASE}/logs/adherence/stats/${currentUser.id}?days=${statsApiDays}`);
+        } else {
+            // Fetch history and adherence stats in parallel
+            const [histRes, _statsRes] = await Promise.all([
+                authFetch(`${API_BASE}/logs/history/${currentUser.id}`),
+                authFetch(`${API_BASE}/logs/adherence/stats/${currentUser.id}?days=${statsApiDays}`)
+            ]);
+            statsRes = _statsRes;
+            allHistory = histRes.ok ? await histRes.json() : [];
+            if (!histRes.ok) {
+                console.warn("[renderReports] History endpoint returned", histRes.status, "— rendering with empty data");
+            }
         }
 
         // Filtered subset for the selected period (date field = "date")
@@ -2202,6 +2225,10 @@ async function renderReports() {
         console.error("[renderReports]", err);
         if (dashEmpty) { dashEmpty.style.display = "block"; dashEmpty.textContent = "Could not load report data."; }
         if (rptEmpty)  { rptEmpty.style.display  = "flex"; }
+        // Do not attempt to render the analytics dashboard when the primary
+        // data fetch failed — it would fire 2–4 more network requests against
+        // an already-failing network, and render with undefined/empty data.
+        return;
     }
 
     // ── Analytics dashboard extra sections ─────────────────────────────────
@@ -2267,11 +2294,18 @@ async function renderAnalyticsDashboard(preloadedStats, preloadedStreak, preload
     //     before the UI settles.
     const needMeds = preloadedMeds === undefined;
 
+    // Issue #10 fix: Caregivers see medicine data for their linked patient,
+    // not for their own account.  Apply the same URL logic that renderDashboard()
+    // uses so the Analytics medicine count and donut always match the dashboard.
+    const _analyticsMedsUrl = (currentUser.role === "CAREGIVER" && currentUser.patientEmail)
+        ? `${API_BASE}/medications/today-by-email/${encodeURIComponent(currentUser.patientEmail)}`
+        : `${API_BASE}/medications/today/${uid}`;
+
     // When called from renderReports(), stats and streak are already available.
     // Skip those two fetches to avoid duplicate network requests and stat-card
     // overwrites.  For the remaining four endpoints fire them in parallel as before.
     const parallelFetches = [
-        needMeds ? authFetch(`${API_BASE}/medications/today/${uid}`) : Promise.resolve(null),
+        needMeds ? authFetch(_analyticsMedsUrl) : Promise.resolve(null),
         authFetch(`${API_BASE}/logs/today/${uid}`),
         authFetch(`${API_BASE}/bmi/history/${uid}`),
         authFetch(`${API_BASE}/vitals/history/${uid}`)
@@ -2351,7 +2385,7 @@ async function renderAnalyticsDashboard(preloadedStats, preloadedStreak, preload
     catch (e) { console.warn("[Analytics] health score error:", e); }
 
     // ── 3. Medicine Consumption Donut ──────────────────────────────────────
-    try { adashRenderDonut(stats); }
+    try { adashRenderDonut(stats, todayLogs, meds); }
     catch (e) { console.warn("[Analytics] donut error:", e); }
 
     // ── 4. BMI Trend chart ─────────────────────────────────────────────────
@@ -2425,8 +2459,19 @@ function adashRenderStatCards(meds, stats, todayLogs, bmiHistory, vitalsHist, sk
     }
 
     // Today's doses
-    const todayTotal  = todayLogs.length;
+    // FIX Issue 3: todayLogs.length is the count of LOG RECORDS (only created
+    // when a dose is marked TAKEN or MISSED). This is always less than the total
+    // scheduled doses, causing the Analytics "Today's Doses" card to show a
+    // smaller denominator than the Dashboard (which counts schedule slots).
+    // Fix: compute the total scheduled doses from the meds array (same source
+    // as the Dashboard) so both views use the same denominator.
     const todayTaken  = todayLogs.filter(l => l.status === "TAKEN").length;
+    const todayMissed = todayLogs.filter(l => l.status === "MISSED").length;
+    // Total dose slots scheduled for today (from the medicine schedule)
+    const todayScheduled = Array.isArray(meds)
+        ? meds.reduce((sum, m) => sum + (Array.isArray(m.times) ? m.times.length : 0), 0)
+        : todayLogs.length; // fallback if meds not available
+    const todayTotal = todayScheduled > 0 ? todayScheduled : todayLogs.length;
     setText("adash-today-doses", todayTaken + "/" + todayTotal);
     setText("adash-today-sub", todayTotal > 0 ? `${todayTaken} taken of ${todayTotal}` : "No doses today");
 
@@ -2552,13 +2597,38 @@ function animateCounter(el, from, to, duration) {
 }
 
 // ── 3. Medicine Consumption Donut ─────────────────────────────────────────────
-function adashRenderDonut(stats) {
+// FIX Issue 2: The original function used stats.takenDoses/missedDoses/pendingDoses
+// which are ALL-TIME backend totals — not today's consumption. This made the donut
+// show historically-skewed numbers unrelated to the current day.
+// Now accepts todayLogs (today's actual log records) and meds (today's schedule)
+// to compute a meaningful "today" breakdown:
+//   taken  = logs with status TAKEN today
+//   missed = logs with status MISSED today
+//   pending = scheduled doses that have no log record yet (or are still in future)
+function adashRenderDonut(stats, todayLogs, meds) {
     const ctx = document.getElementById("adash-donut-chart");
     if (!ctx) return;
 
-    const taken   = stats.takenDoses   || 0;
-    const missed  = stats.missedDoses  || 0;
-    const pending = stats.pendingDoses || 0;
+    // Build today's dose breakdown from the actual log records + schedule.
+    // todayLogs comes from GET /logs/today/{id} — only created when a dose
+    // is marked TAKEN or MISSED. Pending = scheduled - logged.
+    let taken   = 0;
+    let missed  = 0;
+    let pending = 0;
+
+    if (Array.isArray(todayLogs) && Array.isArray(meds) && meds.length > 0) {
+        // Use today's actual log records + schedule for an accurate breakdown.
+        // This path runs even when todayLogs is empty (all doses still pending).
+        taken  = todayLogs.filter(l => (l.status || "").toUpperCase() === "TAKEN").length;
+        missed = todayLogs.filter(l => (l.status || "").toUpperCase() === "MISSED").length;
+        const totalScheduled = meds.reduce((sum, m) => sum + (Array.isArray(m.times) ? m.times.length : 0), 0);
+        pending = Math.max(0, totalScheduled - taken - missed);
+    } else if (stats) {
+        // Fallback: use backend stats when meds/todayLogs are unavailable
+        taken   = stats.takenDoses   || 0;
+        missed  = stats.missedDoses  || 0;
+        pending = stats.pendingDoses || 0;
+    }
 
     // Update legend values
     setText("adash-dl-taken",   taken);
@@ -2661,10 +2731,15 @@ function adashRenderBmiChart(bmiHistory) {
     }
 
     // Filter by current period
-    const filteredBmi = adashFilterByPeriod(bmiHistory, adashCurrentPeriod, "calculatedAt");
+    // FIX Issue 4 (BMI Trend not rendering): The BmiResponseDto field is
+    // "createdAt" (set from record.getCreatedAt() in BmiService).  The old
+    // code passed "calculatedAt" which doesn't exist on the DTO, so every
+    // record's dateStr was "" and the string comparison "" >= cutoffStr was
+    // always false — filtering out every record and producing an empty chart.
+    const filteredBmi = adashFilterByPeriod(bmiHistory, adashCurrentPeriod, "createdAt");
 
     const labels = filteredBmi.map(b => {
-        const d = new Date(b.calculatedAt || b.date || b.createdAt || "");
+        const d = new Date(b.createdAt || b.calculatedAt || b.date || "");
         return isNaN(d) ? "—" : d.toLocaleDateString("en-GB", { month: "short", day: "numeric" });
     });
     const bmiVals   = filteredBmi.map(b => b.bmiValue ? +b.bmiValue.toFixed(1) : null);
@@ -2859,8 +2934,10 @@ function adashRenderVitalsCharts(allVitals, period) {
 }
 
 // ── 6. AI Health Insights ─────────────────────────────────────────────────────
-let adashAiInsightsCache = null;
-let adashAiInsightsUid   = null;
+let adashAiInsightsCache   = null;
+let adashAiInsightsUid     = null;
+let adashAiInsightsCacheTs = 0;          // epoch ms when the cache was last populated
+const ADASH_AI_CACHE_TTL   = 10 * 60 * 1000; // 10-minute TTL
 
 async function adashRenderAiInsights(stats, bmiHistory, vitalsHist, streak, forceRefresh) {
     const grid    = document.getElementById("adash-ai-grid");
@@ -2873,8 +2950,12 @@ async function adashRenderAiInsights(stats, bmiHistory, vitalsHist, streak, forc
             <p>Generating AI insights…</p>
         </div>`;
 
-    // Use cache unless forced refresh or different user
-    if (!forceRefresh && adashAiInsightsCache && adashAiInsightsUid === currentUser.id) {
+    // Use cache unless forced refresh, different user, or cache older than TTL.
+    const cacheAge   = Date.now() - adashAiInsightsCacheTs;
+    const cacheValid = adashAiInsightsCache
+        && adashAiInsightsUid === currentUser.id
+        && cacheAge < ADASH_AI_CACHE_TTL;
+    if (!forceRefresh && cacheValid) {
         grid.innerHTML = adashAiInsightsCache;
         return;
     }
@@ -2912,8 +2993,19 @@ Return ONLY a valid JSON array. No markdown, no code blocks. Example:
 
         const text = await res.text();
 
-        // Parse JSON from response (strip any markdown wrapping)
-        const jsonMatch = text.match(/\[[\s\S]*\]/);
+        // FIX Issue 10: Strip markdown code fences before parsing.
+        // The AI model sometimes wraps the JSON in ```json ... ``` even when
+        // instructed not to, causing the \[[\s\S]*\] regex to fail or match
+        // the wrong substring and throw "Invalid AI response format".
+        // Also handle the case where the model returns a JSON object {} wrapping
+        // an array — extract the first array found in the response.
+        const cleanText = text
+            .replace(/```json\s*/gi, "")
+            .replace(/```\s*/gi, "")
+            .trim();
+
+        // Parse JSON from response — find the outermost [...] array
+        const jsonMatch = cleanText.match(/\[[\s\S]*\]/);
         if (!jsonMatch) throw new Error("Invalid AI response format");
 
         const insights = JSON.parse(jsonMatch[0]);
@@ -2921,8 +3013,9 @@ Return ONLY a valid JSON array. No markdown, no code blocks. Example:
 
         const html = insights.map(i => adashInsightCard(i)).join("");
         grid.innerHTML = html;
-        adashAiInsightsCache = html;
-        adashAiInsightsUid   = currentUser.id;
+        adashAiInsightsCache   = html;
+        adashAiInsightsUid     = currentUser.id;
+        adashAiInsightsCacheTs = Date.now();
 
     } catch (err) {
         console.warn("[Analytics] AI insights error:", err);
@@ -2930,8 +3023,9 @@ Return ONLY a valid JSON array. No markdown, no code blocks. Example:
         const fallbackInsights = adashGenerateFallbackInsights(stats, bmiHistory, vitalsHist, streak);
         const html = fallbackInsights.map(i => adashInsightCard(i)).join("");
         grid.innerHTML = html;
-        adashAiInsightsCache = html;
-        adashAiInsightsUid   = currentUser.id;
+        adashAiInsightsCache   = html;
+        adashAiInsightsUid     = currentUser.id;
+        adashAiInsightsCacheTs = Date.now();
     }
 }
 
@@ -3223,6 +3317,15 @@ function triggerDoseNotification(med, dateStr, displayTime) {
 function clearScheduledTimeouts() {
     scheduledTimeouts.forEach((id) => clearTimeout(id));
     scheduledTimeouts = [];
+    // activeMissTimeouts are intentionally NOT cleared here — a reschedule
+    // (e.g. user marks a dose taken) must not cancel an already-running
+    // 5-minute miss-window for a different dose that was reminded earlier.
+}
+
+// Called only on logout and on hard reset — clears the miss-window timers too.
+function clearMissTimeouts() {
+    activeMissTimeouts.forEach((id) => clearTimeout(id));
+    activeMissTimeouts = [];
 }
 
 // scheduleNotificationsForToday() has been removed.
@@ -3328,7 +3431,11 @@ function checkReminders() {
                 }
             });
             updateMissedDoseNotifications(medsCache, todayStr);
-            renderReports();
+            // Pass the updated in-memory logs[] so renderReports() reuses them
+            // rather than firing a fresh GET /logs/history fetch.  This avoids
+            // the race where the server-side missed-batch write might not yet be
+            // committed when the fresh fetch lands.
+            renderReports(logs);
             refreshActivityFeed();
         })
         .catch(err => console.error("[DoseBuddy] checkReminders missed-batch error:", err));
@@ -3429,13 +3536,16 @@ function scheduleMedicineReminders() {
                                     existing.status = "MISSED";
                                 }
                                 updateMissedDoseNotifications(medsCache, capturedDate);
-                                renderReports();
+                                renderReports(logs);
                                 refreshActivityFeed();
                             });
                     }
                 }, 5 * 60 * 1000);
 
-                scheduledTimeouts.push(missTimeout);
+                // Track miss-window timers in a SEPARATE array so that
+                // clearScheduledTimeouts() (called when rescheduling on
+                // mark-taken) does NOT cancel an already-running miss window.
+                activeMissTimeouts.push(missTimeout);
 
             }, delay);
 
@@ -3540,7 +3650,10 @@ async function searchAiMedicineInfo() {
         return;
     }
 
-    if (!_aiLock()) return;
+    if (!_aiLock()) {
+        resultBox.textContent = "⏳ Another AI request is in progress. Please wait a moment.";
+        return;
+    }
 
     resultBox.textContent = "Thinking with AI...";
 
@@ -3582,7 +3695,11 @@ async function searchAiMedicineInfoView() {
         return;
     }
 
-    if (!_aiLock()) return;
+    if (!_aiLock()) {
+        resultBox.style.display = "block";
+        resultBox.textContent = "⏳ Another AI request is in progress. Please wait a moment.";
+        return;
+    }
 
     resultBox.style.display = "block";
     resultBox.textContent = "Thinking with AI...";
@@ -3625,7 +3742,11 @@ async function checkSymptomsView() {
         return;
     }
 
-    if (!_aiLock()) return;
+    if (!_aiLock()) {
+        resultBox.style.display = "block";
+        resultBox.textContent = "⏳ Another AI request is in progress. Please wait a moment.";
+        return;
+    }
 
     resultBox.style.display = "block";
     resultBox.textContent = "Analyzing symptoms with AI...";
@@ -3670,7 +3791,10 @@ document.addEventListener("click", async function(e){
             return;
         }
 
-        if (!_aiLock()) return;
+        if (!_aiLock()) {
+            result.textContent = "⏳ Another AI request is in progress. Please wait a moment.";
+            return;
+        }
 
         result.textContent = "Analyzing symptoms with AI...";
 
@@ -4504,7 +4628,8 @@ function setupPrescriptionUpload() {
 
             if (savedCount > 0) {
                 try { await renderDashboard();     } catch(e) { console.warn("Dashboard refresh failed"); }
-                try { await renderReports();       } catch(e) { console.warn("Reports refresh failed"); }
+                // Pass freshly-fetched logs[] from renderDashboard — avoids duplicate /logs/history fetch.
+                try { await renderReports(logs);       } catch(e) { console.warn("Reports refresh failed"); }
                 try { await refreshActivityFeed(); } catch(e) { console.warn("Activity refresh failed"); }
             }
 
@@ -4750,6 +4875,7 @@ function setupProfileDropdown() {
 }
 
 function doLogoutAction() {
+    stopReminderAudio(); // Stop any active reminder audio (mirrors doLogout in setupNav)
     currentUser = null;
     saveToLS(LS_CURRENT_USER_KEY, null);
     clearTokens(); // Clear JWT tokens
@@ -4757,6 +4883,7 @@ function doLogoutAction() {
     firedReminderKeys.clear();
     _lastScheduledDate = "";
     clearScheduledTimeouts();
+    clearMissTimeouts(); // Stop any pending 5-min miss-window timers
     medsCache = [];
     medsCacheDate = null;
     showAuthView();
@@ -5372,6 +5499,11 @@ async function loadVitalsLatest() {
     if (!currentUser) return;
     try {
         const res = await authFetch(`${API_BASE}/vitals/latest/${currentUser.id}`);
+        // FIX Issue 9: 404 means "no records yet" — this is expected for new
+        // users and should be handled silently, not logged as a console error.
+        // The backend returns 404 with body {"message":"No vitals records found"}
+        // when the user has no vitals history. Clear the cards and return quietly.
+        if (res.status === 404) { clearVitalsSummaryCards(); return; }
         if (!res.ok) { clearVitalsSummaryCards(); return; }
         const data = await res.json();
         renderVitalsSummaryCards(data);
@@ -6359,7 +6491,10 @@ async function exportReportsPDF() {
             authFetch(`${API_BASE}/logs/adherence/stats/${currentUser.id}`),
             authFetch(`${API_BASE}/bmi/latest/${currentUser.id}`),
             authFetch(`${API_BASE}/vitals/history/${currentUser.id}`),
-            authFetch(`${API_BASE}/streaks/${currentUser.id}`)
+            // Use recalculate (POST) not the read-only GET endpoint.
+            // The GET endpoint always returns perfectDaysThisWeek/Month = 0
+            // because it returns the last persisted snapshot, not a live value.
+            authFetch(`${API_BASE}/streaks/recalculate/${currentUser.id}`, { method: "POST" })
         ]);
 
         const history  = histRes.ok  ? await histRes.json()  : [];

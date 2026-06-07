@@ -176,9 +176,9 @@ public class StreakService {
         streak.setUnlockedBadges(String.join(",", newBadges));
         streakRepo.save(streak);
 
-        StreakDto dto = toDto(streak, userId, newlyUnlocked);
-        dto.setPerfectDaysThisWeek(perfectThisWeek);
-        dto.setPerfectDaysThisMonth(perfectThisMonth);
+        // Pass the already-computed perfect-day counts so toDto() doesn't
+        // run a redundant logRepo.findByMarker query for the same data.
+        StreakDto dto = toDto(streak, userId, newlyUnlocked, perfectThisWeek, perfectThisMonth);
         return dto;
     }
 
@@ -194,6 +194,11 @@ public class StreakService {
     }
 
     private StreakDto toDto(UserStreak streak, Long userId, String newlyUnlocked) {
+        return toDto(streak, userId, newlyUnlocked, -1, -1);
+    }
+
+    private StreakDto toDto(UserStreak streak, Long userId, String newlyUnlocked,
+                            int precomputedWeek, int precomputedMonth) {
         StreakDto dto = new StreakDto();
         dto.setUserId(userId);
         dto.setCurrentStreak(streak.getCurrentStreak() != null ? streak.getCurrentStreak() : 0);
@@ -212,8 +217,50 @@ public class StreakService {
                 .collect(Collectors.toList());
         dto.setAllBadges(allBadges);
 
-        dto.setPerfectDaysThisWeek(0);
-        dto.setPerfectDaysThisMonth(0);
+        // FIX Issue 7: perfectDaysThisWeek and perfectDaysThisMonth were hardcoded
+        // to 0 here, meaning the GET /streaks/{id} endpoint always returned 0 for
+        // these fields regardless of the user's actual history.
+        //
+        // If the caller already computed these values (precomputedWeek >= 0),
+        // use them directly — no extra DB query. Otherwise compute from logs.
+        int perfectThisWeek  = 0;
+        int perfectThisMonth = 0;
+
+        if (precomputedWeek >= 0 && precomputedMonth >= 0) {
+            // Caller (recalculate) already has these — avoid a redundant log query
+            perfectThisWeek  = precomputedWeek;
+            perfectThisMonth = precomputedMonth;
+        } else {
+            // GET /streaks/{id} path — compute on-the-fly so the read-only
+            // endpoint returns accurate values without requiring a recalculate.
+            try {
+                User user = userRepo.findById(userId).orElse(null);
+                if (user != null) {
+                    LocalDate today = LocalDate.now();
+                    List<IntakeLog> allLogs = logRepo.findByMarker(user);
+                    if (!allLogs.isEmpty()) {
+                        Map<LocalDate, List<IntakeLog>> byDate = allLogs.stream()
+                                .collect(Collectors.groupingBy(IntakeLog::getDate));
+                        Set<LocalDate> perfectDays = byDate.entrySet().stream()
+                                .filter(e -> e.getValue().stream()
+                                        .allMatch(l -> "TAKEN".equalsIgnoreCase(l.getStatus())))
+                                .map(Map.Entry::getKey)
+                                .collect(Collectors.toSet());
+                        perfectThisWeek  = (int) perfectDays.stream()
+                                .filter(d -> !d.isBefore(today.minusDays(6)) && !d.isAfter(today))
+                                .count();
+                        perfectThisMonth = (int) perfectDays.stream()
+                                .filter(d -> !d.isBefore(today.minusDays(29)) && !d.isAfter(today))
+                                .count();
+                    }
+                }
+            } catch (Exception ignored) {
+                // Computation failure must never prevent the DTO from being returned
+            }
+        }
+
+        dto.setPerfectDaysThisWeek(perfectThisWeek);
+        dto.setPerfectDaysThisMonth(perfectThisMonth);
 
         return dto;
     }
