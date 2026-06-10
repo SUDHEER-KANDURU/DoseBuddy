@@ -36,7 +36,7 @@ img, canvas, svg, video { max-width: 100%; }
     position: fixed;
     top: 0; left: 0;
     width: var(--sidebar-w);
-    height: 100vh;
+    height: 100dvh;
     transform: translateX(-100%);
     z-index: 200;
     box-shadow: var(--shadow-lg);
@@ -473,7 +473,7 @@ img, canvas, svg, video { max-width: 100%; }
 /* ── Legal / Terms modal ─────────────────────────────────── */
 @media (max-width: 540px) {
   .legal-modal-overlay { padding: var(--space-2); }
-  .legal-modal         { max-height: 96vh; border-radius: var(--radius-lg); }
+  .legal-modal         { max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 32px); border-radius: var(--radius-lg); }
   .legal-modal-header  { padding: var(--space-4); }
   .legal-modal-body    { padding: var(--space-3); gap: var(--space-3); }
   .legal-modal-footer  { padding: var(--space-3) var(--space-4); }
@@ -646,7 +646,7 @@ img, canvas, svg, video { max-width: 100%; }
    MOBILE AUDIT FIXES — v2
    Issues addressed:
    1. Today's Medicines — stacked cards, no horizontal scroll
-   2. Sidebar — sticky footer, nav scrolls, 100vh enforced
+   2. Sidebar — sticky footer, nav scrolls, 100dvh enforced
    3. Auth pages — icon overlap fix for all inputs
    4. Profile modal — 95vw cap, vertical scroll, stacked buttons
    5. Full audit pass — Dashboard, Reports, Profile, Notif, Sidebar
@@ -896,7 +896,7 @@ img, canvas, svg, video { max-width: 100%; }
 /* ── FIX 2: Sidebar — no-scroll fit on all mobile phones ───────── */
 /*
    ROOT CAUSE:
-   1. `height: 100vh` on the sidebar measures the full browser viewport
+   1. `height: 100dvh` on the sidebar measures the full browser viewport
       including the browser's address bar and navigation chrome. On Android
       Chrome this leaves ~128px less visible space, so the sidebar footer
       can fall off-screen while overflow:hidden hides it.
@@ -1160,7 +1160,7 @@ img, canvas, svg, video { max-width: 100%; }
   .modal-box {
     width: 100% !important;
     max-width: 100% !important;
-    max-height: min(88vh, calc(100dvh - 16px));
+    max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 32px);
     border-radius: 16px 16px 0 0;
     overflow: hidden;
     display: flex;
@@ -1194,7 +1194,14 @@ img, canvas, svg, video { max-width: 100%; }
     flex: 1 1 auto;
     min-height: 0;
     padding: 12px 14px;
-    padding-bottom: calc(12px + 52px);
+    padding-bottom: calc(12px + 96px);
+  }
+
+  /* Footer stays visible while the body scrolls beneath it */
+  .modal-footer {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
   }
 
   /* Avatar row: compact horizontal layout, reduce height significantly */
@@ -1258,9 +1265,6 @@ img, canvas, svg, video { max-width: 100%; }
     background: var(--surface);
     border-top: 1px solid var(--border);
     justify-content: stretch;
-    position: sticky;
-    bottom: 0;
-    z-index: 2;
   }
 
   /* Save button: flex-grow takes more space, Cancel is narrower */
@@ -1301,7 +1305,7 @@ img, canvas, svg, video { max-width: 100%; }
   .legal-modal {
     width: 100%;
     max-width: 100%;
-    max-height: min(92vh, calc(100dvh - 16px));
+    max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 32px);
     border-radius: 16px 16px 0 0;
     margin: 0;
   }
@@ -1313,16 +1317,16 @@ img, canvas, svg, video { max-width: 100%; }
   .legal-modal-body {
     min-height: 0;
     padding: 12px 14px;
-    padding-bottom: calc(12px + 52px);
+    padding-bottom: calc(12px + 96px);
   }
 
   .legal-modal-footer {
-    padding: 10px 14px 14px;
-    flex-direction: column-reverse;
-    gap: 10px;
     position: sticky;
     bottom: 0;
     z-index: 2;
+    padding: 10px 14px 14px;
+    flex-direction: column-reverse;
+    gap: 10px;
     background: var(--surface);
   }
 
@@ -1340,18 +1344,23 @@ img, canvas, svg, video { max-width: 100%; }
   }
   .modal-box {
     max-width: 460px !important;
-    max-height: min(92vh, calc(100dvh - 16px));
+    max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 32px);
     border-radius: var(--radius-xl);
-    margin: auto;
+  }
+
+  .modal-footer {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
   }
 }
 
 /* ── Extra-small phones (≤ 375px): squeeze padding further ── */
 @media (max-width: 375px) {
-  .modal-box       { max-height: min(94vh, calc(100dvh - 10px)); }
+  .modal-box       { max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 32px); }
   .modal-header    { padding: 10px 12px 8px; }
-  .modal-body      { padding: 10px 12px; }
-  .modal-footer    { padding: 8px 12px 12px; gap: 6px; }
+  .modal-body      { padding: 10px 12px; padding-bottom: calc(10px + 96px); }
+  .modal-footer    { position: sticky; bottom: 0; z-index: 2; padding: 8px 12px 12px; gap: 6px; }
 
   .modal-body .form-group input,
   .modal-body .form-group select {
@@ -1638,11 +1647,6 @@ img, canvas, svg, video { max-width: 100%; }
 }
 
 
-/* ── FIX 5h: Global overflow guardrails ──────────────────── */
-/*
-   Belt-and-braces: no element inside the app shell should ever
-   force horizontal scroll on screens from 320 px up.
-*/
 @media (max-width: 767px) {
   .app-view,
   .card,
@@ -1664,7 +1668,6 @@ img, canvas, svg, video { max-width: 100%; }
     flex-shrink: 0;
   }
 
-  /* Ensure all buttons never cause horizontal overflow */
   button {
     max-width: 100%;
   }
@@ -1679,7 +1682,6 @@ img, canvas, svg, video { max-width: 100%; }
     flex-wrap: wrap;
   }
 
-  /* Milestone list items wrap cleanly */
   .milestone-meta {
     flex-wrap: wrap;
     gap: var(--space-1);

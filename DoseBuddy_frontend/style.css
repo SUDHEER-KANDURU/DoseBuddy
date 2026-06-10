@@ -86,7 +86,7 @@ body {
   line-height: 1.6;
   background: var(--bg);
   color: var(--text-primary);
-  min-height: 100vh;
+  min-height: 100dvh;
   overflow-x: hidden;
   transition: background var(--transition), color var(--transition);
   -webkit-font-smoothing: antialiased;
@@ -124,7 +124,7 @@ p  { color: var(--text-secondary); }
   grid-template-areas: "sidebar topnav" "sidebar main";
   grid-template-columns: var(--sidebar-w) 1fr;
   grid-template-rows: var(--topnav-h) 1fr;
-  min-height: 100vh;
+  min-height: 100dvh;
 }
 
 /* Hidden until JS shows it */
@@ -229,7 +229,7 @@ p  { color: var(--text-secondary); }
 .sidebar {
   grid-area: sidebar;
   position: fixed; top: 0; left: 0;
-  width: var(--sidebar-w); height: 100vh;
+  width: var(--sidebar-w); height: 100dvh;
   background: var(--surface);
   border-right: 1px solid var(--border);
   display: flex; flex-direction: column;
@@ -1431,7 +1431,7 @@ tr.due-now { animation: pulse-row 2s ease infinite; }
 
 #auth-view.active {
   display: flex; justify-content: center; align-items: center;
-  min-height: 100vh; background: var(--bg);
+  min-height: 100dvh; background: var(--bg);
 }
 
 .auth-page {
@@ -2616,7 +2616,7 @@ body.dark-mode .sidebar-theme-knob {
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-lg);
   width: 100%; max-width: min(580px, 95vw);
-  max-height: min(90vh, calc(100dvh - 32px));
+  max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 32px);
   display: flex; flex-direction: column;
   overflow: hidden;
 }
@@ -2625,7 +2625,7 @@ body.dark-mode .sidebar-theme-knob {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  max-height: min(90vh, calc(100dvh - 32px));
+  max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 32px);
 }
 
 .modal-box-sm { max-width: min(480px, 95vw); }
@@ -2693,9 +2693,6 @@ body.dark-mode .sidebar-theme-knob {
   padding: var(--space-4) var(--space-5);
   border-top: 1px solid var(--border);
   flex-shrink: 0;
-  position: sticky;
-  bottom: 0;
-  z-index: 2;
   background: var(--surface);
 }
 
@@ -2968,7 +2965,7 @@ body.dark-mode .toggle-switch.active { background: var(--primary); }
 @media (max-width: 768px) {
   .profile-dropdown { right: 8px; width: calc(100vw - 16px); max-width: 320px; }
   .modal-form-grid  { grid-template-columns: 1fr; }
-  .modal-box        { max-height: 95vh; }
+  .modal-box        { max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 32px); }
   .modal-footer     { flex-direction: column-reverse; gap: var(--space-2); }
   .modal-btn-primary,
   .modal-btn-secondary,
@@ -3886,7 +3883,7 @@ body.dark-mode .brand-logo-circle {
   border: 1px solid var(--border);
   width: 100%;
   max-width: 560px;
-  max-height: 85vh;
+  max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 32px);
   display: flex;
   flex-direction: column;
   animation: slideUp 0.25s ease;
@@ -4081,7 +4078,7 @@ body.dark-mode .secondary-btn:hover {
   .step-nav-row { flex-direction: column; }
   .step-nav-row .primary-btn,
   .step-nav-row .secondary-btn { width: 100%; }
-  .legal-modal { max-height: 95vh; border-radius: var(--radius-lg); }
+  .legal-modal { max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 32px); border-radius: var(--radius-lg); }
   .signup-steps { gap: 0; }
   .step-label { display: none; }
   
