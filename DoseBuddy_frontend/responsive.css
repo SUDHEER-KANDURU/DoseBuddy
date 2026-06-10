@@ -1153,14 +1153,17 @@ img, canvas, svg, video { max-width: 100%; }
   .modal {
     align-items: flex-end;
     padding: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
   }
 
   /* Modal box: full width, top-rounded corners, max height capped to the safe viewport.
-     Using dynamic viewport units helps prevent Android browser UI from hiding footer buttons. */
+     Use the actual wrapper height as a fallback when 100dvh can overshoot Android browser chrome.
+     This prevents the sheet from extending below the visible screen and hiding the sticky footer. */
   .modal-box {
     width: 100% !important;
     max-width: 100% !important;
-    max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 32px);
+    max-height: min(calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 32px), 100%);
     border-radius: 16px 16px 0 0;
     overflow: hidden;
     display: flex;

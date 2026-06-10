@@ -176,8 +176,7 @@ public class StreakService {
         streak.setUnlockedBadges(String.join(",", newBadges));
         streakRepo.save(streak);
 
-        // Pass the already-computed perfect-day counts so toDto() doesn't
-        // run a redundant logRepo.findByMarker query for the same data.
+        
         StreakDto dto = toDto(streak, userId, newlyUnlocked, perfectThisWeek, perfectThisMonth);
         return dto;
     }

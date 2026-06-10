@@ -2602,6 +2602,8 @@ body.dark-mode .sidebar-theme-knob {
 
 .modal.modal-open {
   display: flex;
+  visibility: visible;
+  pointer-events: auto;
   animation: modalIn 0.2s ease forwards;
 }
 
