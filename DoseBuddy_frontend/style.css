@@ -2159,7 +2159,11 @@ body.dark-mode ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); 
 body.dark-mode .primary-btn:hover { box-shadow: 0 4px 14px rgba(255,255,255,0.15); }
 
 .toast-container {
-  position: fixed; bottom: 24px; right: 24px;
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  left: auto;
+  max-width: calc(100vw - 32px);
   z-index: 9999;
   display: flex; flex-direction: column; gap: 10px;
   pointer-events: none;
@@ -2368,7 +2372,7 @@ input:focus-visible, select:focus-visible { outline: none; border-color: var(--p
   .stats-row, .reports-stats-row { grid-template-columns: 1fr 1fr; gap: var(--space-2); }
   .stat-value, .rsc-value { font-size: 1.2rem; }
   .topnav-right .theme-text { display: none; }
-  .toast-container { bottom: 16px; right: 12px; left: 12px; }
+  .toast-container { bottom: 16px; right: 12px; left: 12px; max-width: calc(100vw - 24px); }
   .toast { min-width: unset; max-width: 100%; }
 }
 
@@ -2500,7 +2504,8 @@ body.dark-mode .sidebar-theme-knob {
   position: fixed;
   top: calc(var(--topnav-h) + 8px);
   right: 16px;
-  width: 240px;
+  width: min(240px, calc(100vw - 24px));
+  max-width: min(280px, calc(100vw - 24px));
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -2611,9 +2616,16 @@ body.dark-mode .sidebar-theme-knob {
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-lg);
   width: 100%; max-width: min(580px, 95vw);
-  max-height: 90vh;
+  max-height: min(90vh, calc(100dvh - 32px));
   display: flex; flex-direction: column;
   overflow: hidden;
+}
+
+.modal-content {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  max-height: min(90vh, calc(100dvh - 32px));
 }
 
 .modal-box-sm { max-width: min(480px, 95vw); }
@@ -2655,8 +2667,10 @@ body.dark-mode .sidebar-theme-knob {
 
 .modal-body {
   padding: var(--space-5);
+  padding-bottom: calc(var(--space-5) + 52px);
   overflow-y: auto;
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .modal-section-label {
@@ -2679,6 +2693,10 @@ body.dark-mode .sidebar-theme-knob {
   padding: var(--space-4) var(--space-5);
   border-top: 1px solid var(--border);
   flex-shrink: 0;
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  background: var(--surface);
 }
 
 .modal-footer-single { justify-content: flex-end; }
@@ -3121,7 +3139,7 @@ body.dark-mode .notif-item-unread:hover { background: rgba(255,255,255,0.08); }
 body.dark-mode .notif-item:hover { background: rgba(255,255,255,0.03); }
 
 @media (max-width: 480px) {
-  .notif-panel { width: calc(100vw - 16px); right: -8px; }
+  .notif-panel { width: auto; right: 8px; left: 8px; max-width: calc(100vw - 16px); }
 }
 
 .onboarding-overlay {

@@ -1155,12 +1155,12 @@ img, canvas, svg, video { max-width: 100%; }
     padding: 0;
   }
 
-  /* Modal box: full width, top-rounded corners, max 88vh so a
-     sliver of the page is visible (confirms it's a sheet) */
+  /* Modal box: full width, top-rounded corners, max height capped to the safe viewport.
+     Using dynamic viewport units helps prevent Android browser UI from hiding footer buttons. */
   .modal-box {
     width: 100% !important;
     max-width: 100% !important;
-    max-height: 88vh;
+    max-height: min(88vh, calc(100dvh - 16px));
     border-radius: 16px 16px 0 0;
     overflow: hidden;
     display: flex;
@@ -1194,6 +1194,7 @@ img, canvas, svg, video { max-width: 100%; }
     flex: 1 1 auto;
     min-height: 0;
     padding: 12px 14px;
+    padding-bottom: calc(12px + 52px);
   }
 
   /* Avatar row: compact horizontal layout, reduce height significantly */
@@ -1257,6 +1258,9 @@ img, canvas, svg, video { max-width: 100%; }
     background: var(--surface);
     border-top: 1px solid var(--border);
     justify-content: stretch;
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
   }
 
   /* Save button: flex-grow takes more space, Cancel is narrower */
@@ -1287,6 +1291,45 @@ img, canvas, svg, video { max-width: 100%; }
     justify-content: center;
     border-radius: var(--radius-full);
   }
+
+  /* Legal modals share the same sheet behavior as generic modals on phones */
+  .legal-modal-overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .legal-modal {
+    width: 100%;
+    max-width: 100%;
+    max-height: min(92vh, calc(100dvh - 16px));
+    border-radius: 16px 16px 0 0;
+    margin: 0;
+  }
+
+  .legal-modal-header {
+    padding: 12px 14px 10px;
+  }
+
+  .legal-modal-body {
+    min-height: 0;
+    padding: 12px 14px;
+    padding-bottom: calc(12px + 52px);
+  }
+
+  .legal-modal-footer {
+    padding: 10px 14px 14px;
+    flex-direction: column-reverse;
+    gap: 10px;
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    background: var(--surface);
+  }
+
+  .legal-modal-footer .primary-btn {
+    width: 100%;
+    justify-content: center;
+  }
 }
 
 /* ── Slightly larger phones (480px–768px): centered card instead of sheet ── */
@@ -1297,7 +1340,7 @@ img, canvas, svg, video { max-width: 100%; }
   }
   .modal-box {
     max-width: 460px !important;
-    max-height: 92vh;
+    max-height: min(92vh, calc(100dvh - 16px));
     border-radius: var(--radius-xl);
     margin: auto;
   }
@@ -1305,7 +1348,7 @@ img, canvas, svg, video { max-width: 100%; }
 
 /* ── Extra-small phones (≤ 375px): squeeze padding further ── */
 @media (max-width: 375px) {
-  .modal-box       { max-height: 94vh; }
+  .modal-box       { max-height: min(94vh, calc(100dvh - 10px)); }
   .modal-header    { padding: 10px 12px 8px; }
   .modal-body      { padding: 10px 12px; }
   .modal-footer    { padding: 8px 12px 12px; gap: 6px; }
