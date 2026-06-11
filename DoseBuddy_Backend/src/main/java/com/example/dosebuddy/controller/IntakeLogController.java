@@ -10,8 +10,14 @@ import com.example.dosebuddy.model.User;
 import com.example.dosebuddy.repository.IntakeLogRepository;
 import com.example.dosebuddy.repository.MedicationRepository;
 import com.example.dosebuddy.repository.UserRepository;
+import com.example.dosebuddy.security.UserPrincipal;
 import com.example.dosebuddy.service.ActivityService;
+import com.example.dosebuddy.service.ScheduledDoseService;
+import com.example.dosebuddy.service.StreakService;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
@@ -29,32 +35,38 @@ public class IntakeLogController {
     private final UserRepository userRepo;
     private final MedicationRepository medRepo;
     private final ActivityService activityService;
+    private final ScheduledDoseService scheduledDoseService;
+    private final StreakService streakService;
 
     public IntakeLogController(IntakeLogRepository logRepo,
                                UserRepository userRepo,
                                MedicationRepository medRepo,
-                               ActivityService activityService) {
+                               ActivityService activityService,
+                               ScheduledDoseService scheduledDoseService,
+                               StreakService streakService) {
         this.logRepo = logRepo;
         this.userRepo = userRepo;
         this.medRepo = medRepo;
         this.activityService = activityService;
+        this.scheduledDoseService = scheduledDoseService;
+        this.streakService = streakService;
     }
 
     @PostMapping("/mark")
-    public ResponseEntity<?> markDose(@RequestBody MarkDoseRequest req) {
-        if (req.getUserId() == null || req.getMedicationId() == null ||
+    public ResponseEntity<?> markDose(@RequestBody MarkDoseRequest req,
+                                      @AuthenticationPrincipal UserPrincipal principal) {
+        if (req.getMedicationId() == null ||
                 req.getDate() == null || req.getTime() == null) {
             return ResponseEntity.badRequest().body("Missing required fields");
-        }
-
-        User marker = userRepo.findById(req.getUserId()).orElse(null);
-        if (marker == null) {
-            return ResponseEntity.badRequest().body("User not found");
         }
 
         Medication med = medRepo.findById(req.getMedicationId()).orElse(null);
         if (med == null) {
             return ResponseEntity.badRequest().body("Medication not found");
+        }
+        User marker = med.getUser();
+        if (marker == null || !canAccessUser(marker, principal)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body("Access denied");
         }
 
         LocalDate date;
@@ -71,13 +83,16 @@ public class IntakeLogController {
             status = "TAKEN";
         }
 
-        IntakeLog log = new IntakeLog();
+        IntakeLog log = logRepo.findByMarkerAndMedicationAndDateAndTime(marker, med, date, time)
+                .orElseGet(IntakeLog::new);
         log.setMarker(marker);
         log.setMedication(med);
         log.setDate(date);
         log.setTime(time);
         log.setStatus(status.toUpperCase());
         log.setScheduledTime(LocalDateTime.of(date, time));
+        log.setTakenTime(null);
+        log.setMissedTime(null);
 
         if ("TAKEN".equalsIgnoreCase(status)) {
             log.setTakenTime(LocalDateTime.now());
@@ -102,17 +117,28 @@ public class IntakeLogController {
         
         activityService.logActivity(marker, activityType, activityMessage, "INTAKE_LOG", log.getId());
 
+        streakService.recalculate(marker.getId());
+
         return ResponseEntity.ok().build();
     }
 
     @GetMapping("/history/{userId}")
-    public ResponseEntity<?> getHistory(@PathVariable Long userId) {
+    public ResponseEntity<?> getHistory(@PathVariable Long userId,
+                                        @RequestParam(defaultValue = "0") int page,
+                                        @RequestParam(defaultValue = "100") int size,
+                                        @AuthenticationPrincipal UserPrincipal principal) {
         User marker = userRepo.findById(userId).orElse(null);
         if (marker == null) {
             return ResponseEntity.badRequest().body("User not found");
         }
+        if (!canAccessUser(marker, principal)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body("Access denied");
+        }
 
-        List<IntakeLog> logs = logRepo.findByMarkerOrderByDateDescTimeDesc(marker);
+        int safePage = Math.max(0, page);
+        int safeSize = Math.min(500, Math.max(1, size));
+        List<IntakeLog> logs = logRepo.findByMarkerOrderByDateDescTimeDesc(
+                marker, PageRequest.of(safePage, safeSize)).getContent();
 
         List<IntakeLogDto> dtoList = logs.stream()
                 .map(l -> new IntakeLogDto(
@@ -130,24 +156,29 @@ public class IntakeLogController {
     }
 
     @GetMapping("/today/{userId}")
-    public ResponseEntity<?> getTodayLogs(@PathVariable Long userId) {
+    public ResponseEntity<?> getTodayLogs(@PathVariable Long userId,
+                                          @AuthenticationPrincipal UserPrincipal principal) {
         User marker = userRepo.findById(userId).orElse(null);
         if (marker == null) {
             return ResponseEntity.badRequest().body("User not found");
         }
+        if (!canAccessUser(marker, principal)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body("Access denied");
+        }
 
         LocalDate today = LocalDate.now();
-        List<IntakeLog> logs = logRepo.findByMarkerAndDate(marker, today);
+        ScheduledDoseService.Summary summary = scheduledDoseService.summarize(
+                marker, today, today, LocalDateTime.now());
 
-        List<IntakeLogDto> dtoList = logs.stream()
-                .map(l -> new IntakeLogDto(
-                        l.getId(),
-                        l.getDate().toString(),
-                        l.getTime().toString().substring(0, 5),
-                        l.getMedication().getId(),
-                        l.getMedication().getName(),
-                        l.getMedication().getDosage(),
-                        l.getStatus()
+        List<IntakeLogDto> dtoList = summary.doses().stream()
+                .map(d -> new IntakeLogDto(
+                        d.logId(),
+                        d.date().toString(),
+                        d.time().toString().substring(0, 5),
+                        d.medicationId(),
+                        d.medicationName(),
+                        d.dosage(),
+                        d.status()
                 ))
                 .collect(Collectors.toList());
 
@@ -155,60 +186,80 @@ public class IntakeLogController {
     }
 
     @GetMapping("/summary/week/{userId}")
-    public ResponseEntity<?> getWeeklySummary(@PathVariable Long userId) {
+    public ResponseEntity<?> getWeeklySummary(@PathVariable Long userId,
+                                              @AuthenticationPrincipal UserPrincipal principal) {
         User marker = userRepo.findById(userId).orElse(null);
         if (marker == null) {
             return ResponseEntity.badRequest().body("User not found");
+        }
+        if (!canAccessUser(marker, principal)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body("Access denied");
         }
 
         LocalDate today = LocalDate.now();
         LocalDate start = today.minusDays(6);
 
-        List<IntakeLog> logs = logRepo.findByMarkerAndDateBetween(marker, start, today);
-
-        Map<LocalDate, Long> takenPerDay = logs.stream()
-                .filter(l -> "TAKEN".equalsIgnoreCase(l.getStatus()))
-                .collect(Collectors.groupingBy(
-                        IntakeLog::getDate,
-                        Collectors.counting()
-                ));
-
-        Map<LocalDate, Long> missedPerDay = logs.stream()
-                .filter(l -> "MISSED".equalsIgnoreCase(l.getStatus()))
-                .collect(Collectors.groupingBy(
-                        IntakeLog::getDate,
-                        Collectors.counting()
-                ));
+        ScheduledDoseService.Summary summary = scheduledDoseService.summarize(
+                marker, start, today, LocalDateTime.now());
 
         List<DailySummaryDto> result = new ArrayList<>();
         for (int i = 0; i < 7; i++) {
             LocalDate d = start.plusDays(i);
-            int taken  = takenPerDay.getOrDefault(d, 0L).intValue();
-            int missed = missedPerDay.getOrDefault(d, 0L).intValue();
+            ScheduledDoseService.DailyCounts counts = summary.daily().get(d);
+            int taken = counts == null ? 0 : counts.taken();
+            int missed = counts == null ? 0 : counts.missed();
             result.add(new DailySummaryDto(d.toString(), taken, missed));
         }
 
         return ResponseEntity.ok(result);
     }
 
+    @GetMapping("/summary/{userId}")
+    public ResponseEntity<?> getSummary(@PathVariable Long userId,
+                                        @RequestParam(defaultValue = "7") int days,
+                                        @AuthenticationPrincipal UserPrincipal principal) {
+        User marker = userRepo.findById(userId).orElse(null);
+        if (marker == null) {
+            return ResponseEntity.badRequest().body("User not found");
+        }
+        if (!canAccessUser(marker, principal)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body("Access denied");
+        }
+
+        LocalDate today = LocalDate.now();
+        int safeDays = Math.min(3650, Math.max(1, days));
+        LocalDate start = today.minusDays(safeDays - 1L);
+        ScheduledDoseService.Summary summary = scheduledDoseService.summarize(
+                marker, start, today, LocalDateTime.now());
+
+        List<DailySummaryDto> result = new ArrayList<>(safeDays);
+        for (int i = 0; i < safeDays; i++) {
+            LocalDate date = start.plusDays(i);
+            ScheduledDoseService.DailyCounts counts = summary.daily().get(date);
+            result.add(new DailySummaryDto(date.toString(),
+                    counts == null ? 0 : counts.taken(),
+                    counts == null ? 0 : counts.missed()));
+        }
+        return ResponseEntity.ok(result);
+    }
+
     @PostMapping("/mark-missed-batch")
-    public ResponseEntity<?> markMissedBatch(@RequestBody List<MarkDoseRequest> requests) {
+    public ResponseEntity<?> markMissedBatch(@RequestBody List<MarkDoseRequest> requests,
+                                             @AuthenticationPrincipal UserPrincipal principal) {
         if (requests == null || requests.isEmpty()) {
             return ResponseEntity.ok("No entries to process");
         }
 
         int created = 0;
         for (MarkDoseRequest req : requests) {
-            if (req.getUserId() == null || req.getMedicationId() == null
-                    || req.getDate() == null || req.getTime() == null) {
+            if (req.getMedicationId() == null || req.getDate() == null || req.getTime() == null) {
                 continue;
             }
 
-            User marker = userRepo.findById(req.getUserId()).orElse(null);
-            if (marker == null) continue;
-
             Medication med = medRepo.findById(req.getMedicationId()).orElse(null);
             if (med == null) continue;
+            User marker = med.getUser();
+            if (marker == null || !canAccessUser(marker, principal)) continue;
 
             LocalDate date;
             LocalTime time;
@@ -253,11 +304,15 @@ public class IntakeLogController {
     @GetMapping("/adherence/stats/{userId}")
     public ResponseEntity<?> getAdherenceStats(
             @PathVariable Long userId,
-            @RequestParam(name = "days", defaultValue = "0") int days) {
+            @RequestParam(name = "days", defaultValue = "0") int days,
+            @AuthenticationPrincipal UserPrincipal principal) {
 
         User marker = userRepo.findById(userId).orElse(null);
         if (marker == null) {
             return ResponseEntity.badRequest().body("User not found");
+        }
+        if (!canAccessUser(marker, principal)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body("Access denied");
         }
 
         LocalDate today      = LocalDate.now();
@@ -269,52 +324,37 @@ public class IntakeLogController {
         // days > 0   → exactly that many calendar days back from today
         LocalDate statsStart = (days > 0)
                 ? today.minusDays(days - 1)   // inclusive: e.g. days=7 → last 7 days
-                : today.minusDays(3649);       // ~10 years — effectively "all time"
+                : scheduledDoseService.earliestScheduledDate(marker, today);
 
-        List<IntakeLog> allLogs   = logRepo.findByMarkerAndDateBetween(marker, statsStart, today);
-        List<IntakeLog> todayLogs = logRepo.findByMarkerAndDate(marker, today);
-        List<IntakeLog> weekLogs  = logRepo.findByMarkerAndDateBetween(marker, weekStart, today);
-        List<IntakeLog> monthLogs = logRepo.findByMarkerAndDateBetween(marker, monthStart, today);
+        ScheduledDoseService.Summary summary = scheduledDoseService.summarize(
+                marker, statsStart, today, LocalDateTime.now());
+        ScheduledDoseService.Summary recentSummary = statsStart.isAfter(monthStart)
+                ? scheduledDoseService.summarize(marker, monthStart, today, LocalDateTime.now())
+                : summary;
 
-        int totalDoses = allLogs.size();
-        int takenDoses = (int) allLogs.stream().filter(l -> "TAKEN".equalsIgnoreCase(l.getStatus())).count();
-        int missedDoses = (int) allLogs.stream().filter(l -> "MISSED".equalsIgnoreCase(l.getStatus())).count();
-        int pendingDoses = (int) allLogs.stream().filter(l -> "PENDING".equalsIgnoreCase(l.getStatus())).count();
-
-        double adherencePercentage = 0.0;
-        if (totalDoses > 0) {
-            adherencePercentage = Math.round((takenDoses * 100.0 / totalDoses) * 10.0) / 10.0;
-        }
-
-        int missedToday = (int) todayLogs.stream().filter(l -> "MISSED".equalsIgnoreCase(l.getStatus())).count();
-        int missedThisWeek = (int) weekLogs.stream().filter(l -> "MISSED".equalsIgnoreCase(l.getStatus())).count();
-        int missedThisMonth = (int) monthLogs.stream().filter(l -> "MISSED".equalsIgnoreCase(l.getStatus())).count();
-
-        Map<String, Long> missedByMedicine = allLogs.stream()
-                .filter(l -> "MISSED".equalsIgnoreCase(l.getStatus()))
-                .collect(Collectors.groupingBy(
-                        l -> l.getMedication().getName(),
-                        Collectors.counting()
-                ));
-
-        String mostMissedMedicine = "-";
-        int mostMissedCount = 0;
-        if (!missedByMedicine.isEmpty()) {
-            Map.Entry<String, Long> maxEntry = missedByMedicine.entrySet().stream()
-                    .max(Map.Entry.comparingByValue())
-                    .orElse(null);
-            if (maxEntry != null) {
-                mostMissedMedicine = maxEntry.getKey();
-                mostMissedCount = maxEntry.getValue().intValue();
-            }
-        }
+        int missedToday = Optional.ofNullable(recentSummary.daily().get(today))
+                .map(ScheduledDoseService.DailyCounts::missed).orElse(0);
+        int missedThisWeek = recentSummary.daily().entrySet().stream()
+                .filter(e -> !e.getKey().isBefore(weekStart))
+                .mapToInt(e -> e.getValue().missed()).sum();
+        int missedThisMonth = recentSummary.daily().values().stream()
+                .mapToInt(ScheduledDoseService.DailyCounts::missed).sum();
 
         AdherenceStatsDto stats = new AdherenceStatsDto(
-                totalDoses, takenDoses, missedDoses, pendingDoses,
-                adherencePercentage, missedToday, missedThisWeek, missedThisMonth,
-                mostMissedMedicine, mostMissedCount
+                summary.total(), summary.taken(), summary.missed(), summary.pending(),
+                summary.adherencePercentage(), missedToday, missedThisWeek, missedThisMonth,
+                summary.mostMissedMedicine(), summary.mostMissedCount()
         );
 
         return ResponseEntity.ok(stats);
+    }
+
+    private boolean canAccessUser(User target, UserPrincipal principal) {
+        if (target == null || principal == null) return false;
+        if (target.getId().equals(principal.getUserId())) return true;
+        User authUser = principal.getUser();
+        return "CAREGIVER".equalsIgnoreCase(authUser.getRole())
+                && authUser.getPatientEmail() != null
+                && authUser.getPatientEmail().equalsIgnoreCase(target.getEmail());
     }
 }

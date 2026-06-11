@@ -3,8 +3,11 @@ package com.example.dosebuddy.controller;
 import com.example.dosebuddy.dto.ActivityDto;
 import com.example.dosebuddy.model.User;
 import com.example.dosebuddy.repository.UserRepository;
+import com.example.dosebuddy.security.UserPrincipal;
 import com.example.dosebuddy.service.ActivityService;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
@@ -27,11 +30,15 @@ public class ActivityController {
     @GetMapping("/recent/{userId}")
     public ResponseEntity<?> getRecentActivities(
             @PathVariable Long userId,
-            @RequestParam(defaultValue = "10") int limit) {
+            @RequestParam(defaultValue = "10") int limit,
+            @AuthenticationPrincipal UserPrincipal principal) {
         
         User user = userRepository.findById(userId).orElse(null);
         if (user == null) {
             return ResponseEntity.badRequest().body("User not found");
+        }
+        if (!canAccessUser(user, principal)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body("Access denied");
         }
 
         List<ActivityDto> activities = activityService.getRecentActivities(user, limit);
@@ -39,10 +46,14 @@ public class ActivityController {
     }
 
     @GetMapping("/all/{userId}")
-    public ResponseEntity<?> getAllActivities(@PathVariable Long userId) {
+    public ResponseEntity<?> getAllActivities(@PathVariable Long userId,
+                                              @AuthenticationPrincipal UserPrincipal principal) {
         User user = userRepository.findById(userId).orElse(null);
         if (user == null) {
             return ResponseEntity.badRequest().body("User not found");
+        }
+        if (!canAccessUser(user, principal)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body("Access denied");
         }
 
         List<ActivityDto> activities = activityService.getAllActivities(user);
@@ -53,11 +64,15 @@ public class ActivityController {
     @GetMapping("/type/{userId}/{type}")
     public ResponseEntity<?> getActivitiesByType(
             @PathVariable Long userId,
-            @PathVariable String type) {
+            @PathVariable String type,
+            @AuthenticationPrincipal UserPrincipal principal) {
         
         User user = userRepository.findById(userId).orElse(null);
         if (user == null) {
             return ResponseEntity.badRequest().body("User not found");
+        }
+        if (!canAccessUser(user, principal)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body("Access denied");
         }
 
         List<ActivityDto> activities = activityService.getActivitiesByType(user, type);
@@ -68,11 +83,15 @@ public class ActivityController {
     @GetMapping("/since/{userId}")
     public ResponseEntity<?> getActivitiesSince(
             @PathVariable Long userId,
-            @RequestParam String since) {
+            @RequestParam String since,
+            @AuthenticationPrincipal UserPrincipal principal) {
         
         User user = userRepository.findById(userId).orElse(null);
         if (user == null) {
             return ResponseEntity.badRequest().body("User not found");
+        }
+        if (!canAccessUser(user, principal)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body("Access denied");
         }
 
         try {
@@ -85,10 +104,14 @@ public class ActivityController {
     }
 
     @GetMapping("/count/{userId}")
-    public ResponseEntity<?> getActivityCount(@PathVariable Long userId) {
+    public ResponseEntity<?> getActivityCount(@PathVariable Long userId,
+                                              @AuthenticationPrincipal UserPrincipal principal) {
         User user = userRepository.findById(userId).orElse(null);
         if (user == null) {
             return ResponseEntity.badRequest().body("User not found");
+        }
+        if (!canAccessUser(user, principal)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body("Access denied");
         }
 
         long count = activityService.getActivityCount(user);
@@ -96,7 +119,8 @@ public class ActivityController {
     }
 
     @PostMapping("/log")
-    public ResponseEntity<?> logActivity(@RequestBody Map<String, Object> request) {
+    public ResponseEntity<?> logActivity(@RequestBody Map<String, Object> request,
+                                         @AuthenticationPrincipal UserPrincipal principal) {
         Object userIdObj = request.get("userId");
         Object typeObj   = request.get("type");
         Object msgObj    = request.get("message");
@@ -118,6 +142,9 @@ public class ActivityController {
         User user = userRepository.findById(userId).orElse(null);
         if (user == null) {
             return ResponseEntity.badRequest().body("User not found");
+        }
+        if (!canAccessUser(user, principal)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body("Access denied");
         }
 
         String relatedEntityType = request.containsKey("relatedEntityType")
@@ -147,13 +174,26 @@ public class ActivityController {
     }
 
     @DeleteMapping("/clear/{userId}")
-    public ResponseEntity<?> clearActivities(@PathVariable Long userId) {
+    public ResponseEntity<?> clearActivities(@PathVariable Long userId,
+                                             @AuthenticationPrincipal UserPrincipal principal) {
         User user = userRepository.findById(userId).orElse(null);
         if (user == null) {
             return ResponseEntity.badRequest().body("User not found");
         }
+        if (!canAccessUser(user, principal)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body("Access denied");
+        }
 
         activityService.deleteAllActivities(user);
         return ResponseEntity.ok("All activities cleared");
+    }
+
+    private boolean canAccessUser(User target, UserPrincipal principal) {
+        if (target == null || principal == null) return false;
+        if (target.getId().equals(principal.getUserId())) return true;
+        User authUser = principal.getUser();
+        return "CAREGIVER".equalsIgnoreCase(authUser.getRole())
+                && authUser.getPatientEmail() != null
+                && authUser.getPatientEmail().equalsIgnoreCase(target.getEmail());
     }
 }

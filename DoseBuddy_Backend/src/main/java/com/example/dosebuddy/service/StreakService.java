@@ -1,10 +1,8 @@
 package com.example.dosebuddy.service;
 
 import com.example.dosebuddy.dto.StreakDto;
-import com.example.dosebuddy.model.IntakeLog;
 import com.example.dosebuddy.model.User;
 import com.example.dosebuddy.model.UserStreak;
-import com.example.dosebuddy.repository.IntakeLogRepository;
 import com.example.dosebuddy.repository.UserRepository;
 import com.example.dosebuddy.repository.UserStreakRepository;
 import org.springframework.stereotype.Service;
@@ -12,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.util.*;
+import java.time.LocalDateTime;
 import java.util.stream.Collectors;
 
 @Service
@@ -39,21 +38,19 @@ public class StreakService {
     );
 
     private final UserStreakRepository streakRepo;
-    private final IntakeLogRepository  logRepo;
     private final UserRepository       userRepo;
+    private final ScheduledDoseService scheduledDoseService;
 
     public StreakService(UserStreakRepository streakRepo,
-                         IntakeLogRepository logRepo,
-                         UserRepository userRepo) {
+                         UserRepository userRepo,
+                         ScheduledDoseService scheduledDoseService) {
         this.streakRepo = streakRepo;
-        this.logRepo    = logRepo;
         this.userRepo   = userRepo;
+        this.scheduledDoseService = scheduledDoseService;
     }
 
     public StreakDto getStreak(Long userId) {
-        UserStreak streak = streakRepo.findByUserId(userId)
-                .orElseGet(() -> createEmpty(userId));
-        return toDto(streak, userId, null);
+        return recalculate(userId);
     }
 
     @Transactional
@@ -67,9 +64,12 @@ public class StreakService {
         if (user == null) {
             return toDto(streak, userId, null);
         }
-        List<IntakeLog> allLogs = logRepo.findByMarker(user);
+        LocalDate today = LocalDate.now();
+        LocalDate firstScheduled = scheduledDoseService.earliestScheduledDate(user, today);
+        ScheduledDoseService.Summary allTime = scheduledDoseService.summarize(
+                user, firstScheduled, today, LocalDateTime.now());
 
-        if (allLogs.isEmpty()) {
+        if (allTime.total() == 0) {
             streak.setCurrentStreak(0);
             streak.setLongestStreak(0);
             streak.setLastPerfectDate(null);
@@ -78,29 +78,21 @@ public class StreakService {
             return toDto(streak, userId, null);
         }
 
-        LocalDate today = LocalDate.now();
-        Map<LocalDate, List<IntakeLog>> byDate = allLogs.stream()
-                .collect(Collectors.groupingBy(IntakeLog::getDate));
-
-        Set<LocalDate> perfectDays = byDate.entrySet().stream()
-                .filter(e -> e.getValue().stream()
-                        .allMatch(l -> "TAKEN".equalsIgnoreCase(l.getStatus())))
-                .map(Map.Entry::getKey)
-                .collect(Collectors.toSet());
+        Set<LocalDate> perfectDays = allTime.perfectDays();
 
         int currentStreak = 0;
-        LocalDate cursor = today;
+        ScheduledDoseService.DailyCounts todayCounts = allTime.daily().get(today);
+        boolean todayHasMissedDose = todayCounts != null && todayCounts.missed() > 0;
+        LocalDate cursor = perfectDays.contains(today)
+                ? today
+                : todayHasMissedDose ? null : today.minusDays(1);
 
-        if (!perfectDays.contains(today)) {
-            cursor = today.minusDays(1);
-        }
-
-        while (perfectDays.contains(cursor)) {
+        while (cursor != null && perfectDays.contains(cursor)) {
             currentStreak++;
             cursor = cursor.minusDays(1);
         }
 
-        int longestStreak = Math.max(streak.getLongestStreak(), currentStreak);
+        int longestStreak = currentStreak;
 
         if (!perfectDays.isEmpty()) {
             List<LocalDate> sorted = perfectDays.stream().sorted().collect(Collectors.toList());
@@ -113,7 +105,7 @@ public class StreakService {
                     run = 1;
                 }
             }
-            longestStreak = Math.max(longestStreak, maxRun);
+            longestStreak = maxRun;
         }
 
         LocalDate streakStart = currentStreak > 0
@@ -133,16 +125,16 @@ public class StreakService {
                 .filter(d -> !d.isBefore(today.minusDays(29)) && !d.isAfter(today))
                 .count();
 
-        long totalTaken = allLogs.stream()
-                .filter(l -> "TAKEN".equalsIgnoreCase(l.getStatus()))
-                .count();
-
-        List<IntakeLog> last30 = allLogs.stream()
-                .filter(l -> !l.getDate().isBefore(today.minusDays(29)))
-                .collect(Collectors.toList());
-        double adherence30 = last30.isEmpty() ? 0.0
-                : (last30.stream().filter(l -> "TAKEN".equalsIgnoreCase(l.getStatus())).count()
-                   * 100.0 / last30.size());
+        long totalTaken = allTime.taken();
+        LocalDate last30Start = today.minusDays(29);
+        int last30Taken = allTime.daily().entrySet().stream()
+                .filter(e -> !e.getKey().isBefore(last30Start))
+                .mapToInt(e -> e.getValue().taken()).sum();
+        int last30Missed = allTime.daily().entrySet().stream()
+                .filter(e -> !e.getKey().isBefore(last30Start))
+                .mapToInt(e -> e.getValue().missed()).sum();
+        int last30Completed = last30Taken + last30Missed;
+        double adherence30 = last30Completed == 0 ? 0.0 : last30Taken * 100.0 / last30Completed;
 
         Set<String> newBadges = new HashSet<>(previousBadges);
 
@@ -157,9 +149,9 @@ public class StreakService {
                 case "PERFECT_WEEK"     -> unlock = perfectThisWeek >= 7;
                 case "FORTNIGHT"        -> unlock = currentStreak >= 14 || longestStreak >= 14;
                 case "MONTH_MASTER"     -> unlock = currentStreak >= 30 || longestStreak >= 30;
-                case "ADHERENCE_MASTER" -> unlock = adherence30 >= 90.0 && last30.size() >= 10;
+                case "ADHERENCE_MASTER" -> unlock = adherence30 >= 90.0 && last30Completed >= 10;
                 case "CENTURY"          -> unlock = totalTaken >= 100;
-                case "CONSISTENCY"      -> unlock = !byDate.isEmpty() && byDate.size() >= 30;
+                case "CONSISTENCY"      -> unlock = allTime.daily().size() >= 30;
                 default                 -> {}
             }
             if (unlock) newBadges.add(def.key);
@@ -176,9 +168,7 @@ public class StreakService {
         streak.setUnlockedBadges(String.join(",", newBadges));
         streakRepo.save(streak);
 
-        
-        StreakDto dto = toDto(streak, userId, newlyUnlocked, perfectThisWeek, perfectThisMonth);
-        return dto;
+        return toDto(streak, userId, newlyUnlocked, perfectThisWeek, perfectThisMonth);
     }
 
 
@@ -229,33 +219,6 @@ public class StreakService {
             // Caller (recalculate) already has these — avoid a redundant log query
             perfectThisWeek  = precomputedWeek;
             perfectThisMonth = precomputedMonth;
-        } else {
-            // GET /streaks/{id} path — compute on-the-fly so the read-only
-            // endpoint returns accurate values without requiring a recalculate.
-            try {
-                User user = userRepo.findById(userId).orElse(null);
-                if (user != null) {
-                    LocalDate today = LocalDate.now();
-                    List<IntakeLog> allLogs = logRepo.findByMarker(user);
-                    if (!allLogs.isEmpty()) {
-                        Map<LocalDate, List<IntakeLog>> byDate = allLogs.stream()
-                                .collect(Collectors.groupingBy(IntakeLog::getDate));
-                        Set<LocalDate> perfectDays = byDate.entrySet().stream()
-                                .filter(e -> e.getValue().stream()
-                                        .allMatch(l -> "TAKEN".equalsIgnoreCase(l.getStatus())))
-                                .map(Map.Entry::getKey)
-                                .collect(Collectors.toSet());
-                        perfectThisWeek  = (int) perfectDays.stream()
-                                .filter(d -> !d.isBefore(today.minusDays(6)) && !d.isAfter(today))
-                                .count();
-                        perfectThisMonth = (int) perfectDays.stream()
-                                .filter(d -> !d.isBefore(today.minusDays(29)) && !d.isAfter(today))
-                                .count();
-                    }
-                }
-            } catch (Exception ignored) {
-                // Computation failure must never prevent the DTO from being returned
-            }
         }
 
         dto.setPerfectDaysThisWeek(perfectThisWeek);

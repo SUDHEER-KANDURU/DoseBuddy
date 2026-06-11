@@ -7,6 +7,7 @@ import com.example.dosebuddy.model.User;
 import com.example.dosebuddy.repository.BmiRecordRepository;
 import com.example.dosebuddy.repository.UserRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.data.domain.PageRequest;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -72,9 +73,9 @@ public class BmiService {
     }
 
     public List<BmiResponseDto> getRecentBmiHistory(Long userId, int limit) {
-        List<BmiRecord> records = bmiRecordRepository.findByUserIdOrderByCreatedAtDesc(userId);
+        List<BmiRecord> records = bmiRecordRepository.findByUserIdOrderByCreatedAtDesc(
+                userId, PageRequest.of(0, Math.min(100, Math.max(1, limit))));
         return records.stream()
-                .limit(Math.max(1, limit))
                 .map(this::buildBmiResponse)
                 .collect(Collectors.toList());
     }

@@ -7,6 +7,7 @@ import com.example.dosebuddy.model.VitalRecord;
 import com.example.dosebuddy.repository.UserRepository;
 import com.example.dosebuddy.repository.VitalRecordRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.data.domain.PageRequest;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -63,8 +64,9 @@ public class VitalService {
     }
 
     public List<VitalRecordDto> getRecent(Long userId, int limit) {
-        return vitalRepo.findByUserIdOrderByRecordedAtDesc(userId)
-                .stream().limit(Math.max(1, limit))
+        return vitalRepo.findByUserIdOrderByRecordedAtDesc(
+                        userId, PageRequest.of(0, Math.min(100, Math.max(1, limit))))
+                .stream()
                 .map(this::toDto).collect(Collectors.toList());
     }
 
@@ -85,9 +87,10 @@ public class VitalService {
                 .stream().map(this::toDto).collect(Collectors.toList());
     }
 
-    public boolean deleteVital(Long id) {
-        if (!vitalRepo.existsById(id)) return false;
-        vitalRepo.deleteById(id);
+    public boolean deleteVital(Long id, Long userId) {
+        Optional<VitalRecord> record = vitalRepo.findById(id);
+        if (record.isEmpty() || !record.get().getUserId().equals(userId)) return false;
+        vitalRepo.delete(record.get());
         return true;
     }
 

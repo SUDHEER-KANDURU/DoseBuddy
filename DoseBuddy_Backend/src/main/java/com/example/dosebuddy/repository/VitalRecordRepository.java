@@ -3,6 +3,7 @@ package com.example.dosebuddy.repository;
 import com.example.dosebuddy.model.VitalRecord;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDateTime;
@@ -13,6 +14,8 @@ import java.util.Optional;
 public interface VitalRecordRepository extends JpaRepository<VitalRecord, Long> {
 
     List<VitalRecord> findByUserIdOrderByRecordedAtDesc(Long userId);
+
+    List<VitalRecord> findByUserIdOrderByRecordedAtDesc(Long userId, Pageable pageable);
 
     @Query("SELECT v FROM VitalRecord v WHERE v.userId = ?1 ORDER BY v.recordedAt DESC LIMIT 1")
     Optional<VitalRecord> findLatestByUserId(Long userId);
