@@ -103,6 +103,32 @@ async function authFetch(url, options = {}) {
     return response;
 }
 
+const _jsonCache = new Map();
+const _jsonInflight = new Map();
+
+async function fetchJsonCached(url, ttlMs = 15000) {
+    const cached = _jsonCache.get(url);
+    if (cached && Date.now() - cached.at < ttlMs) return cached.data;
+    if (_jsonInflight.has(url)) return _jsonInflight.get(url);
+
+    const request = authFetch(url)
+        .then(async res => {
+            if (!res.ok) throw new Error(`Request failed (${res.status})`);
+            const data = await res.json();
+            _jsonCache.set(url, { data, at: Date.now() });
+            return data;
+        })
+        .finally(() => _jsonInflight.delete(url));
+    _jsonInflight.set(url, request);
+    return request;
+}
+
+function invalidateDataCache(...fragments) {
+    for (const key of _jsonCache.keys()) {
+        if (fragments.some(fragment => key.includes(fragment))) _jsonCache.delete(key);
+    }
+}
+
 /** Called when refresh token is expired or invalid — logs the user out */
 function _handleAuthExpiry() {
     // Guard: only fire the expiry flow if we actually have a session to expire.
@@ -122,6 +148,10 @@ let currentUser = null;
 let logs = [];
 let medsCache = [];
 let medsCacheDate = null;
+let _dashboardRenderId = 0;
+let _historyRenderId = 0;
+let _reportsRenderId = 0;
+let _profileFetchedAt = 0;
 // ─── Notification deduplication ──────────────────────────────────────────────
 // firedReminderKeys  – Set of "userId-medId-YYYY-MM-DD-HH:MM" strings.
 //   • Added when triggerDoseNotification fires.
@@ -618,6 +648,9 @@ function setupAuthView() {
 
     setupSignupSteps();
 
+    setupOtpVerification();
+    setupForgotPassword();
+
     setupLegalModals();
 
     document.getElementById("su-password")?.addEventListener("input", (e) => {
@@ -951,51 +984,23 @@ async function handleSignupApi(body, errorElem) {
         body: JSON.stringify(body)
     });
 
+    const data = await res.json().catch(() => ({}));
+
     if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
         if (errorElem) errorElem.textContent = data.message || "Signup failed.";
         return;
     }
 
-    const user = await res.json();
-
-    // ── Step 1: Store tokens FIRST, before any protected call ─────────────
-    // This must happen before fetchFullProfile so authFetch has a valid token.
-    if (user.accessToken && user.refreshToken) {
-        storeTokens(user.accessToken, user.refreshToken, user.expiresIn || 900);
-    } else {
-        // Backend didn't return tokens — signup failed silently
-        if (errorElem) errorElem.textContent = "Signup error: no authentication token received.";
+    // If the backend requires email verification (OTP)
+    if (data.requiresVerification) {
+        showOtpVerificationForm(data.email || body.email);
         return;
     }
 
-    // ── Step 2: Set currentUser from the signup response immediately ───────
-    // This prevents the route guard from firing before fetchFullProfile returns.
-    currentUser = user;
-    saveToLS(LS_CURRENT_USER_KEY, currentUser);
-
-    // ── Step 3: Show the app shell before the async profile fetch ──────────
-    // The user is now authenticated (tokens + currentUser set), so showAppViews
-    // and switchView can both proceed safely without hitting the route guard.
-    showAppViews();
-    switchView("dashboard-view");
-    showToast(`Welcome to DoseBuddy, ${currentUser.name || ""}! 🎉`, "success", 4000);
-
-    // ── Step 4: Enrich with full profile in the background ─────────────────
-    // Do NOT await this before showing the dashboard. If it fails, the user
-    // is already logged in with the signup response data — no harm done.
-    fetchFullProfile(user.id).then(fullProfile => {
-        if (fullProfile) {
-            currentUser = { ...currentUser, ...fullProfile };
-            saveToLS(LS_CURRENT_USER_KEY, currentUser);
-            updateUserMenuInfo();
-            updateProfileDropdown();
-        }
-    }).catch(err => {
-        // Profile enrichment failed — user is still logged in, just with
-        // signup-response data. Silent failure is acceptable here.
-        console.warn("[Signup] fetchFullProfile failed (non-fatal):", err.message);
-    });
+    // Legacy path: if backend returns tokens directly (shouldn't happen now)
+    if (data.accessToken && data.refreshToken) {
+        completeLoginFromResponse(data);
+    }
 }
 
 // ── Unlock audio using the login button press as the user gesture ─────────────
@@ -1029,38 +1034,43 @@ async function handleLoginApi(email, password, errorElem) {
 
     if (!res.ok) {
         const data = await res.json().catch(() => ({}));
+
+        // If email not verified, show OTP verification form
+        if (res.status === 403 && data.requiresVerification) {
+            showOtpVerificationForm(data.email || email);
+            return;
+        }
+
         errorElem.textContent = data.message || "Login failed.";
         return;
     }
 
     const user = await res.json();
+    completeLoginFromResponse(user);
+}
 
-    // ── Step 1: Store tokens FIRST ─────────────────────────────────────────
+// ── Complete Login (shared by signup-verify and login) ────────────────────────
+function completeLoginFromResponse(user) {
     if (user.accessToken && user.refreshToken) {
         storeTokens(user.accessToken, user.refreshToken, user.expiresIn || 900);
     } else {
-        errorElem.textContent = "Login error: no authentication token received.";
+        showToast("Login error: no authentication token received.", "error");
         return;
     }
 
-    // Login button press = confirmed user gesture — unlock audio now.
     unlockAudioOnLogin();
 
-    // ── Step 2: Set currentUser immediately from login response ────────────
     currentUser = user;
     saveToLS(LS_CURRENT_USER_KEY, currentUser);
 
-    // ── Step 3: Show app and navigate — tokens + user already set ──────────
     showAppViews();
     switchView("dashboard-view");
-    showToast(`Welcome back, ${currentUser.name || ""}!`, "success", 3000);
+    showToast(`Welcome${currentUser.name ? ", " + currentUser.name : ""}!`, "success", 3000);
 
-    // Prompt for notification permission (user gesture already happened)
     if ("Notification" in window && Notification.permission === "default") {
         setTimeout(() => showNotifPermissionBanner(), 2000);
     }
 
-    // ── Step 4: Enrich profile in background (non-blocking) ────────────────
     fetchFullProfile(user.id).then(fullProfile => {
         if (fullProfile) {
             currentUser = { ...currentUser, ...fullProfile };
@@ -1070,6 +1080,264 @@ async function handleLoginApi(email, password, errorElem) {
         }
     }).catch(err => {
         console.warn("[Login] fetchFullProfile failed (non-fatal):", err.message);
+    });
+}
+
+// ── OTP Verification Flow ────────────────────────────────────────────────────
+
+let pendingOtpEmail = "";
+
+function showOtpVerificationForm(email) {
+    pendingOtpEmail = email;
+    // Hide all auth forms
+    document.getElementById("login-form").style.display = "none";
+    document.getElementById("signup-form").style.display = "none";
+    document.getElementById("login-header").style.display = "none";
+    document.getElementById("signup-header").style.display = "none";
+    document.getElementById("signup-switch-text").style.display = "none";
+    const fpForm = document.getElementById("forgot-password-form");
+    if (fpForm) fpForm.style.display = "none";
+
+    // Show OTP form
+    const otpForm = document.getElementById("otp-verify-form");
+    otpForm.style.display = "block";
+    document.getElementById("otp-subtitle").textContent = `Enter the 6-digit code sent to ${email}`;
+    document.getElementById("otp-input").value = "";
+    document.getElementById("otp-error").textContent = "";
+    document.getElementById("otp-form-error").textContent = "";
+    document.getElementById("otp-input").focus();
+
+    const card = document.querySelector(".auth-card");
+    if (card) card.classList.remove("auth-card-wide");
+}
+
+function hideOtpVerificationForm() {
+    document.getElementById("otp-verify-form").style.display = "none";
+    document.getElementById("login-form").style.display = "block";
+    document.getElementById("login-header").style.display = "block";
+    const card = document.querySelector(".auth-card");
+    if (card) card.classList.remove("auth-card-wide");
+}
+
+function setupOtpVerification() {
+    const otpForm = document.getElementById("otp-verify-form");
+    if (!otpForm) return;
+
+    otpForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const otp = document.getElementById("otp-input").value.trim();
+        const errorElem = document.getElementById("otp-form-error");
+        errorElem.textContent = "";
+
+        if (!otp || otp.length !== 6 || !/^\d{6}$/.test(otp)) {
+            document.getElementById("otp-error").textContent = "Please enter a valid 6-digit code.";
+            return;
+        }
+
+        const btn = document.getElementById("otp-submit-btn");
+        btn.disabled = true;
+        btn.textContent = "Verifying...";
+
+        try {
+            const res = await fetch(`${API_BASE}/auth/verify-email`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ email: pendingOtpEmail, otp })
+            });
+
+            const data = await res.json().catch(() => ({}));
+
+            if (!res.ok) {
+                errorElem.textContent = data.message || "Verification failed.";
+                return;
+            }
+
+            // Verification successful — data contains login response with tokens
+            if (data.accessToken) {
+                showToast("Email verified successfully!", "success", 3000);
+                completeLoginFromResponse(data);
+            } else {
+                showToast("Email verified! Please log in.", "success", 3000);
+                hideOtpVerificationForm();
+            }
+        } catch (err) {
+            console.error(err);
+            errorElem.textContent = "Something went wrong. Please try again.";
+        } finally {
+            btn.disabled = false;
+            btn.textContent = "Verify Email";
+        }
+    });
+
+    // Resend OTP button
+    document.getElementById("resend-otp-btn")?.addEventListener("click", async () => {
+        const errorElem = document.getElementById("otp-form-error");
+        errorElem.textContent = "";
+
+        try {
+            const res = await fetch(`${API_BASE}/auth/resend-otp`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ email: pendingOtpEmail })
+            });
+            const data = await res.json().catch(() => ({}));
+            showToast(data.message || "OTP resent!", "success", 3000);
+        } catch (err) {
+            errorElem.textContent = "Failed to resend OTP.";
+        }
+    });
+
+    // Back to login
+    document.getElementById("otp-back-to-login-btn")?.addEventListener("click", () => {
+        hideOtpVerificationForm();
+    });
+}
+
+// ── Forgot Password Flow ─────────────────────────────────────────────────────
+
+let forgotPasswordStep = "email"; // "email" or "reset"
+let forgotPasswordEmail = "";
+
+function showForgotPasswordForm() {
+    document.getElementById("login-form").style.display = "none";
+    document.getElementById("signup-form").style.display = "none";
+    document.getElementById("login-header").style.display = "none";
+    document.getElementById("signup-header").style.display = "none";
+    document.getElementById("signup-switch-text").style.display = "none";
+    const otpForm = document.getElementById("otp-verify-form");
+    if (otpForm) otpForm.style.display = "none";
+
+    const fpForm = document.getElementById("forgot-password-form");
+    fpForm.style.display = "block";
+
+    // Reset to step 1
+    forgotPasswordStep = "email";
+    document.getElementById("fp-email").value = "";
+    document.getElementById("fp-email-group").style.display = "block";
+    document.getElementById("fp-otp-section").style.display = "none";
+    document.getElementById("fp-submit-btn").textContent = "Send Reset Code";
+    document.getElementById("fp-form-error").textContent = "";
+    document.getElementById("fp-email-error").textContent = "";
+
+    const card = document.querySelector(".auth-card");
+    if (card) card.classList.remove("auth-card-wide");
+}
+
+function hideForgotPasswordForm() {
+    document.getElementById("forgot-password-form").style.display = "none";
+    document.getElementById("login-form").style.display = "block";
+    document.getElementById("login-header").style.display = "block";
+    const card = document.querySelector(".auth-card");
+    if (card) card.classList.remove("auth-card-wide");
+}
+
+function setupForgotPassword() {
+    document.getElementById("forgot-password-btn")?.addEventListener("click", () => {
+        showForgotPasswordForm();
+    });
+
+    document.getElementById("fp-back-to-login-btn")?.addEventListener("click", () => {
+        hideForgotPasswordForm();
+    });
+
+    const fpForm = document.getElementById("forgot-password-form");
+    if (!fpForm) return;
+
+    fpForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const errorElem = document.getElementById("fp-form-error");
+        errorElem.textContent = "";
+
+        if (forgotPasswordStep === "email") {
+            // Step 1: Send OTP to email
+            const email = document.getElementById("fp-email").value.trim().toLowerCase();
+            if (!email || !email.includes("@")) {
+                document.getElementById("fp-email-error").textContent = "Please enter a valid email.";
+                return;
+            }
+
+            const btn = document.getElementById("fp-submit-btn");
+            btn.disabled = true;
+            btn.textContent = "Sending...";
+
+            try {
+                const res = await fetch(`${API_BASE}/auth/forgot-password`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ email })
+                });
+                const data = await res.json().catch(() => ({}));
+
+                if (!res.ok) {
+                    errorElem.textContent = data.message || "Failed to send reset code.";
+                    return;
+                }
+
+                // Move to step 2: show OTP + new password fields
+                forgotPasswordEmail = email;
+                forgotPasswordStep = "reset";
+                document.getElementById("fp-email-group").style.display = "none";
+                document.getElementById("fp-otp-section").style.display = "block";
+                document.getElementById("fp-submit-btn").textContent = "Reset Password";
+                showToast("Reset code sent to your email!", "success", 3000);
+                document.getElementById("fp-otp").focus();
+            } catch (err) {
+                errorElem.textContent = "Something went wrong. Please try again.";
+            } finally {
+                btn.disabled = false;
+                if (forgotPasswordStep === "email") btn.textContent = "Send Reset Code";
+            }
+        } else {
+            // Step 2: Verify OTP and reset password
+            const otp = document.getElementById("fp-otp").value.trim();
+            const newPassword = document.getElementById("fp-new-password").value;
+            const confirmPassword = document.getElementById("fp-confirm-password").value;
+
+            let valid = true;
+            if (!otp || otp.length !== 6 || !/^\d{6}$/.test(otp)) {
+                document.getElementById("fp-otp-error").textContent = "Enter a valid 6-digit code.";
+                valid = false;
+            }
+            if (!newPassword || newPassword.length < 8) {
+                document.getElementById("fp-pw-error").textContent = "Password must be at least 8 characters.";
+                valid = false;
+            }
+            if (newPassword !== confirmPassword) {
+                document.getElementById("fp-confirm-error").textContent = "Passwords do not match.";
+                valid = false;
+            }
+            if (!valid) return;
+
+            const btn = document.getElementById("fp-submit-btn");
+            btn.disabled = true;
+            btn.textContent = "Resetting...";
+
+            try {
+                const res = await fetch(`${API_BASE}/auth/reset-password`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        email: forgotPasswordEmail,
+                        otp,
+                        newPassword
+                    })
+                });
+                const data = await res.json().catch(() => ({}));
+
+                if (!res.ok) {
+                    errorElem.textContent = data.message || "Reset failed.";
+                    return;
+                }
+
+                showToast("Password reset successfully! Please log in.", "success", 4000);
+                hideForgotPasswordForm();
+            } catch (err) {
+                errorElem.textContent = "Something went wrong. Please try again.";
+            } finally {
+                btn.disabled = false;
+                btn.textContent = "Reset Password";
+            }
+        }
     });
 }
 
@@ -1083,7 +1351,9 @@ async function fetchFullProfile(userId) {
             console.warn("fetchFullProfile: server returned", res.status);
             return null;
         }
-        return await res.json();
+        const profile = await res.json();
+        _profileFetchedAt = Date.now();
+        return profile;
     } catch (e) {
         // authFetch throws when _handleAuthExpiry fires (session genuinely dead)
         // OR on network failure. Either way, return null — the caller decides
@@ -1298,9 +1568,8 @@ function setupMedicineForm() {
           
             const firstTime = times[0] || "";
 
+            invalidateDataCache("/medications/", "/logs/summary/", "/logs/adherence/", "/streaks/");
             await renderDashboard();
-            // Pass freshly-fetched logs[] from renderDashboard — avoids duplicate /logs/history fetch.
-            await renderReports(logs);
             await refreshActivityFeed();
         } catch (err) {
             console.error(err);
@@ -1397,6 +1666,7 @@ function isMedicationActiveToday(med, todayStr) {
 
 async function renderDashboard() {
     if (!currentUser) return;
+    const renderId = ++_dashboardRenderId;
 
     // Update greeting and date every time the dashboard renders
     updateGreeting();
@@ -1446,14 +1716,12 @@ async function renderDashboard() {
         // requests. The original sequential awaits added the full RTT of the logs
         // request before the meds request even started, causing Today's Medicines
         // to appear noticeably late on every dashboard open.
-        const [logsRes, medsRes] = await Promise.all([
-            authFetch(`${API_BASE}/logs/history/${currentUser.id}`),
-            authFetch(medsUrl)
+        const [todayLogs, meds] = await Promise.all([
+            fetchJsonCached(`${API_BASE}/logs/today/${currentUser.id}`, 10000),
+            fetchJsonCached(medsUrl, 30000)
         ]);
-        logs = logsRes.ok ? await logsRes.json() : [];
-
-        if (!medsRes.ok) throw new Error("Failed to load medicines");
-        const meds = await medsRes.json();
+        if (renderId !== _dashboardRenderId) return;
+        logs = Array.isArray(todayLogs) ? todayLogs : [];
 
         medsCache = meds;
         medsCacheDate = todayStr;
@@ -1546,9 +1814,6 @@ async function renderDashboard() {
                             med.name
                         );
                         await renderDashboard();
-                        // Pass the freshly-fetched logs[] from renderDashboard to
-                        // renderReports so it doesn't make a duplicate /logs/history fetch.
-                        await renderReports(logs);
                         await refreshActivityFeed();
                     });
                 }
@@ -1593,7 +1858,8 @@ async function renderDashboard() {
         const adherenceElem = document.getElementById("adherence");
 
         const pending = Math.max(0, totalDoses - takenDoses - missedDoses);
-        const percent = totalDoses === 0 ? 0 : Math.round((takenDoses / totalDoses) * 100);
+        const completedDoses = takenDoses + missedDoses;
+        const percent = completedDoses === 0 ? 0 : Math.round((takenDoses / completedDoses) * 100);
 
         if (statsElem && totalDoses > 0) {
             statsElem.textContent =
@@ -1692,9 +1958,8 @@ async function deleteMedication(medId) {
             return;
         }
 
+        invalidateDataCache("/medications/", "/logs/", "/streaks/");
         try { await renderDashboard(); } catch(e) { console.warn("Dashboard refresh failed"); }
-        // Pass freshly-fetched logs[] from renderDashboard — avoids duplicate /logs/history fetch.
-        try { await renderReports(logs);   } catch(e) { console.warn("Reports refresh failed"); }
         try { await refreshActivityFeed(); } catch(e) { console.warn("Activity refresh failed"); }
     } catch (err) {
         console.error(err);
@@ -1703,6 +1968,7 @@ async function deleteMedication(medId) {
 
 async function renderHistory() {
     if (!currentUser) return;
+    const renderId = ++_historyRenderId;
 
     const tbody = document.getElementById("history-body");
     const empty = document.getElementById("history-empty");
@@ -1711,9 +1977,13 @@ async function renderHistory() {
     tbody.innerHTML = "";
 
     try {
-        const res = await authFetch(`${API_BASE}/logs/history/${currentUser.id}`);
+        const [res, historyStats] = await Promise.all([
+            authFetch(`${API_BASE}/logs/history/${currentUser.id}?page=0&size=100`),
+            fetchJsonCached(`${API_BASE}/logs/adherence/stats/${currentUser.id}?days=0`, 10000)
+        ]);
         if (!res.ok) throw new Error("Failed to load history");
         const items = await res.json();
+        if (renderId !== _historyRenderId) return;
 
         // Do NOT overwrite the global logs[] here.  The global is the shared
         // source of truth for getDoseStatus() which the dashboard table reads.
@@ -1722,17 +1992,10 @@ async function renderHistory() {
         // history-view data and show wrong status pills until renderDashboard()
         // fires its own fetch.  Use a local variable for all History rendering.
 
-        if (items.length === 0) {
-            empty.style.display = "flex";
-            return;
-        }
-        empty.style.display = "none";
-
-        const takenCount = items.filter(l => (l.status || "").toLowerCase() === "taken").length;
-        const missedCount = items.filter(l => (l.status || "").toLowerCase() === "missed").length;
-        const pendingCount = items.filter(l => (l.status || "").toLowerCase() === "pending").length;
-        const totalCount = items.length;
-        const adherencePct = totalCount > 0 ? Math.round((takenCount / totalCount) * 100) : 0;
+        const takenCount = historyStats.takenDoses || 0;
+        const missedCount = historyStats.missedDoses || 0;
+        const pendingCount = historyStats.pendingDoses || 0;
+        const adherencePct = historyStats.adherencePercentage || 0;
 
         const takenCountEl = document.getElementById("hist-taken-count");
         const missedCountEl = document.getElementById("hist-missed-count");
@@ -1743,6 +2006,12 @@ async function renderHistory() {
         if (missedCountEl) missedCountEl.textContent = missedCount;
         if (pendingCountEl) pendingCountEl.textContent = pendingCount;
         if (adherencePctEl) adherencePctEl.textContent = adherencePct + "%";
+
+        if (items.length === 0) {
+            empty.style.display = "flex";
+            return;
+        }
+        empty.style.display = "none";
 
         items.forEach((log) => {
             const tr = document.createElement("tr");
@@ -1837,8 +2106,7 @@ async function markDoseTaken(userId, medId, dateStr, timeStr, medName = "") {
         if (!res.ok) {
             console.error("Failed to save log");
         } else {
-            // Recalculate streak after a dose is taken
-            recalculateStreak();
+            invalidateDataCache("/logs/today/", "/logs/summary/", "/logs/adherence/", "/streaks/");
         }
     } catch (err) {
         console.error(err);
@@ -1853,8 +2121,7 @@ async function markDoseMissed(userId, medId, dateStr, timeStr) {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify([{ userId, medicationId: medId, date: dateStr, time: timeStr }]),
         });
-        // Recalculate streak after a missed dose
-        recalculateStreak();
+        invalidateDataCache("/logs/today/", "/logs/summary/", "/logs/adherence/", "/streaks/");
     } catch (err) {
         console.error("markDoseMissed error:", err);
     }
@@ -1890,9 +2157,10 @@ function renderMissedMiniChart(labels, missedValues) {
                 borderSkipped: false,
             }]
         },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: false,
             plugins: {
                 legend: { display: false },
                 tooltip: {
@@ -1911,6 +2179,7 @@ function renderMissedMiniChart(labels, missedValues) {
 
 async function renderReports(preloadedHistory) {
     if (!currentUser) return;
+    const renderId = ++_reportsRenderId;
 
     // ── Determine the active period from the selected tab ─────────────────
     // adashCurrentPeriod is set by setupAnalyticsFilterTabs().
@@ -1926,6 +2195,8 @@ async function renderReports(preloadedHistory) {
     const dashCtx   = document.getElementById("weekly-chart");
     const rptCtx    = document.getElementById("weekly-chart-reports");
     const rptEmpty  = document.getElementById("reports-empty-page");
+    const dashboardIsVisible = document.getElementById("dashboard-view")?.classList.contains("active");
+    const reportsIsVisible = document.getElementById("reports-view")?.classList.contains("active");
 
     // Guard on rptCtx (the reports-view canvas), not dashCtx.
     // dashCtx lives inside dashboard-view and may be hidden when reports is active.
@@ -1951,42 +2222,18 @@ async function renderReports(preloadedHistory) {
         //
         // When called directly (tab navigation, period change, checkReminders),
         // preloadedHistory is undefined so we fetch fresh data as before.
-        const statsApiDays = periodDays === 0 ? 0 : periodDays;
+        const statsApiDays = dashboardIsVisible ? 7 : (periodDays === 0 ? 0 : periodDays);
 
-        let allHistory;
-        let statsRes;
-
-        if (preloadedHistory !== undefined) {
-            // Reuse history already in memory — no network round-trip needed
-            allHistory = preloadedHistory;
-            // Still need stats; fetch independently
-            statsRes = await authFetch(`${API_BASE}/logs/adherence/stats/${currentUser.id}?days=${statsApiDays}`);
-        } else {
-            // Fetch history and adherence stats in parallel
-            const [histRes, _statsRes] = await Promise.all([
-                authFetch(`${API_BASE}/logs/history/${currentUser.id}`),
-                authFetch(`${API_BASE}/logs/adherence/stats/${currentUser.id}?days=${statsApiDays}`)
-            ]);
-            statsRes = _statsRes;
-            allHistory = histRes.ok ? await histRes.json() : [];
-            if (!histRes.ok) {
-                console.warn("[renderReports] History endpoint returned", histRes.status, "— rendering with empty data");
-            }
-        }
-
-        // Filtered subset for the selected period (date field = "date")
-        const filtered = filterByPeriod(allHistory, period === "all" ? "all" : periodDays, "date");
+        const chartDays = dashboardIsVisible ? 7 : (periodDays === 0 ? 90 : periodDays);
+        const [dailySummary, stats] = await Promise.all([
+            fetchJsonCached(`${API_BASE}/logs/summary/${currentUser.id}?days=${chartDays}`, 10000),
+            fetchJsonCached(`${API_BASE}/logs/adherence/stats/${currentUser.id}?days=${statsApiDays}`, 10000)
+        ]);
+        if (renderId !== _reportsRenderId) return;
+        _rptStats = stats;
 
         // ── Build daily buckets for the chart ─────────────────────────────
         // Determine the date range to display
-        let chartDays;
-        if (period === "all") {
-            // Show up to 90 days of history in the chart (more makes it unreadable)
-            chartDays = 90;
-        } else {
-            chartDays = periodDays;
-        }
-
         const today   = new Date();
         today.setHours(0, 0, 0, 0);
         const buckets = {}; // "YYYY-MM-DD" → { taken:0, missed:0 }
@@ -2008,13 +2255,11 @@ async function renderReports(preloadedHistory) {
             buckets[key] = { taken: 0, missed: 0 };
         }
 
-        // Tally the filtered logs into buckets
-        filtered.forEach(log => {
-            const dateKey = (log.date || "").substring(0, 10);
+        dailySummary.forEach(day => {
+            const dateKey = (day.date || "").substring(0, 10);
             if (!buckets[dateKey]) return; // outside our display window
-            const status = (log.status || "").toUpperCase();
-            if (status === "TAKEN")  buckets[dateKey].taken++;
-            else if (status === "MISSED") buckets[dateKey].missed++;
+            buckets[dateKey].taken = day.takenCount || 0;
+            buckets[dateKey].missed = day.missedCount || 0;
         });
 
         const sortedKeys   = Object.keys(buckets).sort();
@@ -2028,7 +2273,6 @@ async function renderReports(preloadedHistory) {
         // dashboard view is actually visible.  Drawing on a hidden canvas
         // causes Chart.js to produce a 0×0 chart AND can throw an error that
         // aborts the rest of renderReports() (including the stat-card writes).
-        const dashboardIsVisible = document.getElementById("dashboard-view")?.classList.contains("active");
         if (dashboardIsVisible) {
             if (dashEmpty) {
                 dashEmpty.style.display = hasData ? "none" : "block";
@@ -2065,6 +2309,7 @@ async function renderReports(preloadedHistory) {
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    animation: false,
                     plugins: {
                         legend: { display: true, position: "top", labels: { boxWidth: 12, font: { size: 11 }, color: "#4a4540" } },
                     },
@@ -2077,7 +2322,7 @@ async function renderReports(preloadedHistory) {
         }
 
         // ── Reports page chart ─────────────────────────────────────────────
-        if (rptCtx) {
+        if (rptCtx && reportsIsVisible) {
             if (rptEmpty) rptEmpty.style.display = hasData ? "none" : "flex";
             const existing = Chart.getChart(rptCtx);
             if (existing) existing.destroy();
@@ -2109,6 +2354,7 @@ async function renderReports(preloadedHistory) {
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    animation: false,
                     plugins: {
                         legend: { display: true, position: "top", labels: { boxWidth: 12, font: { size: 11 }, color: "#4a4540" } },
                         tooltip: {
@@ -2128,23 +2374,17 @@ async function renderReports(preloadedHistory) {
         // ── Stat cards — calculated from the filtered client-side data ──────
         // We compute totals directly from the filtered history so the numbers
         // match the chart exactly for any period.
-        const filteredTaken  = filtered.filter(l => (l.status || "").toUpperCase() === "TAKEN").length;
-        const filteredMissed = filtered.filter(l => (l.status || "").toUpperCase() === "MISSED").length;
-        const filteredTotal  = filtered.length;
-        const filteredAdher  = filteredTotal > 0
-            ? Math.round((filteredTaken / filteredTotal) * 1000) / 10  // one decimal
-            : 0;
+        const filteredTaken  = stats.takenDoses || 0;
+        const filteredMissed = stats.missedDoses || 0;
+        const filteredTotal  = stats.totalDoses || 0;
+        const filteredAdher  = stats.adherencePercentage || 0;
 
         // FIX Issue 2: use the statsRes already fetched in parallel at the top
         // of this function. The original code made a second sequential fetch
         // here, doubling the network round-trips and causing the noticeable
         // render delay.
         try {
-            if (statsRes.ok) {
-                const stats = await statsRes.json();
-                // Capture for renderAnalyticsDashboard() — avoids a second fetch
-                _rptStats = stats;
-
+            if (stats) {
                 // Override totals with client-computed values so they always
                 // match the chart for the selected period.
                 const totalEl  = document.getElementById("rpt-total-doses");
@@ -2242,8 +2482,10 @@ async function renderReports(preloadedHistory) {
     // Pass undefined for medsCache when it hasn't been populated yet (e.g.
     // direct navigation to reports view before the dashboard ever loaded) so
     // renderAnalyticsDashboard falls back to its own fetch gracefully.
-    const _medsForAnalytics = (medsCache && medsCache.length > 0) ? medsCache : undefined;
-    renderAnalyticsDashboard(_rptStats, _rptStreak, _medsForAnalytics);
+    if (reportsIsVisible) {
+        const _medsForAnalytics = (medsCache && medsCache.length > 0) ? medsCache : undefined;
+        renderAnalyticsDashboard(_rptStats, _rptStreak, _medsForAnalytics);
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -2260,6 +2502,8 @@ let adashHrChart       = null;
 let adashBpChart       = null;
 let adashSugarChart    = null;
 let adashWeightChart   = null;
+let _analyticsBmiHistory = [];
+let _analyticsVitalsHistory = [];
 
 /**
  * Main entry point — called whenever reports view opens or period changes.
@@ -2307,8 +2551,8 @@ async function renderAnalyticsDashboard(preloadedStats, preloadedStreak, preload
     const parallelFetches = [
         needMeds ? authFetch(_analyticsMedsUrl) : Promise.resolve(null),
         authFetch(`${API_BASE}/logs/today/${uid}`),
-        authFetch(`${API_BASE}/bmi/history/${uid}`),
-        authFetch(`${API_BASE}/vitals/history/${uid}`)
+        authFetch(`${API_BASE}/bmi/recent/${uid}?limit=100`),
+        authFetch(`${API_BASE}/vitals/recent/${uid}?limit=100`)
     ];
 
     const [
@@ -2362,8 +2606,10 @@ async function renderAnalyticsDashboard(preloadedStats, preloadedStreak, preload
 
     const meds       = preloadedMeds !== undefined ? preloadedMeds : await settled(medsResult, []);
     const todayLogs  = await settled(todayLogsResult, []);
-    const bmiHistory = await settled(bmiHistResult,   []);
-    const vitalsHist = await settled(vitalsHistResult,[]);
+    const bmiHistory = (await settled(bmiHistResult, [])).slice().reverse();
+    const vitalsHist = (await settled(vitalsHistResult, [])).slice().reverse();
+    _analyticsBmiHistory = bmiHistory;
+    _analyticsVitalsHistory = vitalsHist;
 
     // Use preloaded values when available; otherwise parse the fetched responses.
     const stats  = preloadedStats  !== undefined ? preloadedStats  : await safeJson(statsResult,  {});
@@ -2875,7 +3121,7 @@ function adashRenderVitalsCharts(allVitals, period) {
                     x: { grid: { color: gridColor }, ticks: { color: tickColor, font: { size: 9 }, maxRotation: 45, maxTicksLimit: 8 } },
                     y: { beginAtZero: false, grid: { color: gridColor }, ticks: { color: tickColor, font: { size: 9 } } }
                 },
-                animation: { duration: 800 }
+                animation: false
             }
         });
     }
@@ -3153,10 +3399,7 @@ function setupVitalsPeriodTabs() {
             adashCurrentVitalsPeriod = this.dataset.vperiod;
 
             if (!currentUser) return;
-            authFetch(`${API_BASE}/vitals/history/${currentUser.id}`)
-                .then(r => r.ok ? r.json() : [])
-                .then(vitalsHist => adashRenderVitalsCharts(vitalsHist, adashCurrentVitalsPeriod))
-                .catch(err => console.warn("[Analytics] Vitals period reload error:", err));
+            adashRenderVitalsCharts(_analyticsVitalsHistory, adashCurrentVitalsPeriod);
         });
     });
 }
@@ -3171,15 +3414,15 @@ function setupAdashAiRefresh() {
         try {
             const [statsRes, bmiRes, vitalsRes, streakRes] = await Promise.all([
                 authFetch(`${API_BASE}/logs/adherence/stats/${currentUser.id}`),
-                authFetch(`${API_BASE}/bmi/history/${currentUser.id}`),
-                authFetch(`${API_BASE}/vitals/history/${currentUser.id}`),
+                authFetch(`${API_BASE}/bmi/recent/${currentUser.id}?limit=100`),
+                authFetch(`${API_BASE}/vitals/recent/${currentUser.id}?limit=100`),
                 // Use recalculate so the streak fed to AI insights has accurate
                 // perfectDaysThisWeek / perfectDaysThisMonth values.
                 authFetch(`${API_BASE}/streaks/recalculate/${currentUser.id}`, { method: "POST" })
             ]);
             const stats      = statsRes.ok  ? await statsRes.json()  : {};
-            const bmiHistory = bmiRes.ok    ? await bmiRes.json()    : [];
-            const vitalsHist = vitalsRes.ok ? await vitalsRes.json() : [];
+            const bmiHistory = bmiRes.ok    ? (await bmiRes.json()).slice().reverse()    : [];
+            const vitalsHist = vitalsRes.ok ? (await vitalsRes.json()).slice().reverse() : [];
             const streak     = streakRes.ok ? await streakRes.json() : {};
             adashAiInsightsCache = null; // force refresh
             await adashRenderAiInsights(stats, bmiHistory, vitalsHist, streak, true);
@@ -3411,6 +3654,7 @@ function checkReminders() {
             body: JSON.stringify(toMarkMissed),
         })
         .then(() => {
+            invalidateDataCache("/logs/today/", "/logs/summary/", "/logs/adherence/", "/streaks/");
             // Update in-memory logs so getDoseStatus returns MISSED immediately,
             // then refresh just the UI display — do NOT call renderDashboard()
             // as that would wipe all scheduled timeouts.
@@ -3524,7 +3768,8 @@ function scheduleMedicineReminders() {
                     const status = getDoseStatus(currentUser.id, capturedMed.id, capturedDate, capturedTime);
                     if (status !== "TAKEN" && status !== "MISSED") {
                         markDoseMissed(currentUser.id, capturedMed.id, capturedDate, capturedTime)
-                            .then(() => {
+                             .then(() => {
+                                invalidateDataCache("/logs/today/", "/logs/summary/", "/logs/adherence/", "/streaks/");
                                 // Update in-memory logs directly (same pattern as checkReminders)
                                 const existing = logs.find(
                                     l => (l.medId === capturedMed.id || l.medicationId === capturedMed.id)
@@ -4627,9 +4872,8 @@ function setupPrescriptionUpload() {
             }
 
             if (savedCount > 0) {
+                invalidateDataCache("/medications/", "/logs/summary/", "/logs/adherence/", "/streaks/");
                 try { await renderDashboard();     } catch(e) { console.warn("Dashboard refresh failed"); }
-                // Pass freshly-fetched logs[] from renderDashboard — avoids duplicate /logs/history fetch.
-                try { await renderReports(logs);       } catch(e) { console.warn("Reports refresh failed"); }
                 try { await refreshActivityFeed(); } catch(e) { console.warn("Activity refresh failed"); }
             }
 
@@ -4967,12 +5211,15 @@ async function openProfileSettingsModal() {
     _populateProfileForm(currentUser);
     openModal("modal-profile");
 
+    if (Date.now() - _profileFetchedAt < 60000) return;
+
     // Step 2 — background refresh: silently re-fetch and update the form
     // if the server has newer data. Never blocks the modal from opening.
     try {
         const res = await authFetch(`${API_BASE}/user/profile/${currentUser.id}`);
         if (!res.ok) return; // stale data already shown — that's fine
         const profile = await res.json();
+        _profileFetchedAt = Date.now();
 
         currentUser = { ...currentUser, ...profile };
         saveToLS(LS_CURRENT_USER_KEY, currentUser);
@@ -6183,11 +6430,7 @@ async function renderReportsStreak() {
     if (!currentUser) return null;
 
     try {
-        const res = await authFetch(`${API_BASE}/streaks/recalculate/${currentUser.id}`, {
-            method: "POST"
-        });
-        if (!res.ok) return null;
-        const data = await res.json();
+        const data = await fetchJsonCached(`${API_BASE}/streaks/${currentUser.id}`, 10000);
 
         const currentStreak = data.currentStreak  || 0;
         const longestStreak = data.longestStreak  || 0;
@@ -6474,6 +6717,19 @@ function pdfFooter(doc) {
     }
 }
 
+async function fetchAllHistoryPages(userId, maxRecords = 5000) {
+    const size = 500;
+    const records = [];
+    for (let page = 0; records.length < maxRecords; page++) {
+        const res = await authFetch(`${API_BASE}/logs/history/${userId}?page=${page}&size=${size}`);
+        if (!res.ok) throw new Error("Failed to fetch history");
+        const batch = await res.json();
+        records.push(...batch);
+        if (batch.length < size) break;
+    }
+    return records.slice(0, maxRecords);
+}
+
 
 async function exportReportsPDF() {
     if (!currentUser) { showToast("Please log in first", "error"); return; }
@@ -6486,18 +6742,18 @@ async function exportReportsPDF() {
             : "all";
         const now = new Date();
 
-        const [histRes, statsRes, bmiRes, vitalsRes, streakRes] = await Promise.all([
-            authFetch(`${API_BASE}/logs/history/${currentUser.id}`),
-            authFetch(`${API_BASE}/logs/adherence/stats/${currentUser.id}`),
+        const statsDays = period === "all" ? 0 : Number(period);
+        const [history, statsRes, bmiRes, vitalsRes, streakRes] = await Promise.all([
+            fetchAllHistoryPages(currentUser.id),
+            authFetch(`${API_BASE}/logs/adherence/stats/${currentUser.id}?days=${statsDays}`),
             authFetch(`${API_BASE}/bmi/latest/${currentUser.id}`),
-            authFetch(`${API_BASE}/vitals/history/${currentUser.id}`),
+            authFetch(`${API_BASE}/vitals/recent/${currentUser.id}?limit=100`),
             // Use recalculate (POST) not the read-only GET endpoint.
             // The GET endpoint always returns perfectDaysThisWeek/Month = 0
             // because it returns the last persisted snapshot, not a live value.
             authFetch(`${API_BASE}/streaks/recalculate/${currentUser.id}`, { method: "POST" })
         ]);
 
-        const history  = histRes.ok  ? await histRes.json()  : [];
         const stats    = statsRes.ok ? await statsRes.json() : {};
         const bmi      = bmiRes.ok   ? await bmiRes.json()   : null;
         const vitals   = vitalsRes.ok ? await vitalsRes.json() : [];
@@ -6665,9 +6921,10 @@ async function exportHistoryPDF() {
     const restore = setExportLoading(btn, "Generating…");
 
     try {
-        const res = await authFetch(`${API_BASE}/logs/history/${currentUser.id}`);
-        if (!res.ok) throw new Error("Failed to fetch history");
-        const history = await res.json();
+        const [history, stats] = await Promise.all([
+            fetchAllHistoryPages(currentUser.id),
+            fetchJsonCached(`${API_BASE}/logs/adherence/stats/${currentUser.id}?days=0`, 10000)
+        ]);
         const now = new Date();
 
         const { jsPDF } = window.jspdf;
@@ -6682,10 +6939,10 @@ async function exportHistoryPDF() {
         y = pdfInfoRow(doc, y, "Date",  fmtDateTime(now));
         y += 4;
 
-        const taken   = history.filter(l => l.status === "TAKEN").length;
-        const missed  = history.filter(l => l.status === "MISSED").length;
-        const total   = history.length;
-        const adh     = total > 0 ? Math.round((taken / total) * 100) : 0;
+        const taken   = stats.takenDoses || 0;
+        const missed  = stats.missedDoses || 0;
+        const total   = stats.totalDoses || 0;
+        const adh     = stats.adherencePercentage || 0;
 
         y = pdfSection(doc, y, "Summary");
         y = pdfInfoRow(doc, y, "Total Records", total);
@@ -6735,7 +6992,7 @@ async function exportVitalsPDF() {
 
     try {
         const [vitalsRes, bmiRes] = await Promise.all([
-            authFetch(`${API_BASE}/vitals/history/${currentUser.id}`),
+            authFetch(`${API_BASE}/vitals/recent/${currentUser.id}?limit=100`),
             authFetch(`${API_BASE}/bmi/latest/${currentUser.id}`)
         ]);
         const vitals = vitalsRes.ok ? await vitalsRes.json() : [];

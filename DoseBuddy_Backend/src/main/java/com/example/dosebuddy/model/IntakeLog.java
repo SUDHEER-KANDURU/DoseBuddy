@@ -41,6 +41,9 @@ public class IntakeLog {
     @Column(name = "missed_time")
     private LocalDateTime missedTime;
 
+    @Column(name = "email_reminder_sent", columnDefinition = "BOOLEAN DEFAULT FALSE")
+    private Boolean emailReminderSent = false;
+
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
 
@@ -92,6 +95,10 @@ public class IntakeLog {
 
     public LocalDateTime getMissedTime() { return missedTime; }
     public void setMissedTime(LocalDateTime missedTime) { this.missedTime = missedTime; }
+
+    public Boolean getEmailReminderSent() { return emailReminderSent; }
+    public boolean isEmailReminderSent() { return emailReminderSent != null && emailReminderSent; }
+    public void setEmailReminderSent(Boolean emailReminderSent) { this.emailReminderSent = emailReminderSent; }
 
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }

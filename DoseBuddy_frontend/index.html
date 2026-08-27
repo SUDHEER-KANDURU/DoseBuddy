@@ -96,8 +96,92 @@
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9"/></svg>
                     Sign In
                 </button>
+                <p class="small-text center-text" style="margin-top:8px;">
+                    <button type="button" class="auth-link-btn" id="forgot-password-btn">Forgot password?</button>
+                </p>
                 <p class="small-text center-text auth-switch-text">Don't have an account? <button type="button" class="auth-link-btn" id="go-signup-btn">Sign Up</button></p>
                 <p class="error-text" id="auth-error"></p>
+            </form>
+
+            <!-- ── OTP Verification Form ─────────────────────────────────── -->
+            <form id="otp-verify-form" style="display:none;" novalidate>
+                <div style="text-align:center; margin-bottom:20px;">
+                    <div style="font-size:48px; margin-bottom:8px;">📧</div>
+                    <h2 style="color:#1e293b; margin:0 0 4px;">Verify Your Email</h2>
+                    <p style="color:#64748b; font-size:14px;" id="otp-subtitle">Enter the 6-digit code sent to your email</p>
+                </div>
+
+                <div class="form-group">
+                    <label for="otp-input">Verification Code</label>
+                    <div class="otp-input-wrap">
+                        <input type="text" id="otp-input" maxlength="6" placeholder="000000" autocomplete="one-time-code" style="text-align:center; font-size:24px; letter-spacing:8px; font-weight:700;">
+                    </div>
+                    <span class="field-error" id="otp-error"></span>
+                </div>
+
+                <button type="submit" class="primary-btn full-width" id="otp-submit-btn">
+                    Verify Email
+                </button>
+
+                <p class="small-text center-text" style="margin-top:12px;">
+                    Didn't receive the code?
+                    <button type="button" class="auth-link-btn" id="resend-otp-btn">Resend OTP</button>
+                </p>
+                <p class="small-text center-text" style="margin-top:4px;">
+                    <button type="button" class="auth-link-btn" id="otp-back-to-login-btn">Back to Login</button>
+                </p>
+                <p class="error-text" id="otp-form-error"></p>
+            </form>
+
+            <!-- ── Forgot Password Form ──────────────────────────────────── -->
+            <form id="forgot-password-form" style="display:none;" novalidate>
+                <div style="text-align:center; margin-bottom:20px;">
+                    <div style="font-size:48px; margin-bottom:8px;">🔒</div>
+                    <h2 style="color:#1e293b; margin:0 0 4px;">Reset Password</h2>
+                    <p style="color:#64748b; font-size:14px;">Enter your email to receive a reset code</p>
+                </div>
+
+                <div class="form-group" id="fp-email-group">
+                    <label for="fp-email">Email Address</label>
+                    <div class="input-icon-wrap">
+                        <svg class="input-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+                        <input type="email" id="fp-email" placeholder="you@example.com" autocomplete="email">
+                    </div>
+                    <span class="field-error" id="fp-email-error"></span>
+                </div>
+
+                <div id="fp-otp-section" style="display:none;">
+                    <div class="form-group">
+                        <label for="fp-otp">Verification Code</label>
+                        <input type="text" id="fp-otp" maxlength="6" placeholder="000000" autocomplete="one-time-code" style="text-align:center; font-size:24px; letter-spacing:8px; font-weight:700;">
+                        <span class="field-error" id="fp-otp-error"></span>
+                    </div>
+                    <div class="form-group">
+                        <label for="fp-new-password">New Password</label>
+                        <div class="input-icon-wrap">
+                            <svg class="input-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+                            <input type="password" id="fp-new-password" placeholder="At least 8 characters" autocomplete="new-password">
+                        </div>
+                        <span class="field-error" id="fp-pw-error"></span>
+                    </div>
+                    <div class="form-group">
+                        <label for="fp-confirm-password">Confirm Password</label>
+                        <div class="input-icon-wrap">
+                            <svg class="input-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+                            <input type="password" id="fp-confirm-password" placeholder="Re-enter password" autocomplete="new-password">
+                        </div>
+                        <span class="field-error" id="fp-confirm-error"></span>
+                    </div>
+                </div>
+
+                <button type="submit" class="primary-btn full-width" id="fp-submit-btn">
+                    Send Reset Code
+                </button>
+
+                <p class="small-text center-text" style="margin-top:12px;">
+                    <button type="button" class="auth-link-btn" id="fp-back-to-login-btn">Back to Login</button>
+                </p>
+                <p class="error-text" id="fp-form-error"></p>
             </form>
 
             <form id="signup-form" style="display:none;" novalidate>

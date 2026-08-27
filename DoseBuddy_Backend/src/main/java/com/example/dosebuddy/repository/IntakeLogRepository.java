@@ -43,6 +43,14 @@ public interface IntakeLogRepository extends JpaRepository<IntakeLog, Long> {
     @Modifying
     @Query("DELETE FROM IntakeLog l WHERE l.medication.id = :medId")
     void deleteByMedicationId(@Param("medId") Long medicationId);
+
+    @Query("SELECT l FROM IntakeLog l WHERE l.status = 'MISSED' " +
+           "AND l.emailReminderSent = false " +
+           "AND l.date = :today " +
+           "AND l.scheduledTime <= :cutoff")
+    List<IntakeLog> findMissedDosesNeedingEmailReminder(
+            @Param("today") LocalDate today,
+            @Param("cutoff") java.time.LocalDateTime cutoff);
 }
 
 

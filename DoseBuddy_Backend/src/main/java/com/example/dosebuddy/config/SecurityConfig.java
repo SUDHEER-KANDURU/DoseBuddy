@@ -80,9 +80,13 @@ public class SecurityConfig {
             // ── Route authorization ───────────────────────────────────────
             .authorizeHttpRequests(auth -> auth
                 // Public: auth endpoints
-                .requestMatchers(HttpMethod.POST, "/api/auth/login")   .permitAll()
-                .requestMatchers(HttpMethod.POST, "/api/auth/signup")  .permitAll()
-                .requestMatchers(HttpMethod.POST, "/api/auth/refresh") .permitAll()
+                .requestMatchers(HttpMethod.POST, "/api/auth/login")           .permitAll()
+                .requestMatchers(HttpMethod.POST, "/api/auth/signup")          .permitAll()
+                .requestMatchers(HttpMethod.POST, "/api/auth/refresh")         .permitAll()
+                .requestMatchers(HttpMethod.POST, "/api/auth/verify-email")    .permitAll()
+                .requestMatchers(HttpMethod.POST, "/api/auth/resend-otp")      .permitAll()
+                .requestMatchers(HttpMethod.POST, "/api/auth/forgot-password") .permitAll()
+                .requestMatchers(HttpMethod.POST, "/api/auth/reset-password")  .permitAll()
 
                 // Everything else requires authentication
                 .anyRequest().authenticated()
