@@ -32,16 +32,18 @@ public class GeminiOcrService {
     private final ObjectMapper objectMapper;
 
     public GeminiOcrService(
-            @Value("${gemini.model:gemini-2.0-flash}") String geminiModel,
-            @Value("${gemini.api.key:}") String geminiApiKey) {
+            @Value("${gemini.model:${GEMINI_MODEL:gemini-3.6-flash}}") String geminiModel,
+            @Value("${gemini.api.key:${GEMINI_API_KEY:}}") String geminiApiKey) {
 
         // Resolve API key: Spring property first, then raw env var fallback
         String key = (geminiApiKey != null && !geminiApiKey.isBlank())
                 ? geminiApiKey
                 : (System.getenv("GEMINI_API_KEY") != null ? System.getenv("GEMINI_API_KEY") : "");
 
+        String model = (geminiModel != null && !geminiModel.isBlank()) ? geminiModel.trim() : "gemini-3.6-flash";
+
         this.apiKey         = key.trim();
-        this.geminiEndpoint = GEMINI_BASE_URL + geminiModel + ":generateContent";
+        this.geminiEndpoint = GEMINI_BASE_URL + model + ":generateContent";
         this.httpClient     = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(REQUEST_TIMEOUT_SEC))
                 .build();

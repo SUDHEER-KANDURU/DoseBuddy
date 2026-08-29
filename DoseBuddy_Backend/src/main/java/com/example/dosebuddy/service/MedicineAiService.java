@@ -13,13 +13,15 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
  * Handles AI chat features — AI assistant, symptom checker,
  * and text-based prescription parsing.
  *
- * Uses Groq (defaulting to llama-3.3-70b-versatile) with automatic fallback
- * to alternative Groq models and Google Gemini (gemini-2.0-flash).
+ * Uses Groq (defaulting to openai/gpt-oss-20b) with automatic fallback
+ * to alternative active Groq models (openai/gpt-oss-120b, qwen/qwen3.8-27b)
+ * and Google Gemini (gemini-3.6-flash).
  */
 @Service
 public class MedicineAiService {
@@ -31,10 +33,13 @@ public class MedicineAiService {
     private static final int    REQUEST_TIMEOUT_SEC = 30;
 
     private static final List<String> FALLBACK_GROQ_MODELS = List.of(
-            "llama-3.3-70b-versatile",
             "openai/gpt-oss-20b",
-            "openai/gpt-oss-120b"
+            "openai/gpt-oss-120b",
+            "qwen/qwen3.8-27b",
+            "qwen/qwen3.6-27b"
     );
+
+    private static final Pattern THINK_TAG_PATTERN = Pattern.compile("(?s)<think>.*?</think>");
 
     private final String groqApiKey;
     private final String groqModel;
@@ -44,9 +49,9 @@ public class MedicineAiService {
     private final ObjectMapper objectMapper;
 
     public MedicineAiService(
-            @Value("${groq.model:${GROQ_MODEL:llama-3.3-70b-versatile}}") String groqModel,
+            @Value("${groq.model:${GROQ_MODEL:openai/gpt-oss-20b}}") String groqModel,
             @Value("${groq.api.key:${GROQ_API_KEY:}}") String groqApiKey,
-            @Value("${gemini.model:${GEMINI_MODEL:gemini-2.0-flash}}") String geminiModel,
+            @Value("${gemini.model:${GEMINI_MODEL:gemini-3.6-flash}}") String geminiModel,
             @Value("${gemini.api.key:${GEMINI_API_KEY:}}") String geminiApiKey) {
 
         String gKey = (groqApiKey != null && !groqApiKey.isBlank())
@@ -58,9 +63,9 @@ public class MedicineAiService {
                 : (System.getenv("GEMINI_API_KEY") != null ? System.getenv("GEMINI_API_KEY") : "");
 
         this.groqApiKey   = gKey.trim();
-        this.groqModel    = (groqModel != null && !groqModel.isBlank()) ? groqModel.trim() : "llama-3.3-70b-versatile";
+        this.groqModel    = (groqModel != null && !groqModel.isBlank()) ? groqModel.trim() : "openai/gpt-oss-20b";
         this.geminiApiKey = gemKey.trim();
-        this.geminiModel  = (geminiModel != null && !geminiModel.isBlank()) ? geminiModel.trim() : "gemini-2.0-flash";
+        this.geminiModel  = (geminiModel != null && !geminiModel.isBlank()) ? geminiModel.trim() : "gemini-3.6-flash";
 
         this.httpClient   = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(REQUEST_TIMEOUT_SEC))
@@ -101,7 +106,8 @@ public class MedicineAiService {
                 """.formatted(rawName);
 
         try {
-            return generateAiResponse(prompt);
+            String rawResponse = generateAiResponse(prompt);
+            return cleanOutput(rawResponse);
         } catch (Exception e) {
             return "Error: " + e.getMessage();
         }
@@ -122,7 +128,8 @@ public class MedicineAiService {
                 """.formatted(symptoms);
 
         try {
-            return generateAiResponse(prompt);
+            String rawResponse = generateAiResponse(prompt);
+            return cleanOutput(rawResponse);
         } catch (Exception e) {
             return "Error: " + e.getMessage();
         }
@@ -160,7 +167,8 @@ public class MedicineAiService {
                 """ + text;
 
         try {
-            return generateAiResponse(prompt);
+            String rawResponse = generateAiResponse(prompt);
+            return cleanOutput(rawResponse);
         } catch (Exception e) {
             System.err.println("[MedicineAiService] parsePrescriptionToJson failed: " + e.getMessage());
             return "[]";
@@ -344,6 +352,13 @@ public class MedicineAiService {
                 .get(0)
                 .path("text")
                 .asText();
+    }
+
+    private String cleanOutput(String text) {
+        if (text == null) return "";
+        // Strip reasoning think tags if present
+        String cleaned = THINK_TAG_PATTERN.matcher(text).replaceAll("").trim();
+        return cleaned;
     }
 
     private String escapeJson(String s) {
