@@ -244,20 +244,23 @@ public class AuthController {
                     "message", "Query parameter 'to' is required. Example: /api/auth/test-email?to=your-email@gmail.com"
             ));
         }
+        String fromEmail = emailService.getFromEmail();
         try {
             emailService.sendTestEmail(to);
             return ResponseEntity.ok(Map.of(
                     "success", true,
                     "message", "Test email sent successfully to " + to,
-                    "fromEmail", emailService.getFromEmail()
+                    "fromEmail", fromEmail
             ));
         } catch (Exception e) {
             String causeMsg = e.getCause() != null ? e.getCause().getMessage() : e.getMessage();
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
-                    "success", false,
-                    "message", "Failed to send test email: " + e.getMessage(),
-                    "cause", causeMsg != null ? causeMsg : "N/A",
-                    "errorType", e.getClass().getName()
+                    "success",    false,
+                    "fromEmail",  fromEmail,
+                    "message",    "Failed to send test email: " + e.getMessage(),
+                    "cause",      causeMsg != null ? causeMsg : "N/A",
+                    "errorType",  e.getClass().getName(),
+                    "hint",       "If cause contains 'API key is invalid', check that RESEND_API_KEY is set correctly in Render and the service has been redeployed."
             ));
         }
     }

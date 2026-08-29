@@ -4,6 +4,7 @@ import com.resend.Resend;
 import com.resend.core.exception.ResendException;
 import com.resend.services.emails.model.CreateEmailOptions;
 import com.resend.services.emails.model.CreateEmailResponse;
+import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -13,15 +14,6 @@ import org.springframework.stereotype.Service;
 /**
  * Centralized email service for DoseBuddy.
  * Uses the Resend HTTP API (https://resend.com) instead of SMTP.
- *
- * Why Resend instead of Gmail SMTP?
- *   Render's free tier blocks ALL outbound SMTP ports (25, 465, 587).
- *   Resend sends over HTTPS (port 443) which is always open.
- *
- * Required environment variable:
- *   RESEND_API_KEY  — obtain from https://resend.com/api-keys
- *   MAIL_FROM       — verified sender address on Resend
- *                     (e.g. dosebuddy@yourdomain.com, or use onboarding@resend.dev for tests)
  */
 @Service
 public class EmailService {
@@ -31,18 +23,29 @@ public class EmailService {
     private final Resend resend;
     private final String fromAddress;
     private final String fromName;
+    private final String rawApiKey; // kept for startup diagnostic only
 
     public EmailService(
             @Value("${RESEND_API_KEY:}") String apiKey,
-            @Value("${MAIL_FROM:DoseBuddy <onboarding@resend.dev>}") String fromAddress,
+            @Value("${MAIL_FROM:onboarding@resend.dev}") String fromAddress,
             @Value("${app.mail.from-name:DoseBuddy}") String fromName) {
 
-        if (apiKey == null || apiKey.isBlank()) {
-            log.warn("[EmailService] RESEND_API_KEY is not set — emails will fail. Set it in Render environment.");
-        }
-        this.resend      = new Resend(apiKey == null ? "" : apiKey.trim());
+        String cleanKey = (apiKey != null) ? apiKey.trim() : "";
+        this.rawApiKey   = cleanKey;
+        this.resend      = new Resend(cleanKey.isEmpty() ? "invalid" : cleanKey);
         this.fromAddress = fromAddress.trim();
         this.fromName    = fromName.trim();
+    }
+
+    @PostConstruct
+    public void logStartupConfig() {
+        String maskedKey = rawApiKey.isEmpty()
+                ? "*** NOT SET ***"
+                : rawApiKey.substring(0, Math.min(6, rawApiKey.length())) + "***";
+        log.info("═══════════════════════════════════════════════════════");
+        log.info("[EmailService] RESEND_API_KEY : {}", maskedKey);
+        log.info("[EmailService] MAIL_FROM      : {}", fromAddress);
+        log.info("═══════════════════════════════════════════════════════");
     }
 
     // ── OTP Email (Signup Verification) ──────────────────────────────────────
