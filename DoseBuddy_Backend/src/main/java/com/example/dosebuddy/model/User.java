@@ -39,15 +39,6 @@ public class User {
     @Column(name = "emergency_contact")
     private String emergencyContact;
 
-    @Column(name = "email_verified", columnDefinition = "BOOLEAN DEFAULT FALSE")
-    private Boolean emailVerified = false;
-
-    @Column(name = "otp")
-    private String otp;
-
-    @Column(name = "otp_expiry")
-    private LocalDateTime otpExpiry;
-
     @Column(name = "accepted_terms", columnDefinition = "BOOLEAN DEFAULT FALSE")
     private Boolean acceptedTerms = false;
 
@@ -113,16 +104,6 @@ public class User {
 
     public boolean isAcceptedTerms() { return acceptedTerms != null && acceptedTerms; }
     public void setAcceptedTerms(Boolean acceptedTerms) { this.acceptedTerms = acceptedTerms != null ? acceptedTerms : false; }
-
-    public Boolean getEmailVerified() { return emailVerified; }
-    public boolean isEmailVerified() { return emailVerified != null && emailVerified; }
-    public void setEmailVerified(Boolean emailVerified) { this.emailVerified = emailVerified != null ? emailVerified : false; }
-
-    public String getOtp() { return otp; }
-    public void setOtp(String otp) { this.otp = otp; }
-
-    public LocalDateTime getOtpExpiry() { return otpExpiry; }
-    public void setOtpExpiry(LocalDateTime otpExpiry) { this.otpExpiry = otpExpiry; }
 
     public LocalDateTime getAcceptedTermsTimestamp() { return acceptedTermsTimestamp; }
     public void setAcceptedTermsTimestamp(LocalDateTime acceptedTermsTimestamp) { this.acceptedTermsTimestamp = acceptedTermsTimestamp; }

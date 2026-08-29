@@ -64,12 +64,7 @@
 			<scope>runtime</scope>
 		</dependency>
 
-		<!-- Resend email SDK (HTTP API — works on Render free tier; SMTP is blocked) -->
-		<dependency>
-			<groupId>com.resend</groupId>
-			<artifactId>resend-java</artifactId>
-			<version>3.1.0</version>
-		</dependency>
+		<!-- Email sent via Brevo HTTP API using Spring's RestTemplate (no extra dependency needed) -->
 
 		<!-- Validation -->
 		<dependency>

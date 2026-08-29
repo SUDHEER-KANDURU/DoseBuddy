@@ -5,7 +5,6 @@ import com.example.dosebuddy.model.User;
 import com.example.dosebuddy.repository.UserRepository;
 import com.example.dosebuddy.security.JwtService;
 import com.example.dosebuddy.security.UserPrincipal;
-import com.example.dosebuddy.service.EmailService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -17,12 +16,10 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Random;
 
 /**
- * Public authentication endpoints — signup (with OTP email verification),
- * login, token refresh, forgot-password, and reset-password.
- * These routes are explicitly permitted in SecurityConfig (no token required).
+ * Public authentication endpoints — signup, login, token refresh.
+ * All routes are permitted in SecurityConfig (no JWT required).
  */
 @RestController
 @RequestMapping("/api/auth")
@@ -32,23 +29,19 @@ public class AuthController {
     private final UserRepository  userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService      jwtService;
-    private final EmailService    emailService;
-    private final Random          random = new Random();
 
     @Value("${jwt.access-token-expiration}")
     private long accessTokenExpiration;
 
     public AuthController(UserRepository  userRepository,
                           PasswordEncoder passwordEncoder,
-                          JwtService      jwtService,
-                          EmailService    emailService) {
+                          JwtService      jwtService) {
         this.userRepository  = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService      = jwtService;
-        this.emailService    = emailService;
     }
 
-    // ── Signup (creates account + sends OTP for email verification) ──────────
+    // ── Signup ────────────────────────────────────────────────────────────────
 
     @PostMapping("/signup")
     public ResponseEntity<?> signup(@RequestBody SignupRequest request) {
@@ -68,24 +61,7 @@ public class AuthController {
         }
 
         String email = request.getEmail().toLowerCase();
-        Optional<User> existing = userRepository.findByEmail(email);
-        if (existing.isPresent()) {
-            User existingUser = existing.get();
-            // If user exists but hasn't verified email, allow re-signup (resend OTP)
-            if (!existingUser.isEmailVerified()) {
-                String otp = generateOtp();
-                existingUser.setOtp(otp);
-                existingUser.setOtpExpiry(LocalDateTime.now().plusMinutes(10));
-                existingUser.setName(request.getName());
-                existingUser.setPasswordHash(passwordEncoder.encode(request.getPassword()));
-                userRepository.save(existingUser);
-                emailService.sendSignupOtp(email, request.getName(), otp);
-                return ResponseEntity.ok(Map.of(
-                        "message", "OTP sent to your email. Please verify to complete signup.",
-                        "email", email,
-                        "requiresVerification", true
-                ));
-            }
+        if (userRepository.findByEmail(email).isPresent()) {
             return ResponseEntity.status(HttpStatus.CONFLICT)
                     .body(Map.of("message", "Email already in use"));
         }
@@ -105,13 +81,10 @@ public class AuthController {
             patientEmail = patientEmail.toLowerCase();
         }
 
-        // Hash password with BCrypt
-        String hashedPassword = passwordEncoder.encode(request.getPassword());
-
         User user = new User(
                 request.getName(),
                 email,
-                hashedPassword,
+                passwordEncoder.encode(request.getPassword()),
                 role.toUpperCase(),
                 patientEmail
         );
@@ -139,133 +112,14 @@ public class AuthController {
 
         user.setAcceptedTerms(true);
         user.setAcceptedTermsTimestamp(LocalDateTime.now());
-        user.setEmailVerified(false);
-
-        // Generate and set OTP
-        String otp = generateOtp();
-        user.setOtp(otp);
-        user.setOtpExpiry(LocalDateTime.now().plusMinutes(10));
 
         user = userRepository.save(user);
 
-        // Send OTP email
-        emailService.sendSignupOtp(email, request.getName(), otp);
-
-        return ResponseEntity.ok(Map.of(
-                "message", "OTP sent to your email. Please verify to complete signup.",
-                "email", email,
-                "requiresVerification", true
-        ));
-    }
-
-    // ── Verify Email OTP (completes signup) ─────────────────────────────────
-
-    @PostMapping("/verify-email")
-    public ResponseEntity<?> verifyEmail(@RequestBody OtpVerifyRequest request) {
-        if (request.getEmail() == null || request.getOtp() == null) {
-            return ResponseEntity.badRequest()
-                    .body(Map.of("message", "Email and OTP are required"));
-        }
-
-        Optional<User> userOpt = userRepository.findByEmail(request.getEmail().toLowerCase());
-        if (userOpt.isEmpty()) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                    .body(Map.of("message", "No account found with this email"));
-        }
-
-        User user = userOpt.get();
-
-        if (user.isEmailVerified()) {
-            return ResponseEntity.ok(Map.of("message", "Email already verified. You can log in."));
-        }
-
-        if (user.getOtp() == null || user.getOtpExpiry() == null) {
-            return ResponseEntity.badRequest()
-                    .body(Map.of("message", "No OTP was generated. Please sign up again."));
-        }
-
-        if (LocalDateTime.now().isAfter(user.getOtpExpiry())) {
-            return ResponseEntity.status(HttpStatus.GONE)
-                    .body(Map.of("message", "OTP has expired. Please request a new one."));
-        }
-
-        if (!user.getOtp().equals(request.getOtp().trim())) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("message", "Invalid OTP. Please try again."));
-        }
-
-        // OTP is valid — mark email as verified and clear OTP
-        user.setEmailVerified(true);
-        user.setOtp(null);
-        user.setOtpExpiry(null);
-        userRepository.save(user);
-
-        // Return tokens so user is automatically logged in after verification
+        // Account is active immediately — no email verification step
         return ResponseEntity.ok(buildLoginResponse(user));
     }
 
-    // ── Resend OTP ──────────────────────────────────────────────────────────
-
-    @PostMapping("/resend-otp")
-    public ResponseEntity<?> resendOtp(@RequestBody ResendOtpRequest request) {
-        if (request.getEmail() == null || request.getEmail().isBlank()) {
-            return ResponseEntity.badRequest()
-                    .body(Map.of("message", "Email is required"));
-        }
-
-        Optional<User> userOpt = userRepository.findByEmail(request.getEmail().toLowerCase());
-        if (userOpt.isEmpty()) {
-            // Don't reveal whether the email exists
-            return ResponseEntity.ok(Map.of("message", "If this email is registered, a new OTP has been sent."));
-        }
-
-        User user = userOpt.get();
-
-        if (user.isEmailVerified()) {
-            return ResponseEntity.ok(Map.of("message", "Email is already verified. Please log in."));
-        }
-
-        String otp = generateOtp();
-        user.setOtp(otp);
-        user.setOtpExpiry(LocalDateTime.now().plusMinutes(10));
-        userRepository.save(user);
-
-        emailService.sendSignupOtp(user.getEmail(), user.getName(), otp);
-
-        return ResponseEntity.ok(Map.of("message", "A new OTP has been sent to your email."));
-    }
-
-    // ── Diagnostic Test Email ───────────────────────────────────────────────
-
-    @GetMapping("/test-email")
-    public ResponseEntity<?> testEmail(@RequestParam(defaultValue = "") String to) {
-        if (to.isBlank()) {
-            return ResponseEntity.badRequest().body(Map.of(
-                    "message", "Query parameter 'to' is required. Example: /api/auth/test-email?to=your-email@gmail.com"
-            ));
-        }
-        String fromEmail = emailService.getFromEmail();
-        try {
-            emailService.sendTestEmail(to);
-            return ResponseEntity.ok(Map.of(
-                    "success", true,
-                    "message", "Test email sent successfully to " + to,
-                    "fromEmail", fromEmail
-            ));
-        } catch (Exception e) {
-            String causeMsg = e.getCause() != null ? e.getCause().getMessage() : e.getMessage();
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
-                    "success",    false,
-                    "fromEmail",  fromEmail,
-                    "message",    "Failed to send test email: " + e.getMessage(),
-                    "cause",      causeMsg != null ? causeMsg : "N/A",
-                    "errorType",  e.getClass().getName(),
-                    "hint",       "If cause contains 'API key is invalid', check that RESEND_API_KEY is set correctly in Render and the service has been redeployed."
-            ));
-        }
-    }
-
-    // ── Login ───────────────────────────────────────────────────────────────
+    // ── Login ─────────────────────────────────────────────────────────────────
 
     @PostMapping("/login")
     public ResponseEntity<?> login(@RequestBody LoginRequest request) {
@@ -282,30 +136,11 @@ public class AuthController {
 
         User user = userOpt.get();
 
-        // Check if email is verified
-        if (!user.isEmailVerified()) {
-            // Resend OTP automatically so user can complete verification
-            String otp = generateOtp();
-            user.setOtp(otp);
-            user.setOtpExpiry(LocalDateTime.now().plusMinutes(10));
-            userRepository.save(user);
-            emailService.sendSignupOtp(user.getEmail(), user.getName(), otp);
-
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of(
-                            "message", "Email not verified. A new OTP has been sent to your email.",
-                            "email", user.getEmail(),
-                            "requiresVerification", true
-                    ));
-        }
-
-        // Verify BCrypt hash; fall back to plaintext for legacy accounts (migration path)
         boolean passwordMatches = passwordEncoder.matches(request.getPassword(), user.getPasswordHash());
 
         if (!passwordMatches) {
             // Legacy plaintext check — migrates the account on first successful login
             if (user.getPasswordHash().equals(request.getPassword())) {
-                // Upgrade to BCrypt immediately
                 user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
                 userRepository.save(user);
             } else {
@@ -317,79 +152,7 @@ public class AuthController {
         return ResponseEntity.ok(buildLoginResponse(user));
     }
 
-    // ── Forgot Password (sends OTP) ─────────────────────────────────────────
-
-    @PostMapping("/forgot-password")
-    public ResponseEntity<?> forgotPassword(@RequestBody ForgotPasswordRequest request) {
-        if (request.getEmail() == null || request.getEmail().isBlank()) {
-            return ResponseEntity.badRequest()
-                    .body(Map.of("message", "Email is required"));
-        }
-
-        Optional<User> userOpt = userRepository.findByEmail(request.getEmail().toLowerCase());
-        // Always return success to prevent email enumeration
-        if (userOpt.isEmpty()) {
-            return ResponseEntity.ok(Map.of("message", "If this email is registered, an OTP has been sent."));
-        }
-
-        User user = userOpt.get();
-        String otp = generateOtp();
-        user.setOtp(otp);
-        user.setOtpExpiry(LocalDateTime.now().plusMinutes(10));
-        userRepository.save(user);
-
-        emailService.sendPasswordResetOtp(user.getEmail(), user.getName(), otp);
-
-        return ResponseEntity.ok(Map.of("message", "If this email is registered, an OTP has been sent."));
-    }
-
-    // ── Reset Password (verify OTP + set new password) ───────────────────────
-
-    @PostMapping("/reset-password")
-    public ResponseEntity<?> resetPassword(@RequestBody ResetPasswordRequest request) {
-        if (request.getEmail() == null || request.getOtp() == null || request.getNewPassword() == null) {
-            return ResponseEntity.badRequest()
-                    .body(Map.of("message", "Email, OTP, and new password are required"));
-        }
-
-        if (request.getNewPassword().length() < 8) {
-            return ResponseEntity.badRequest()
-                    .body(Map.of("message", "Password must be at least 8 characters"));
-        }
-
-        Optional<User> userOpt = userRepository.findByEmail(request.getEmail().toLowerCase());
-        if (userOpt.isEmpty()) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                    .body(Map.of("message", "No account found with this email"));
-        }
-
-        User user = userOpt.get();
-
-        if (user.getOtp() == null || user.getOtpExpiry() == null) {
-            return ResponseEntity.badRequest()
-                    .body(Map.of("message", "No password reset was requested. Please try again."));
-        }
-
-        if (LocalDateTime.now().isAfter(user.getOtpExpiry())) {
-            return ResponseEntity.status(HttpStatus.GONE)
-                    .body(Map.of("message", "OTP has expired. Please request a new one."));
-        }
-
-        if (!user.getOtp().equals(request.getOtp().trim())) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body(Map.of("message", "Invalid OTP. Please try again."));
-        }
-
-        // OTP valid — update password and clear OTP
-        user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
-        user.setOtp(null);
-        user.setOtpExpiry(null);
-        userRepository.save(user);
-
-        return ResponseEntity.ok(Map.of("message", "Password reset successfully. You can now log in."));
-    }
-
-    // ── Refresh Token ────────────────────────────────────────────────────────
+    // ── Refresh Token ─────────────────────────────────────────────────────────
 
     @PostMapping("/refresh")
     public ResponseEntity<?> refreshToken(@RequestBody RefreshTokenRequest request) {
@@ -434,12 +197,7 @@ public class AuthController {
         }
     }
 
-    // ── Helpers ──────────────────────────────────────────────────────────────
-
-    private String generateOtp() {
-        int otp = 100000 + random.nextInt(900000); // 6-digit OTP
-        return String.valueOf(otp);
-    }
+    // ── Helpers ───────────────────────────────────────────────────────────────
 
     private LoginResponse buildLoginResponse(User user) {
         UserPrincipal principal = new UserPrincipal(user);
