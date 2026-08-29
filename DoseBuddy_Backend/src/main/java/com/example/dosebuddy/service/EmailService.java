@@ -66,6 +66,10 @@ public class EmailService {
 
     private void sendHtmlEmail(String to, String subject, String htmlBody) {
         try {
+            if (fromEmail == null || fromEmail.isBlank() || "noreply@dosebuddy.com".equalsIgnoreCase(fromEmail)) {
+                log.warn("app.mail.from is set to '{}'. Note: Gmail SMTP requires From address to match your MAIL_USERNAME.", fromEmail);
+            }
+            log.info("Sending email to {} (Subject: '{}') using From address: {}", to, subject, fromEmail);
             MimeMessage message = mailSender.createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
             helper.setFrom(fromEmail, fromName);
@@ -75,7 +79,9 @@ public class EmailService {
             mailSender.send(message);
             log.info("Email sent successfully to {}", to);
         } catch (MessagingException | java.io.UnsupportedEncodingException e) {
-            log.error("Failed to send email to {}: {}", to, e.getMessage(), e);
+            log.error("Failed to send email to {}: {} (Cause: {})", to, e.getMessage(), e.getCause() != null ? e.getCause().getMessage() : "N/A", e);
+        } catch (Exception e) {
+            log.error("Unexpected error sending email to {}: {}", to, e.getMessage(), e);
         }
     }
 
