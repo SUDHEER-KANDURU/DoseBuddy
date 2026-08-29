@@ -1,34 +1,48 @@
 package com.example.dosebuddy.service;
 
-import jakarta.mail.MessagingException;
-import jakarta.mail.internet.MimeMessage;
+import com.resend.Resend;
+import com.resend.core.exception.ResendException;
+import com.resend.services.emails.model.CreateEmailOptions;
+import com.resend.services.emails.model.CreateEmailResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 /**
  * Centralized email service for DoseBuddy.
- * Handles OTP emails (signup verification, password reset) and missed-dose reminders.
+ * Uses the Resend HTTP API (https://resend.com) instead of SMTP.
+ *
+ * Why Resend instead of Gmail SMTP?
+ *   Render's free tier blocks ALL outbound SMTP ports (25, 465, 587).
+ *   Resend sends over HTTPS (port 443) which is always open.
+ *
+ * Required environment variable:
+ *   RESEND_API_KEY  — obtain from https://resend.com/api-keys
+ *   MAIL_FROM       — verified sender address on Resend
+ *                     (e.g. dosebuddy@yourdomain.com, or use onboarding@resend.dev for tests)
  */
 @Service
 public class EmailService {
 
     private static final Logger log = LoggerFactory.getLogger(EmailService.class);
 
-    private final JavaMailSender mailSender;
+    private final Resend resend;
+    private final String fromAddress;
+    private final String fromName;
 
-    @Value("${app.mail.from}")
-    private String fromEmail;
+    public EmailService(
+            @Value("${RESEND_API_KEY:}") String apiKey,
+            @Value("${MAIL_FROM:DoseBuddy <onboarding@resend.dev>}") String fromAddress,
+            @Value("${app.mail.from-name:DoseBuddy}") String fromName) {
 
-    @Value("${app.mail.from-name}")
-    private String fromName;
-
-    public EmailService(JavaMailSender mailSender) {
-        this.mailSender = mailSender;
+        if (apiKey == null || apiKey.isBlank()) {
+            log.warn("[EmailService] RESEND_API_KEY is not set — emails will fail. Set it in Render environment.");
+        }
+        this.resend      = new Resend(apiKey == null ? "" : apiKey.trim());
+        this.fromAddress = fromAddress.trim();
+        this.fromName    = fromName.trim();
     }
 
     // ── OTP Email (Signup Verification) ──────────────────────────────────────
@@ -62,45 +76,43 @@ public class EmailService {
         sendHtmlEmail(toEmail, subject, body);
     }
 
-    // ── Synchronous Test Email (Diagnostic) ───────────────────────────────────
+    // ── Synchronous Test Email (Diagnostic endpoint) ─────────────────────────
 
-    public void sendTestEmail(String toEmail) throws Exception {
+    public void sendTestEmail(String toEmail) throws ResendException {
         String subject = "DoseBuddy - Diagnostic Test Email";
-        String body = buildOtpEmailBody("Test User", "123456", "verify your email address", "This is a diagnostic test email.");
-        MimeMessage message = mailSender.createMimeMessage();
-        MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
-        helper.setFrom(fromEmail, fromName);
-        helper.setTo(toEmail);
-        helper.setSubject(subject);
-        helper.setText(body, true);
-        mailSender.send(message);
-        log.info("[EmailService] Test email sent successfully to {}", toEmail);
+        String body = buildOtpEmailBody("Test User", "123456", "verify your email address",
+                "This is a diagnostic test email from DoseBuddy on Resend.");
+        CreateEmailOptions params = CreateEmailOptions.builder()
+                .from(fromAddress)
+                .to(toEmail)
+                .subject(subject)
+                .html(body)
+                .build();
+        CreateEmailResponse response = resend.emails().send(params);
+        log.info("[EmailService] Test email sent to {} — Resend ID: {}", toEmail, response.getId());
     }
 
     public String getFromEmail() {
-        return fromEmail;
+        return fromAddress;
     }
 
     // ── Private helpers ─────────────────────────────────────────────────────
 
     private void sendHtmlEmail(String to, String subject, String htmlBody) {
         try {
-            if (fromEmail == null || fromEmail.isBlank() || "noreply@dosebuddy.com".equalsIgnoreCase(fromEmail)) {
-                log.warn("app.mail.from is set to '{}'. Note: Gmail SMTP requires From address to match your MAIL_USERNAME.", fromEmail);
-            }
-            log.info("Sending email to {} (Subject: '{}') using From address: {}", to, subject, fromEmail);
-            MimeMessage message = mailSender.createMimeMessage();
-            MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
-            helper.setFrom(fromEmail, fromName);
-            helper.setTo(to);
-            helper.setSubject(subject);
-            helper.setText(htmlBody, true);
-            mailSender.send(message);
-            log.info("Email sent successfully to {}", to);
-        } catch (MessagingException | java.io.UnsupportedEncodingException e) {
-            log.error("Failed to send email to {}: {} (Cause: {})", to, e.getMessage(), e.getCause() != null ? e.getCause().getMessage() : "N/A", e);
+            log.info("[EmailService] Sending '{}' to {} from {}", subject, to, fromAddress);
+            CreateEmailOptions params = CreateEmailOptions.builder()
+                    .from(fromAddress)
+                    .to(to)
+                    .subject(subject)
+                    .html(htmlBody)
+                    .build();
+            CreateEmailResponse response = resend.emails().send(params);
+            log.info("[EmailService] Email sent successfully — Resend ID: {}", response.getId());
+        } catch (ResendException e) {
+            log.error("[EmailService] Resend API error sending to {}: {}", to, e.getMessage(), e);
         } catch (Exception e) {
-            log.error("Unexpected error sending email to {}: {}", to, e.getMessage(), e);
+            log.error("[EmailService] Unexpected error sending to {}: {}", to, e.getMessage(), e);
         }
     }
 
