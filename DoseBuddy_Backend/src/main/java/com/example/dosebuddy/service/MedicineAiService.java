@@ -34,28 +34,24 @@ public class MedicineAiService {
     private final ObjectMapper objectMapper;
 
     public MedicineAiService(
-            @Value("${groq.model:llama-3.3-70b-versatile}") String groqModel,
-            // groq.api.key is defined in application.properties as ${GROQ_API_KEY:}
-            // which resolves the GROQ_API_KEY environment variable (set on Railway)
-            // or falls back to empty string (feature disabled).
-            // Previously @Value("${GROQ_API_KEY:}") was used, which bypasses Spring's
-            // property file chain and only resolves at runtime via System.getenv —
-            // causing the "AI lookup failed: Groq API key is not configured." error
-            // in environments where the env var is present but not yet injected into
-            // the Spring context (race condition on Railway cold starts).
+            @Value("${groq.model:llama-3.1-8b-instant}") String groqModel,
             @Value("${groq.api.key:}") String groqApiKey) {
 
-        this.apiKey       = groqApiKey.isBlank() ? System.getenv("GROQ_API_KEY") : groqApiKey;
-        this.model        = groqModel;
+        // Resolve API key: Spring property first, then raw env var fallback
+        String key = (groqApiKey != null && !groqApiKey.isBlank())
+                ? groqApiKey
+                : (System.getenv("GROQ_API_KEY") != null ? System.getenv("GROQ_API_KEY") : "");
+
+        this.apiKey       = key.trim();
+        this.model        = groqModel.trim();
         this.httpClient   = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(REQUEST_TIMEOUT_SEC))
                 .build();
         this.objectMapper = new ObjectMapper();
 
-        System.out.println("[AI] Chat Provider: Groq");
-        System.out.println("[AI] Groq Model: " + this.model);
-        System.out.println("[AI] Groq API key loaded: "
-                + (this.apiKey != null && !this.apiKey.isBlank() ? "YES" : "NO — chat AI features will be disabled"));
+        System.out.println("[AI] Chat Provider : Groq");
+        System.out.println("[AI] Groq Model    : " + this.model);
+        System.out.println("[AI] Groq API key  : " + (this.apiKey.isBlank() ? "NOT SET — AI features disabled" : "loaded (" + this.apiKey.substring(0, Math.min(6, this.apiKey.length())) + "***)"));
     }
 
     // ─────────────────────────────────────────────────────────────────────────
