@@ -15,43 +15,62 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Handles ALL Groq API calls — AI assistant, symptom checker,
- * BMI suggestions, health tips, and text-based prescription parsing.
+ * Handles AI chat features — AI assistant, symptom checker,
+ * and text-based prescription parsing.
  *
- * Image OCR is handled exclusively by GeminiOcrService.
+ * Uses Groq (defaulting to llama-3.3-70b-versatile) with automatic fallback
+ * to alternative Groq models and Google Gemini (gemini-2.0-flash).
  */
 @Service
 public class MedicineAiService {
 
     private static final String GROQ_URL            = "https://api.groq.com/openai/v1/chat/completions";
+    private static final String GEMINI_BASE_URL     = "https://generativelanguage.googleapis.com/v1beta/models/";
     private static final int    MAX_RETRIES         = 2;
     private static final long   RETRY_DELAY_MS      = 1500L;
     private static final int    REQUEST_TIMEOUT_SEC = 30;
 
-    private final String apiKey;
-    private final String model;
+    private static final List<String> FALLBACK_GROQ_MODELS = List.of(
+            "llama-3.3-70b-versatile",
+            "openai/gpt-oss-20b",
+            "openai/gpt-oss-120b"
+    );
+
+    private final String groqApiKey;
+    private final String groqModel;
+    private final String geminiApiKey;
+    private final String geminiModel;
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
 
     public MedicineAiService(
-            @Value("${groq.model:llama-3.1-8b-instant}") String groqModel,
-            @Value("${groq.api.key:}") String groqApiKey) {
+            @Value("${groq.model:${GROQ_MODEL:llama-3.3-70b-versatile}}") String groqModel,
+            @Value("${groq.api.key:${GROQ_API_KEY:}}") String groqApiKey,
+            @Value("${gemini.model:${GEMINI_MODEL:gemini-2.0-flash}}") String geminiModel,
+            @Value("${gemini.api.key:${GEMINI_API_KEY:}}") String geminiApiKey) {
 
-        // Resolve API key: Spring property first, then raw env var fallback
-        String key = (groqApiKey != null && !groqApiKey.isBlank())
+        String gKey = (groqApiKey != null && !groqApiKey.isBlank())
                 ? groqApiKey
                 : (System.getenv("GROQ_API_KEY") != null ? System.getenv("GROQ_API_KEY") : "");
 
-        this.apiKey       = key.trim();
-        this.model        = groqModel.trim();
+        String gemKey = (geminiApiKey != null && !geminiApiKey.isBlank())
+                ? geminiApiKey
+                : (System.getenv("GEMINI_API_KEY") != null ? System.getenv("GEMINI_API_KEY") : "");
+
+        this.groqApiKey   = gKey.trim();
+        this.groqModel    = (groqModel != null && !groqModel.isBlank()) ? groqModel.trim() : "llama-3.3-70b-versatile";
+        this.geminiApiKey = gemKey.trim();
+        this.geminiModel  = (geminiModel != null && !geminiModel.isBlank()) ? geminiModel.trim() : "gemini-2.0-flash";
+
         this.httpClient   = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(REQUEST_TIMEOUT_SEC))
                 .build();
         this.objectMapper = new ObjectMapper();
 
-        System.out.println("[AI] Chat Provider : Groq");
-        System.out.println("[AI] Groq Model    : " + this.model);
-        System.out.println("[AI] Groq API key  : " + (this.apiKey.isBlank() ? "NOT SET — AI features disabled" : "loaded (" + this.apiKey.substring(0, Math.min(6, this.apiKey.length())) + "***)"));
+        System.out.println("[AI] Chat Primary  : Groq (" + this.groqModel + ")");
+        System.out.println("[AI] Groq Key      : " + (this.groqApiKey.isBlank() ? "NOT SET" : "loaded (" + this.groqApiKey.substring(0, Math.min(6, this.groqApiKey.length())) + "***)"));
+        System.out.println("[AI] Chat Fallback : Gemini (" + this.geminiModel + ")");
+        System.out.println("[AI] Gemini Key    : " + (this.geminiApiKey.isBlank() ? "NOT SET" : "loaded (" + this.geminiApiKey.substring(0, Math.min(6, this.geminiApiKey.length())) + "***)"));
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -60,7 +79,7 @@ public class MedicineAiService {
 
     public String getSafeMedicineInfo(String rawName) {
         if (rawName == null || rawName.isBlank()) return "Please provide a valid medicine name.";
-        if (isApiKeyMissing()) return "AI lookup failed: Groq API key is not configured.";
+        if (isAllApiKeysMissing()) return "AI lookup failed: No AI API keys configured.";
 
         String prompt = """
                 You are a professional medical information assistant. Provide structured, safe information about: %s
@@ -80,8 +99,9 @@ public class MedicineAiService {
                 - Keep the total response brief and easy to read
                 - End with: "Always consult a qualified healthcare provider before starting or changing any medication."
                 """.formatted(rawName);
+
         try {
-            return callGroq(prompt);
+            return generateAiResponse(prompt);
         } catch (Exception e) {
             return "Error: " + e.getMessage();
         }
@@ -89,7 +109,7 @@ public class MedicineAiService {
 
     public String checkSymptoms(String symptoms) {
         if (symptoms == null || symptoms.isBlank()) return "Please describe your symptoms.";
-        if (isApiKeyMissing()) return "AI lookup failed: Groq API key is not configured.";
+        if (isAllApiKeysMissing()) return "AI lookup failed: No AI API keys configured.";
 
         String prompt = """
                 A patient reports these symptoms: %s
@@ -102,7 +122,7 @@ public class MedicineAiService {
                 """.formatted(symptoms);
 
         try {
-            return callGroq(prompt);
+            return generateAiResponse(prompt);
         } catch (Exception e) {
             return "Error: " + e.getMessage();
         }
@@ -113,7 +133,7 @@ public class MedicineAiService {
      * Image-based parsing is handled by GeminiOcrService.
      */
     public String parsePrescriptionToJson(String text) {
-        if (isApiKeyMissing()) return "[]";
+        if (isAllApiKeysMissing()) return "[]";
 
         String prompt = """
                 You are a prescription parser. Extract all medicines from the text below.
@@ -140,7 +160,7 @@ public class MedicineAiService {
                 """ + text;
 
         try {
-            return callGroq(prompt);
+            return generateAiResponse(prompt);
         } catch (Exception e) {
             System.err.println("[MedicineAiService] parsePrescriptionToJson failed: " + e.getMessage());
             return "[]";
@@ -158,27 +178,62 @@ public class MedicineAiService {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Internal helpers
+    // Internal multi-provider AI caller (Groq -> Fallback Groq Models -> Gemini)
     // ─────────────────────────────────────────────────────────────────────────
 
-    private boolean isApiKeyMissing() {
-        return apiKey == null || apiKey.isBlank();
+    private boolean isAllApiKeysMissing() {
+        return (groqApiKey == null || groqApiKey.isBlank()) && (geminiApiKey == null || geminiApiKey.isBlank());
+    }
+
+    private String generateAiResponse(String prompt) throws Exception {
+        // Step 1: Try Groq with primary model
+        if (groqApiKey != null && !groqApiKey.isBlank()) {
+            try {
+                return callGroq(prompt, this.groqModel);
+            } catch (Exception e) {
+                System.err.println("[MedicineAiService] Groq (" + this.groqModel + ") failed: " + e.getMessage());
+                
+                // Step 2: Try fallback Groq models
+                for (String fallbackModel : FALLBACK_GROQ_MODELS) {
+                    if (fallbackModel.equalsIgnoreCase(this.groqModel)) continue;
+                    try {
+                        System.out.println("[MedicineAiService] Retrying Groq with fallback model: " + fallbackModel);
+                        return callGroq(prompt, fallbackModel);
+                    } catch (Exception ex) {
+                        System.err.println("[MedicineAiService] Groq (" + fallbackModel + ") failed: " + ex.getMessage());
+                    }
+                }
+            }
+        }
+
+        // Step 3: Fallback to Gemini
+        if (geminiApiKey != null && !geminiApiKey.isBlank()) {
+            try {
+                System.out.println("[MedicineAiService] Falling back to Gemini (" + geminiModel + ")");
+                return callGemini(prompt);
+            } catch (Exception geminiEx) {
+                System.err.println("[MedicineAiService] Gemini fallback failed: " + geminiEx.getMessage());
+                throw geminiEx;
+            }
+        }
+
+        throw new RuntimeException("All AI services failed or are unconfigured.");
     }
 
     /**
      * Calls Groq (OpenAI-compatible) with exponential-backoff retry on 429 / 503.
      */
-    private String callGroq(String userMessage) throws Exception {
+    private String callGroq(String userMessage, String targetModel) throws Exception {
         Exception lastException = null;
 
         for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
             try {
-                String jsonBody = buildRequestBody(userMessage);
+                String jsonBody = buildGroqRequestBody(userMessage, targetModel);
 
                 HttpRequest request = HttpRequest.newBuilder()
                         .uri(URI.create(GROQ_URL))
                         .header("Content-Type", "application/json")
-                        .header("Authorization", "Bearer " + apiKey)
+                        .header("Authorization", "Bearer " + groqApiKey)
                         .timeout(Duration.ofSeconds(REQUEST_TIMEOUT_SEC))
                         .POST(HttpRequest.BodyPublishers.ofString(jsonBody, StandardCharsets.UTF_8))
                         .build();
@@ -212,11 +267,9 @@ public class MedicineAiService {
                             || lower.contains("quota") || lower.contains("resource exhausted")) {
                         long delay = RETRY_DELAY_MS * attempt;
                         if (attempt < MAX_RETRIES) {
-                            System.err.println("[MedicineAiService] Rate limit — retrying in " + delay + "ms");
                             Thread.sleep(delay);
                             continue;
                         }
-                        throw new RuntimeException("AI service quota exceeded. Please try again later.");
                     }
                     throw new RuntimeException("AI error: " + errMsg);
                 }
@@ -246,9 +299,58 @@ public class MedicineAiService {
         throw new RuntimeException("Groq API call failed after " + MAX_RETRIES + " attempts", lastException);
     }
 
-    private String buildRequestBody(String userMessage) throws Exception {
+    private String buildGroqRequestBody(String userMessage, String targetModel) throws Exception {
         Map<String, Object> message = Map.of("role", "user", "content", userMessage);
-        Map<String, Object> body    = Map.of("model", model, "messages", List.of(message));
+        Map<String, Object> body    = Map.of("model", targetModel, "messages", List.of(message));
         return objectMapper.writeValueAsString(body);
+    }
+
+    /**
+     * Calls Gemini text generation as a seamless fallback.
+     */
+    private String callGemini(String prompt) throws Exception {
+        String endpoint = GEMINI_BASE_URL + geminiModel + ":generateContent?key=" + geminiApiKey;
+        String jsonBody = """
+                {
+                  "contents": [{ "parts": [{ "text": "%s" }] }]
+                }
+                """.formatted(escapeJson(prompt));
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(endpoint))
+                .header("Content-Type", "application/json")
+                .timeout(Duration.ofSeconds(REQUEST_TIMEOUT_SEC))
+                .POST(HttpRequest.BodyPublishers.ofString(jsonBody, StandardCharsets.UTF_8))
+                .build();
+
+        HttpResponse<String> response =
+                httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+        JsonNode root = objectMapper.readTree(response.body());
+
+        if (root.has("error")) {
+            String errMsg = root.path("error").path("message").asText("unknown error");
+            throw new RuntimeException("Gemini error: " + errMsg);
+        }
+
+        JsonNode candidates = root.path("candidates");
+        if (candidates.isMissingNode() || candidates.isEmpty()) {
+            return "";
+        }
+
+        return candidates.get(0)
+                .path("content")
+                .path("parts")
+                .get(0)
+                .path("text")
+                .asText();
+    }
+
+    private String escapeJson(String s) {
+        return s
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r");
     }
 }
