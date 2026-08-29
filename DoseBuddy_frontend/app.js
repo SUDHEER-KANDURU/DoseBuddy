@@ -1,6 +1,6 @@
-﻿const API_BASE = (window.APP_CONFIG && window.APP_CONFIG.apiBase)
+const API_BASE = (window.APP_CONFIG && window.APP_CONFIG.apiBase)
     ? window.APP_CONFIG.apiBase
-    : "https://dosebuddy-3ebu.onrender.com";
+    : "https://dosebuddy-3ebu.onrender.com/api";
 const LS_CURRENT_USER_KEY = "dosebuddy_current_user";
 
 const LS_ACCESS_TOKEN_KEY  = "dosebuddy_access_token";
