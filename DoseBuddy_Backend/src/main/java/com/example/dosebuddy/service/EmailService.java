@@ -62,6 +62,25 @@ public class EmailService {
         sendHtmlEmail(toEmail, subject, body);
     }
 
+    // ── Synchronous Test Email (Diagnostic) ───────────────────────────────────
+
+    public void sendTestEmail(String toEmail) throws Exception {
+        String subject = "DoseBuddy - Diagnostic Test Email";
+        String body = buildOtpEmailBody("Test User", "123456", "verify your email address", "This is a diagnostic test email.");
+        MimeMessage message = mailSender.createMimeMessage();
+        MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
+        helper.setFrom(fromEmail, fromName);
+        helper.setTo(toEmail);
+        helper.setSubject(subject);
+        helper.setText(body, true);
+        mailSender.send(message);
+        log.info("[EmailService] Test email sent successfully to {}", toEmail);
+    }
+
+    public String getFromEmail() {
+        return fromEmail;
+    }
+
     // ── Private helpers ─────────────────────────────────────────────────────
 
     private void sendHtmlEmail(String to, String subject, String htmlBody) {

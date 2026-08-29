@@ -235,6 +235,33 @@ public class AuthController {
         return ResponseEntity.ok(Map.of("message", "A new OTP has been sent to your email."));
     }
 
+    // ── Diagnostic Test Email ───────────────────────────────────────────────
+
+    @GetMapping("/test-email")
+    public ResponseEntity<?> testEmail(@RequestParam(defaultValue = "") String to) {
+        if (to.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "message", "Query parameter 'to' is required. Example: /api/auth/test-email?to=your-email@gmail.com"
+            ));
+        }
+        try {
+            emailService.sendTestEmail(to);
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "message", "Test email sent successfully to " + to,
+                    "fromEmail", emailService.getFromEmail()
+            ));
+        } catch (Exception e) {
+            String causeMsg = e.getCause() != null ? e.getCause().getMessage() : e.getMessage();
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
+                    "success", false,
+                    "message", "Failed to send test email: " + e.getMessage(),
+                    "cause", causeMsg != null ? causeMsg : "N/A",
+                    "errorType", e.getClass().getName()
+            ));
+        }
+    }
+
     // ── Login ───────────────────────────────────────────────────────────────
 
     @PostMapping("/login")
