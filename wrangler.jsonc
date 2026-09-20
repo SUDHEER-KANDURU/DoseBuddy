@@ -1,0 +1,32 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "dosebuddy",
+  "main": "cloudflare-worker/index.ts",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./DoseBuddy_frontend",
+    "binding": "ASSETS"
+  },
+  "containers": [
+    {
+      "name": "dosebuddy-container",
+      "class_name": "DoseBuddyContainer",
+      "image": "./DoseBuddy_Backend/Dockerfile"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "DOSEBUDDY_CONTAINER",
+        "class_name": "DoseBuddyContainer"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["DoseBuddyContainer"]
+    }
+  ]
+}

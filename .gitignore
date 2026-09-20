@@ -1,0 +1,4 @@
+
+# Cloudflare Worker dependencies
+cloudflare-worker/node_modules/
+.wrangler/
