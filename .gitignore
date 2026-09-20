@@ -1,4 +1,7 @@
-
-# Cloudflare Worker dependencies
+# Node / Cloudflare dependencies
+node_modules/
 cloudflare-worker/node_modules/
 .wrangler/
+dist/
+.dist/
+worker-configuration.d.ts
