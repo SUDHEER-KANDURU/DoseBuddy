@@ -1,48 +1,49 @@
-import { env } from "cloudflare:workers";
-import { Container, getContainer } from "@cloudflare/containers";
+import { createConnection } from "mysql2/promise";
+import bcrypt from "bcryptjs";
 
-export interface Env {
-  ASSETS: Fetcher;
-  DOSEBUDDY_CONTAINER: DurableObjectNamespace<DoseBuddyContainer>;
+export interface Env { HYPERDRIVE: Hyperdrive; JWT_SECRET: string; GROQ_API_KEY?: string; GEMINI_API_KEY?: string; GROQ_MODEL?: string; GEMINI_MODEL?: string; }
+type Json = Record<string, any>;
+type User = Json & { id: number; email: string; password_hash: string; role: string; patient_email?: string | null };
+const enc = new TextEncoder(), dec = new TextDecoder(), ACCESS = 900, REFRESH = 604800;
+const cors = { "access-control-allow-origin": "*", "access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS", "access-control-allow-headers": "Authorization, Content-Type", "access-control-max-age": "3600" };
+const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...cors, "content-type": "application/json; charset=utf-8" } });
+const plain = (body: string, status = 200) => new Response(body, { status, headers: cors });
+const b64url = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes)).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+function unb64(value: string) { const normal = value.replaceAll("-", "+").replaceAll("_", "/") + "=".repeat((4 - value.length % 4) % 4); return Uint8Array.from(atob(normal), c => c.charCodeAt(0)); }
+async function key(secret: string) { let raw: Uint8Array; try { raw = unb64(secret); } catch { raw = enc.encode(secret); } return crypto.subtle.importKey("raw", raw, { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]); }
+async function jwt(env: Env, claims: Json) { const h = b64url(enc.encode('{"alg":"HS256","typ":"JWT"}')), p = b64url(enc.encode(JSON.stringify({ ...claims, iat: Math.floor(Date.now() / 1000) }))); const s = new Uint8Array(await crypto.subtle.sign("HMAC", await key(env.JWT_SECRET), enc.encode(`${h}.${p}`))); return `${h}.${p}.${b64url(s)}`; }
+async function claims(env: Env, token: string) { const [h, p, s, extra] = token.split("."); if (!h || !p || !s || extra) return null; try { const valid = await crypto.subtle.verify("HMAC", await key(env.JWT_SECRET), unb64(s), enc.encode(`${h}.${p}`)); const payload = JSON.parse(dec.decode(unb64(p))) as Json; return valid && payload.exp > Date.now() / 1000 ? payload : null; } catch { return null; } }
+// mysql2's Node socket types are not fully expressed in the Workers type environment.
+async function sql<T = Json[]>(env: Env, statement: string, values: unknown[] = []) { const db = await createConnection({ uri: env.HYPERDRIVE.connectionString, timezone: "Z" }) as any; try { return await db.execute(statement, values) as [T, unknown]; } finally { await db.end(); } }
+async function getUser(env: Env, id: number) { const [rows] = await sql<User[]>(env, "SELECT * FROM users WHERE id=? LIMIT 1", [id]); return rows[0] ?? null; }
+async function userFor(request: Request, env: Env) { const token = request.headers.get("authorization")?.replace(/^Bearer\s+/i, ""); const c = token ? await claims(env, token) : null; return c?.type === "access" && typeof c.userId === "number" ? getUser(env, c.userId) : null; }
+const accessible = (actor: User, target: User) => actor.id === target.id || (actor.role?.toUpperCase() === "CAREGIVER" && actor.patient_email?.toLowerCase() === target.email.toLowerCase());
+async function requestBody(request: Request) { try { return await request.json<Json>(); } catch { return {}; } }
+async function loginBody(env: Env, user: User) { const base = { userId: user.id, sub: user.email }; return { id: user.id, name: user.name, email: user.email, role: user.role, patientEmail: user.patient_email, phone: user.phone, dob: user.dob, gender: user.gender, emergencyContact: user.emergency_contact, acceptedTerms: Boolean(user.accepted_terms), accessToken: await jwt(env, { ...base, role: user.role, type: "access", exp: Math.floor(Date.now() / 1000) + ACCESS }), refreshToken: await jwt(env, { ...base, type: "refresh", exp: Math.floor(Date.now() / 1000) + REFRESH }), expiresIn: ACCESS }; }
+async function callAi(env: Env, prompt: string) { if (!env.GROQ_API_KEY) return json({ message: "AI service is not configured" }, 503); const r = await fetch("https://api.groq.com/openai/v1/chat/completions", { method: "POST", headers: { authorization: `Bearer ${env.GROQ_API_KEY}`, "content-type": "application/json" }, body: JSON.stringify({ model: env.GROQ_MODEL || "openai/gpt-oss-20b", messages: [{ role: "user", content: prompt }] }) }); if (!r.ok) return json({ message: "AI service is temporarily unavailable" }, 502); const data = await r.json<Json>(); return plain(String(data.choices?.[0]?.message?.content ?? "")); }
 
-  DB_URL: string;
-  DB_USER: string;
-  DB_PASS: string;
-  JWT_SECRET: string;
-  GROQ_API_KEY?: string;
-  GEMINI_API_KEY?: string;
-  GROQ_MODEL?: string;
-  GEMINI_MODEL?: string;
-}
-
-export class DoseBuddyContainer extends Container {
-  defaultPort = 8080;
-
-  // Pass Cloudflare secrets into the Spring Boot container environment
-  override envVars = {
-    DB_URL: (env as unknown as Env).DB_URL,
-    DB_USER: (env as unknown as Env).DB_USER,
-    DB_PASS: (env as unknown as Env).DB_PASS,
-    JWT_SECRET: (env as unknown as Env).JWT_SECRET,
-    GROQ_API_KEY: (env as unknown as Env).GROQ_API_KEY || "",
-    GEMINI_API_KEY: (env as unknown as Env).GEMINI_API_KEY || "",
-    GROQ_MODEL: (env as unknown as Env).GROQ_MODEL || "openai/gpt-oss-20b",
-    GEMINI_MODEL: (env as unknown as Env).GEMINI_MODEL || "gemini-3.6-flash",
-    PORT: "8080"
-  };
-}
-
-export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    const url = new URL(request.url);
-
-    // 1. Route all /api/* requests to the Spring Boot Container
-    if (url.pathname.startsWith("/api")) {
-      const containerStub = getContainer(env.DOSEBUDDY_CONTAINER);
-      return containerStub.fetch(request);
+export default { async fetch(request: Request, env: Env): Promise<Response> {
+  if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
+  const url = new URL(request.url), path = url.pathname;
+  try {
+    if (path === "/" && request.method === "GET") return json({ message: "DoseBuddy API is running" });
+    if (path === "/api/health" && request.method === "GET") return json({ status: "UP", service: "DoseBuddy API" });
+    if (path === "/api/auth/signup" && request.method === "POST") {
+      const b = await requestBody(request), email = String(b.email ?? "").trim().toLowerCase(), password = String(b.password ?? ""), name = String(b.name ?? "").trim(), role = String(b.role || "PATIENT").toUpperCase(), patientEmail = role === "CAREGIVER" ? String(b.patientEmail ?? "").trim().toLowerCase() : null;
+      if (!email || !password || !name) return json({ message: "Name, email and password are required" }, 400); if (!b.acceptedTerms) return json({ message: "You must accept the Terms & Conditions to create an account" }, 400); if (password.length < 8) return json({ message: "Password must be at least 8 characters" }, 400); if (role === "CAREGIVER" && !patientEmail) return json({ message: "Patient email is required for caregivers" }, 400);
+      const [existing] = await sql<User[]>(env, "SELECT id FROM users WHERE email=? LIMIT 1", [email]); if (existing.length) return json({ message: "Email already in use" }, 409);
+      const [result] = await sql<{ insertId: number }>(env, "INSERT INTO users (name,email,password_hash,role,patient_email,phone,dob,gender,emergency_contact,accepted_terms,accepted_terms_timestamp,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,NOW(),NOW(),NOW())", [name, email, await bcrypt.hash(password, 10), role, patientEmail, b.phone || null, b.dob || null, b.gender || null, b.emergencyContact || null, true]); return json(await loginBody(env, (await getUser(env, result.insertId))!));
     }
-
-    // 2. Serve static frontend assets for everything else
-    return env.ASSETS.fetch(request);
-  }
-};
+    if (path === "/api/auth/login" && request.method === "POST") { const b = await requestBody(request), email = String(b.email ?? "").trim().toLowerCase(), password = String(b.password ?? ""); if (!email || !password) return json({ message: "Email and password are required" }, 400); const [rows] = await sql<User[]>(env, "SELECT * FROM users WHERE email=? LIMIT 1", [email]); const user = rows[0]; if (!user) return json({ message: "Invalid email or password" }, 401); const match = user.password_hash.startsWith("$2") ? await bcrypt.compare(password, user.password_hash) : password === user.password_hash; if (!match) return json({ message: "Invalid email or password" }, 401); if (!user.password_hash.startsWith("$2")) { user.password_hash = await bcrypt.hash(password, 10); await sql(env, "UPDATE users SET password_hash=?,updated_at=NOW() WHERE id=?", [user.password_hash, user.id]); } return json(await loginBody(env, user)); }
+    if (path === "/api/auth/refresh" && request.method === "POST") { const b = await requestBody(request), c = await claims(env, String(b.refreshToken ?? "")); if (!c || c.type !== "refresh" || typeof c.userId !== "number") return json({ message: "Invalid or expired refresh token" }, 401); const user = await getUser(env, c.userId); return user ? json(await loginBody(env, user)) : json({ message: "User not found" }, 401); }
+    const actor = await userFor(request, env); if (!actor) return json({ message: "Unauthorized" }, 401);
+    if (path === "/api/medicine/ai-info" && request.method === "GET") return callAi(env, `Provide concise medication information and safety guidance for: ${url.searchParams.get("name") || ""}`);
+    if (path === "/api/medicine/symptom-check" && request.method === "POST") { const b = await requestBody(request); return callAi(env, `Give safe, non-diagnostic guidance for these symptoms: ${String(b.symptoms ?? "")}`); }
+    if (path === "/api/medications/add" && request.method === "POST") { const b = await requestBody(request); const [r] = await sql<{ insertId: number }>(env, "INSERT INTO medications (user_id,name,dosage,instructions,start_date,end_date) VALUES (?,?,?,?,?,?)", [actor.id, b.name, b.dosage, b.instructions ?? null, b.startDate, b.endDate]); for (const time of Array.isArray(b.times) ? b.times : []) await sql(env, "INSERT INTO medication_times (medication_id,time_of_day) VALUES (?,?)", [r.insertId, time]); await sql(env, "INSERT INTO activities (user_id,type,message,related_entity_type,related_entity_id,created_at) VALUES (?,?,?,?,?,NOW())", [actor.id, "MEDICINE_ADDED", `Added new medication: ${b.name} (${b.dosage})`, "MEDICATION", r.insertId]); return plain("Medication added"); }
+    const medsId = path.match(/^\/api\/medications\/today\/(\d+)$/), medsEmail = path.match(/^\/api\/medications\/today-by-email\/(.+)$/); if ((medsId || medsEmail) && request.method === "GET") { const target = medsId ? await getUser(env, Number(medsId[1])) : (await sql<User[]>(env, "SELECT * FROM users WHERE email=? LIMIT 1", [decodeURIComponent(medsEmail![1]).toLowerCase()]))[0][0]; if (!target) return plain(medsId ? "User not found" : "Patient not found", 400); if (!accessible(actor, target)) return plain("Access denied", 403); const [rows] = await sql<Json[]>(env, "SELECT m.*,JSON_ARRAYAGG(JSON_OBJECT('id',mt.id,'timeOfDay',TIME_FORMAT(mt.time_of_day,'%H:%i:%s'))) times FROM medications m LEFT JOIN medication_times mt ON mt.medication_id=m.id WHERE m.user_id=? AND m.start_date<=CURDATE() AND m.end_date>=CURDATE() GROUP BY m.id", [target.id]); return json(rows.map(x => ({ ...x, startDate: x.start_date, endDate: x.end_date, times: typeof x.times === "string" ? JSON.parse(x.times) : x.times }))); }
+    const del = path.match(/^\/api\/medications\/(\d+)$/); if (del && request.method === "DELETE") { const [rows] = await sql<Json[]>(env, "SELECT * FROM medications WHERE id=?", [del[1]]); if (!rows[0]) return new Response(null, { status: 404, headers: cors }); if (Number(rows[0].user_id) !== actor.id) return plain("Access denied", 403); await sql(env, "DELETE FROM intake_logs WHERE medication_id=?", [del[1]]); await sql(env, "DELETE FROM medication_times WHERE medication_id=?", [del[1]]); await sql(env, "DELETE FROM medications WHERE id=?", [del[1]]); return new Response(null, { status: 204, headers: cors }); }
+    const profile = path.match(/^\/api\/user\/profile\/(\d+)$/); if (profile) { const target = await getUser(env, Number(profile[1])); if (!target) return plain("User not found", 404); if (!accessible(actor, target)) return plain("Access denied", 403); if (request.method === "GET") { const { password_hash, ...safe } = target; return json({ ...safe, patientEmail: target.patient_email, emergencyContact: target.emergency_contact, acceptedTerms: Boolean(target.accepted_terms) }); } if (request.method === "PUT") { const b = await requestBody(request); await sql(env, "UPDATE users SET name=?,phone=?,dob=?,gender=?,emergency_contact=?,updated_at=NOW() WHERE id=?", [b.name ?? target.name, b.phone ?? null, b.dob ?? null, b.gender ?? null, b.emergencyContact ?? null, target.id]); const { password_hash, ...safe } = (await getUser(env, target.id))!; return json(safe); } }
+    const password = path.match(/^\/api\/user\/change-password\/(\d+)$/); if (password && request.method === "POST") { if (actor.id !== Number(password[1])) return plain("Access denied", 403); const b = await requestBody(request); if (!await bcrypt.compare(String(b.currentPassword ?? ""), actor.password_hash)) return json({ message: "Current password is incorrect" }, 400); if (String(b.newPassword ?? "").length < 8) return json({ message: "Password must be at least 8 characters" }, 400); await sql(env, "UPDATE users SET password_hash=?,updated_at=NOW() WHERE id=?", [await bcrypt.hash(String(b.newPassword), 10), actor.id]); return json({ message: "Password changed successfully" }); }
+    return json({ message: "Not found" }, 404);
+  } catch (e) { console.error("DoseBuddy Worker error", e instanceof Error ? e.message : "unknown"); return json({ message: "Internal server error" }, 500); }
+} };
