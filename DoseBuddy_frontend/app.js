@@ -116,6 +116,12 @@ async function fetchJsonCached(url, ttlMs = 15000) {
 
     const request = authFetch(url)
         .then(async res => {
+            if (res.status === 404) {
+                // Expected empty state for optional resources (e.g. /bmi/latest/:id before first calculation)
+                const emptyData = null;
+                _jsonCache.set(url, { data: emptyData, at: Date.now() });
+                return emptyData;
+            }
             if (!res.ok) throw new Error(`Request failed (${res.status})`);
             const data = await res.json();
             _jsonCache.set(url, { data, at: Date.now() });
@@ -4237,7 +4243,14 @@ async function calculateBmi() {
         const data = await response.json();
         displayBmiResult(data);
         displayHealthInsights(data);
+        displayBmiResultView(data);
+        displayHealthInsightsView(data);
+
+        invalidateDataCache("/bmi/", "/activities/");
+        _jsonCache.set(`${API_BASE}/bmi/latest/${currentUser.id}`, { data, at: Date.now() });
+
         showToast("BMI calculated successfully! 🎉", "success");
+        try { await refreshActivityFeed(); } catch(e) {}
 
         const bmiVal = data.bmiValue ? data.bmiValue.toFixed(1) : "?";
         const bmiCat = data.bmiCategory || "";
@@ -4299,9 +4312,16 @@ async function calculateBmiView() {
         }
 
         const data = await response.json();
+        displayBmiResult(data);
+        displayHealthInsights(data);
         displayBmiResultView(data);
         displayHealthInsightsView(data);
+
+        invalidateDataCache("/bmi/", "/activities/");
+        _jsonCache.set(`${API_BASE}/bmi/latest/${currentUser.id}`, { data, at: Date.now() });
+
         showToast("BMI calculated successfully! 🎉", "success");
+        try { await refreshActivityFeed(); } catch(e) {}
 
     } catch (error) {
         console.error("BMI calculation error:", error);
@@ -4315,20 +4335,18 @@ async function loadLatestBmi() {
     if (!currentUser) return;
 
     try {
-        const response = await authFetch(`${API_BASE}/bmi/latest/${currentUser.id}`);
+        const data = await fetchJsonCached(`${API_BASE}/bmi/latest/${currentUser.id}`, 15000);
         
-        if (response.ok) {
-            const data = await response.json();
-            
+        if (data) {
             const h = document.getElementById("bmi-height");
             const w = document.getElementById("bmi-weight");
-            if (h) h.value = data.height;
-            if (w) w.value = data.weight;
+            if (h && data.height) h.value = data.height;
+            if (w && data.weight) w.value = data.weight;
 
             const hv = document.getElementById("bmi-height-view");
             const wv = document.getElementById("bmi-weight-view");
-            if (hv) hv.value = data.height;
-            if (wv) wv.value = data.weight;
+            if (hv && data.height) hv.value = data.height;
+            if (wv && data.weight) wv.value = data.weight;
 
             displayBmiResult(data);
             displayHealthInsights(data);
@@ -6775,10 +6793,10 @@ async function exportReportsPDF() {
         const now = new Date();
 
         const statsDays = period === "all" ? 0 : Number(period);
-        const [history, statsRes, bmiRes, vitalsRes, streakRes] = await Promise.all([
+        const [history, statsRes, bmi, vitalsRes, streakRes] = await Promise.all([
             fetchAllHistoryPages(currentUser.id),
             authFetch(`${API_BASE}/logs/adherence/stats/${currentUser.id}?days=${statsDays}`),
-            authFetch(`${API_BASE}/bmi/latest/${currentUser.id}`),
+            fetchJsonCached(`${API_BASE}/bmi/latest/${currentUser.id}`, 15000).catch(() => null),
             authFetch(`${API_BASE}/vitals/recent/${currentUser.id}?limit=100`),
             // Use recalculate (POST) not the read-only GET endpoint.
             // The GET endpoint always returns perfectDaysThisWeek/Month = 0
@@ -6787,7 +6805,6 @@ async function exportReportsPDF() {
         ]);
 
         const stats    = statsRes.ok ? await statsRes.json() : {};
-        const bmi      = bmiRes.ok   ? await bmiRes.json()   : null;
         const vitals   = vitalsRes.ok ? await vitalsRes.json() : [];
         const streak   = streakRes.ok ? await streakRes.json() : {};
 
@@ -7023,12 +7040,11 @@ async function exportVitalsPDF() {
     const restore = setExportLoading(btn, "Generating…");
 
     try {
-        const [vitalsRes, bmiRes] = await Promise.all([
+        const [vitalsRes, bmi] = await Promise.all([
             authFetch(`${API_BASE}/vitals/recent/${currentUser.id}?limit=100`),
-            authFetch(`${API_BASE}/bmi/latest/${currentUser.id}`)
+            fetchJsonCached(`${API_BASE}/bmi/latest/${currentUser.id}`, 15000).catch(() => null)
         ]);
         const vitals = vitalsRes.ok ? await vitalsRes.json() : [];
-        const bmi    = bmiRes.ok   ? await bmiRes.json()    : null;
         const now    = new Date();
 
         const { jsPDF } = window.jspdf;
