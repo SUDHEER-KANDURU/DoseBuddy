@@ -1,11 +1,9 @@
-const CLOUDFLARE_WORKER_API = "https://dosebuddy.sudheerkanduru-5588.workers.dev/api";
+const API_BASE_URL = (window.APP_CONFIG && window.APP_CONFIG.apiBaseUrl)
+    ? window.APP_CONFIG.apiBaseUrl
+    : "https://dosebuddy.sudheerkanduru-5588.workers.dev";
 const API_BASE = (window.APP_CONFIG && window.APP_CONFIG.apiBase)
     ? window.APP_CONFIG.apiBase
-    : (window.location.hostname.includes("workers.dev") || window.location.hostname.includes("pages.dev")
-        ? "/api"
-        : (window.location.protocol === "file:" || window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1" || window.location.hostname.includes("netlify.app")
-            ? CLOUDFLARE_WORKER_API
-            : "/api"));
+    : `${API_BASE_URL}/api`;
 const LS_CURRENT_USER_KEY = "dosebuddy_current_user";
 
 const LS_ACCESS_TOKEN_KEY  = "dosebuddy_access_token";
