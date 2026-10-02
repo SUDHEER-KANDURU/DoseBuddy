@@ -1,8 +1,11 @@
+const CLOUDFLARE_WORKER_API = "https://dosebuddy.sudheerkanduru-5588.workers.dev/api";
 const API_BASE = (window.APP_CONFIG && window.APP_CONFIG.apiBase)
     ? window.APP_CONFIG.apiBase
-    : (window.location.hostname.includes("netlify.app")
-        ? "https://dosebuddy-3ebu.onrender.com/api"
-        : "/api");
+    : (window.location.hostname.includes("workers.dev") || window.location.hostname.includes("pages.dev")
+        ? "/api"
+        : (window.location.protocol === "file:" || window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1" || window.location.hostname.includes("netlify.app")
+            ? CLOUDFLARE_WORKER_API
+            : "/api"));
 const LS_CURRENT_USER_KEY = "dosebuddy_current_user";
 
 const LS_ACCESS_TOKEN_KEY  = "dosebuddy_access_token";
@@ -980,28 +983,34 @@ function setupLegalModals() {
 }
 
 async function handleSignupApi(body, errorElem) {
-    const res = await fetch(`${API_BASE}/auth/signup`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body)
-    });
+    try {
+        const res = await fetch(`${API_BASE}/auth/signup`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body)
+        });
 
-    const data = await res.json().catch(() => ({}));
+        const data = await res.json().catch(() => ({}));
 
-    if (!res.ok) {
-        if (errorElem) errorElem.textContent = data.message || "Signup failed.";
-        return;
-    }
+        if (!res.ok) {
+            if (errorElem) errorElem.textContent = data.message || "Signup failed.";
+            return;
+        }
 
-    // If the backend requires email verification (OTP)
-    if (data.requiresVerification) {
-        showOtpVerificationForm(data.email || body.email);
-        return;
-    }
+        // If the backend requires email verification (OTP)
+        if (data.requiresVerification) {
+            showOtpVerificationForm(data.email || body.email);
+            return;
+        }
 
-    // Legacy path: if backend returns tokens directly (shouldn't happen now)
-    if (data.accessToken && data.refreshToken) {
-        completeLoginFromResponse(data);
+        if (data.accessToken && data.refreshToken) {
+            completeLoginFromResponse(data);
+        } else {
+            if (errorElem) errorElem.textContent = data.message || "Signup succeeded, but session tokens were missing.";
+        }
+    } catch (err) {
+        console.error("[Signup] Request failed:", err);
+        if (errorElem) errorElem.textContent = "Unable to connect to the server. Please check your connection.";
     }
 }
 
@@ -1028,27 +1037,31 @@ function unlockAudioOnLogin() {
 }
 
 async function handleLoginApi(email, password, errorElem) {
-    const res = await fetch(`${API_BASE}/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password })
-    });
+    try {
+        const res = await fetch(`${API_BASE}/auth/login`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email, password })
+        });
 
-    if (!res.ok) {
         const data = await res.json().catch(() => ({}));
 
-        // If email not verified, show OTP verification form
-        if (res.status === 403 && data.requiresVerification) {
-            showOtpVerificationForm(data.email || email);
+        if (!res.ok) {
+            // If email not verified, show OTP verification form
+            if (res.status === 403 && data.requiresVerification) {
+                showOtpVerificationForm(data.email || email);
+                return;
+            }
+
+            if (errorElem) errorElem.textContent = data.message || "Login failed.";
             return;
         }
 
-        errorElem.textContent = data.message || "Login failed.";
-        return;
+        completeLoginFromResponse(data);
+    } catch (err) {
+        console.error("[Login] Request failed:", err);
+        if (errorElem) errorElem.textContent = "Unable to connect to the server. Please check your connection.";
     }
-
-    const user = await res.json();
-    completeLoginFromResponse(user);
 }
 
 // ── Complete Login (shared by signup-verify and login) ────────────────────────
