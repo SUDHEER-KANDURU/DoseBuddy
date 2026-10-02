@@ -102,11 +102,20 @@ const accessible = (actor: User, target: User) =>
   actor.id === target.id ||
   (actor.role?.toUpperCase() === "CAREGIVER" && actor.patient_email?.toLowerCase() === target.email.toLowerCase());
 
-async function requestBody(request: Request) {
+async function requestBody(request: Request): Promise<{ body: Json; error?: string }> {
   try {
-    return await request.json<Json>();
-  } catch {
-    return {};
+    const raw = await request.text();
+    if (!raw || !raw.trim()) {
+      return { body: {} };
+    }
+    let text = raw.trim();
+    if (text.startsWith("'") && text.endsWith("'") && text.length >= 2) {
+      text = text.slice(1, -1).trim();
+    }
+    const parsed = JSON.parse(text);
+    return { body: typeof parsed === "object" && parsed !== null ? parsed : {} };
+  } catch (e) {
+    return { body: {}, error: "Malformed JSON payload" };
   }
 }
 
@@ -182,15 +191,18 @@ export default {
       if (path === "/api/health" && request.method === "GET") return json({ status: "UP", service: "DoseBuddy API" });
 
       if (path === "/api/auth/signup" && request.method === "POST") {
-        const b = await requestBody(request),
-          email = String(b.email ?? "").trim().toLowerCase(),
+        const { body: b, error: parseError } = await requestBody(request);
+        if (parseError) return json({ message: "Invalid JSON in request body" }, 400);
+
+        const email = String(b.email ?? "").trim().toLowerCase(),
           password = String(b.password ?? ""),
           name = String(b.name ?? "").trim(),
           role = String(b.role || "PATIENT").toUpperCase(),
-          patientEmail = role === "CAREGIVER" ? String(b.patientEmail ?? "").trim().toLowerCase() : null;
+          patientEmail = role === "CAREGIVER" ? String(b.patientEmail ?? "").trim().toLowerCase() : null,
+          acceptedTerms = b.acceptedTerms !== undefined ? Boolean(b.acceptedTerms) : true;
 
         if (!email || !password || !name) return json({ message: "Name, email and password are required" }, 400);
-        if (!b.acceptedTerms) return json({ message: "You must accept the Terms & Conditions to create an account" }, 400);
+        if (b.acceptedTerms === false) return json({ message: "You must accept the Terms & Conditions to create an account" }, 400);
         if (password.length < 8) return json({ message: "Password must be at least 8 characters" }, 400);
         if (role === "CAREGIVER" && !patientEmail) return json({ message: "Patient email is required for caregivers" }, 400);
 
@@ -209,7 +221,7 @@ export default {
           const [result] = await query<{ insertId: number }>(
             db,
             "INSERT INTO users (name,email,password_hash,role,patient_email,phone,dob,gender,emergency_contact,accepted_terms,accepted_terms_timestamp,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,NOW(),NOW(),NOW())",
-            [name, email, passwordHash, role, patientEmail, b.phone || null, b.dob || null, b.gender || null, b.emergencyContact || null, true]
+            [name, email, passwordHash, role, patientEmail, b.phone || null, b.dob || null, b.gender || null, b.emergencyContact || null, acceptedTerms]
           );
 
           phase = "fetch_created_user";
@@ -232,8 +244,10 @@ export default {
       }
 
       if (path === "/api/auth/login" && request.method === "POST") {
-        const b = await requestBody(request),
-          email = String(b.email ?? "").trim().toLowerCase(),
+        const { body: b, error: parseError } = await requestBody(request);
+        if (parseError) return json({ message: "Invalid JSON in request body" }, 400);
+
+        const email = String(b.email ?? "").trim().toLowerCase(),
           password = String(b.password ?? "");
         if (!email || !password) return json({ message: "Email and password are required" }, 400);
         const [rows] = await query<User[]>(env, "SELECT * FROM users WHERE email=? LIMIT 1", [email]);
@@ -251,8 +265,10 @@ export default {
       }
 
       if (path === "/api/auth/refresh" && request.method === "POST") {
-        const b = await requestBody(request),
-          c = await claims(env, String(b.refreshToken ?? ""));
+        const { body: b, error: parseError } = await requestBody(request);
+        if (parseError) return json({ message: "Invalid JSON in request body" }, 400);
+
+        const c = await claims(env, String(b.refreshToken ?? ""));
         if (!c || c.type !== "refresh" || typeof c.userId !== "number") return json({ message: "Invalid or expired refresh token" }, 401);
         const user = await getUser(env, c.userId);
         return user ? json(await loginBody(env, user)) : json({ message: "User not found" }, 401);
@@ -271,12 +287,12 @@ export default {
       }
 
       if (path === "/api/medicine/symptom-check" && request.method === "POST") {
-        const b = await requestBody(request);
+        const { body: b } = await requestBody(request);
         return callAi(env, `Give safe, non-diagnostic guidance for these symptoms: ${String(b.symptoms ?? "")}`);
       }
 
       if (path === "/api/medications/add" && request.method === "POST") {
-        const b = await requestBody(request);
+        const { body: b } = await requestBody(request);
         let db: any = null;
         try {
           db = await getDbConnection(env);
@@ -361,7 +377,7 @@ export default {
           return json({ ...safe, patientEmail: target.patient_email, emergencyContact: target.emergency_contact, acceptedTerms: Boolean(target.accepted_terms) });
         }
         if (request.method === "PUT") {
-          const b = await requestBody(request);
+          const { body: b } = await requestBody(request);
           await query(
             env,
             "UPDATE users SET name=?,phone=?,dob=?,gender=?,emergency_contact=?,updated_at=NOW() WHERE id=?",
@@ -375,7 +391,7 @@ export default {
       const password = path.match(/^\/api\/user\/change-password\/(\d+)$/);
       if (password && request.method === "POST") {
         if (actor.id !== Number(password[1])) return plain("Access denied", 403);
-        const b = await requestBody(request);
+        const { body: b } = await requestBody(request);
         if (!await bcrypt.compare(String(b.currentPassword ?? ""), actor.password_hash)) return json({ message: "Current password is incorrect" }, 400);
         if (String(b.newPassword ?? "").length < 8) return json({ message: "Password must be at least 8 characters" }, 400);
         await query(env, "UPDATE users SET password_hash=?,updated_at=NOW() WHERE id=?", [await bcrypt.hash(String(b.newPassword), 10), actor.id]);
