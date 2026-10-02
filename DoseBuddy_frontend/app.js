@@ -1725,31 +1725,41 @@ async function renderDashboard() {
     scheduleTable.style.display = window.innerWidth <= 767 ? "block" : "table";
 
     try {
-        // FIX Issue 1: fetch logs and medicines in parallel — they are independent
-        // requests. The original sequential awaits added the full RTT of the logs
-        // request before the meds request even started, causing Today's Medicines
-        // to appear noticeably late on every dashboard open.
-        const [todayLogs, meds] = await Promise.all([
+        const [logsRes, medsRes] = await Promise.allSettled([
             fetchJsonCached(`${API_BASE}/logs/today/${currentUser.id}`, 10000),
             fetchJsonCached(medsUrl, 30000)
         ]);
         if (renderId !== _dashboardRenderId) return;
-        logs = Array.isArray(todayLogs) ? todayLogs : [];
 
+        const todayLogs = (logsRes.status === "fulfilled" && Array.isArray(logsRes.value)) ? logsRes.value : [];
+        logs = todayLogs;
+
+        const meds = (medsRes.status === "fulfilled" && Array.isArray(medsRes.value)) ? medsRes.value : [];
         medsCache = meds;
         medsCacheDate = todayStr;
 
-        if (!Array.isArray(meds) || meds.length === 0) {
+        if (medsRes.status === "rejected") {
+            console.error("Failed to fetch medications:", medsRes.reason);
+        }
 
+        if (meds.length === 0) {
             document.getElementById("totalDoses").textContent = 0;
             document.getElementById("takenDoses").textContent = 0;
             document.getElementById("pendingDoses").textContent = 0;
             document.getElementById("adherence").textContent = "0%";
 
             noMedsMsg.style.display = "block";
+            noMedsMsg.textContent = medsRes.status === "rejected"
+                ? "Could not load medicines from server."
+                : "No medicines scheduled for today.";
             scheduleTable.style.display = "none";
             if (statsElem) statsElem.textContent = "";
             clearScheduledTimeouts();
+
+            // Load peripheral widgets even when user has 0 scheduled medications
+            loadLatestBmi();
+            renderRecentActivity();
+            renderReports(logs).catch(e => console.warn("[Dashboard] weekly-chart renderReports error:", e));
             return;
         }
 
@@ -2497,7 +2507,7 @@ async function renderReports(preloadedHistory) {
     // renderAnalyticsDashboard falls back to its own fetch gracefully.
     if (reportsIsVisible) {
         const _medsForAnalytics = (medsCache && medsCache.length > 0) ? medsCache : undefined;
-        renderAnalyticsDashboard(_rptStats, _rptStreak, _medsForAnalytics);
+        renderAnalyticsDashboard(_rptStats, _rptStreak, _medsForAnalytics, preloadedHistory);
     }
 }
 
@@ -2535,8 +2545,10 @@ let _analyticsVitalsHistory = [];
  *     the duplicate GET /medications/today fetch is skipped — eliminating the
  *     race condition where a second fetch could return a different (stale) set
  *     and briefly show wrong medicines (Issue 4) with an incorrect count (Issue 3).
+ * @param {Array|undefined} preloadedTodayLogs - Already-fetched today's intake logs
+ *     array. When provided, the duplicate GET /logs/today/{id} fetch is skipped.
  */
-async function renderAnalyticsDashboard(preloadedStats, preloadedStreak, preloadedMeds) {
+async function renderAnalyticsDashboard(preloadedStats, preloadedStreak, preloadedMeds, preloadedTodayLogs) {
     if (!currentUser) return;
     const uid = currentUser.id;
 
@@ -2550,6 +2562,7 @@ async function renderAnalyticsDashboard(preloadedStats, preloadedStreak, preload
     //     medicine just deleted still in flight), causing a flash of wrong data
     //     before the UI settles.
     const needMeds = preloadedMeds === undefined;
+    const needTodayLogs = preloadedTodayLogs === undefined;
 
     // Issue #10 fix: Caregivers see medicine data for their linked patient,
     // not for their own account.  Apply the same URL logic that renderDashboard()
@@ -2563,9 +2576,9 @@ async function renderAnalyticsDashboard(preloadedStats, preloadedStreak, preload
     // overwrites.  For the remaining four endpoints fire them in parallel as before.
     const parallelFetches = [
         needMeds ? authFetch(_analyticsMedsUrl) : Promise.resolve(null),
-        authFetch(`${API_BASE}/logs/today/${uid}`),
-        authFetch(`${API_BASE}/bmi/recent/${uid}?limit=100`),
-        authFetch(`${API_BASE}/vitals/recent/${uid}?limit=100`)
+        needTodayLogs ? fetchJsonCached(`${API_BASE}/logs/today/${uid}`, 10000).catch(() => null) : Promise.resolve(null),
+        fetchJsonCached(`${API_BASE}/bmi/recent/${uid}?limit=100`, 10000).catch(() => null),
+        fetchJsonCached(`${API_BASE}/vitals/recent/${uid}?limit=100`, 10000).catch(() => null)
     ];
 
     const [
@@ -2608,19 +2621,25 @@ async function renderAnalyticsDashboard(preloadedStats, preloadedStreak, preload
     // Helper: safely extract JSON from a settled fetch result
     async function settled(result, fallback) {
         try {
-            if (result.status !== "fulfilled") return fallback;
+            if (result.status !== "fulfilled" || !result.value) return fallback;
             const res = result.value;
-            if (!res.ok) return fallback;
-            return await res.json();
+            if (res && typeof res.json === "function") {
+                if (!res.ok) return fallback;
+                return await res.json();
+            }
+            return res !== null && res !== undefined ? res : fallback;
         } catch (e) {
             return fallback;
         }
     }
 
+    const rawBmi = await settled(bmiHistResult, []);
+    const rawVitals = await settled(vitalsHistResult, []);
+
     const meds       = preloadedMeds !== undefined ? preloadedMeds : await settled(medsResult, []);
-    const todayLogs  = await settled(todayLogsResult, []);
-    const bmiHistory = (await settled(bmiHistResult, [])).slice().reverse();
-    const vitalsHist = (await settled(vitalsHistResult, [])).slice().reverse();
+    const todayLogs  = preloadedTodayLogs !== undefined ? preloadedTodayLogs : await settled(todayLogsResult, []);
+    const bmiHistory = (Array.isArray(rawBmi) ? rawBmi : []).slice().reverse();
+    const vitalsHist = (Array.isArray(rawVitals) ? rawVitals : []).slice().reverse();
     _analyticsBmiHistory = bmiHistory;
     _analyticsVitalsHistory = vitalsHist;
 
