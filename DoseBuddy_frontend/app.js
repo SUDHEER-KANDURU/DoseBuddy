@@ -3322,12 +3322,26 @@ function adashInsightCard(insight) {
         danger:  "adash-ai-card-danger"
     }[insight.type] || "adash-ai-card-info";
 
+    let iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M12 18v-5.25m0 0a6.01 6.01 0 001.5-.189m-1.5.189a6.01 6.01 0 01-1.5-.189m3.75 7.478a12.06 12.06 0 01-4.5 0m3.75 2.383a14.406 14.406 0 01-3 0M14.25 18v-.192c0-.983.658-1.823 1.508-2.316a7.5 7.5 0 10-7.517 0c.85.493 1.509 1.333 1.509 2.316V18"/></svg>`;
+
+    if (insight.type === "success") {
+        iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`;
+    } else if (insight.type === "danger" || insight.type === "warning") {
+        iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>`;
+    } else if (insight.title && insight.title.toLowerCase().includes("medication")) {
+        iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/></svg>`;
+    } else if (insight.title && insight.title.toLowerCase().includes("vitals")) {
+        iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M3 12h2l2-7 3 14 3-10 2 3h6"/></svg>`;
+    } else if (insight.title && insight.title.toLowerCase().includes("bmi")) {
+        iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1M4.22 4.22l.707.707M18.364 18.364l.707.707M1 12h1m20 0h1M4.22 19.778l.707-.707M18.364 5.636l.707-.707"/></svg>`;
+    }
+
     return `
         <div class="adash-ai-card ${typeClass}">
-            <div class="adash-ai-card-icon">${insight.icon || "💡"}</div>
+            <div class="adash-ai-card-icon">${iconSvg}</div>
             <div class="adash-ai-card-body">
-                <p class="adash-ai-card-title">${insight.title || "Insight"}</p>
-                <p class="adash-ai-card-text">${insight.message || ""}</p>
+                <p class="adash-ai-card-title">${escapeHtml(insight.title || "Insight")}</p>
+                <p class="adash-ai-card-text">${escapeHtml(insight.message || "")}</p>
             </div>
         </div>`;
 }
@@ -3342,38 +3356,38 @@ function adashGenerateFallbackInsights(stats, bmiHistory, vitalsHist, streak) {
 
     // Adherence insight
     if (adherence >= 90) {
-        insights.push({ title: "Excellent Adherence", message: `Your ${adherence}% adherence is outstanding. You're in the top tier of medication consistency.`, type: "success", icon: "🏆" });
+        insights.push({ title: "Excellent Adherence", message: `Your ${adherence}% adherence is outstanding. You are maintaining optimal medication consistency.`, type: "success" });
     } else if (adherence >= 70) {
-        insights.push({ title: "Good Adherence", message: `${adherence}% adherence is good. Try to reach 90%+ for optimal treatment outcomes.`, type: "info", icon: "💊" });
+        insights.push({ title: "Good Adherence", message: `${adherence}% adherence is good. Aim for 90%+ for optimal treatment effectiveness.`, type: "info" });
     } else if (adherence > 0) {
-        insights.push({ title: "Low Adherence Alert", message: `Your adherence is ${adherence}%. Missing doses reduces treatment effectiveness. Set reminders to stay on track.`, type: "danger", icon: "⚠️" });
+        insights.push({ title: "Low Adherence Notice", message: `Your adherence is ${adherence}%. Missing doses reduces treatment effectiveness. Set reminders to stay on schedule.`, type: "danger" });
     } else {
-        insights.push({ title: "Start Tracking", message: "Mark your doses as taken each day to build your adherence score and unlock health insights.", type: "info", icon: "📋" });
+        insights.push({ title: "Start Tracking", message: "Mark your doses as taken each day to track adherence and receive personalized insights.", type: "info" });
     }
 
-    // Streak insight
-    if (curStreak >= 7) {
-        insights.push({ title: "Great Streak", message: `You're on a ${curStreak}-day consecutive streak! Consistency like this significantly improves health outcomes.`, type: "success", icon: "🔥" });
-    } else if (missed > 5) {
-        insights.push({ title: "Missed Dose Pattern", message: `You've missed ${missed} doses. Consider morning alarms or pill organizers to build a consistent routine.`, type: "warning", icon: "⏰" });
+    // Consistency insight
+    if (missed > 5) {
+        insights.push({ title: "Missed Dose Pattern", message: `You have missed ${missed} doses recently. Consider scheduled alarms to maintain a consistent routine.`, type: "warning" });
+    } else if (curStreak >= 7) {
+        insights.push({ title: "Consistent Adherence", message: `You have completed ${curStreak} consecutive days on schedule. Consistency significantly supports treatment outcomes.`, type: "success" });
     } else {
-        insights.push({ title: "Building Consistency", message: "Keep taking doses daily to build your streak. Even a 7-day streak shows meaningful habit formation.", type: "info", icon: "📈" });
+        insights.push({ title: "Dose Schedule", message: "Log doses daily to build a comprehensive adherence history for your health review.", type: "info" });
     }
 
     // BMI insight
     if (latestBmi) {
         const bmiVal = latestBmi.bmiValue || 0;
         if (bmiVal >= 18.5 && bmiVal < 25) {
-            insights.push({ title: "Healthy BMI", message: `Your BMI of ${bmiVal.toFixed(1)} is in the normal range. Maintain your current lifestyle with balanced diet and exercise.`, type: "success", icon: "❤️" });
+            insights.push({ title: "Healthy BMI", message: `Your BMI of ${bmiVal.toFixed(1)} is in the normal range. Continue maintaining balanced nutrition and regular activity.`, type: "success" });
         } else if (bmiVal >= 25 && bmiVal < 30) {
-            insights.push({ title: "BMI Observation", message: `Your BMI is ${bmiVal.toFixed(1)} (Overweight). Moderate exercise and a balanced diet can help bring it to the normal range.`, type: "warning", icon: "📊" });
+            insights.push({ title: "BMI Observation", message: `Your BMI is ${bmiVal.toFixed(1)} (Overweight). Balanced nutrition and regular activity can help manage weight.`, type: "warning" });
         } else if (bmiVal >= 30) {
-            insights.push({ title: "BMI Alert", message: `Your BMI of ${bmiVal.toFixed(1)} is in the obese range. Consult a healthcare provider for a personalized weight management plan.`, type: "danger", icon: "🩺" });
+            insights.push({ title: "BMI Medical Notice", message: `Your BMI of ${bmiVal.toFixed(1)} is in the obese range. Consult a healthcare provider for personalized guidance.`, type: "danger" });
         } else {
-            insights.push({ title: "Low BMI Note", message: `Your BMI is ${bmiVal.toFixed(1)} (Underweight). Ensure adequate nutrition and consult a doctor if needed.`, type: "warning", icon: "💪" });
+            insights.push({ title: "Low BMI Notice", message: `Your BMI is ${bmiVal.toFixed(1)} (Underweight). Ensure adequate nutrition and consult your doctor if needed.`, type: "warning" });
         }
     } else {
-        insights.push({ title: "Track Your BMI", message: "Use the BMI Calculator to start monitoring your body mass index over time for better health insights.", type: "info", icon: "⚖️" });
+        insights.push({ title: "Track Your BMI", message: "Use the BMI Calculator to record body mass index over time for comprehensive health insights.", type: "info" });
     }
 
     // Vitals insight
@@ -3381,14 +3395,14 @@ function adashGenerateFallbackInsights(stats, bmiHistory, vitalsHist, streak) {
         const hrOk = latestV.heartRate && latestV.heartRate >= 60 && latestV.heartRate <= 100;
         const bpOk = latestV.bpSystolic && latestV.bpSystolic <= 130;
         if (hrOk && bpOk) {
-            insights.push({ title: "Vitals Look Good", message: "Your recent heart rate and blood pressure readings are within normal ranges. Keep monitoring regularly.", type: "success", icon: "🫀" });
+            insights.push({ title: "Vitals Within Range", message: "Your recent heart rate and blood pressure readings are within normal ranges. Continue regular logging.", type: "success" });
         } else if (latestV.bpSystolic && latestV.bpSystolic > 140) {
-            insights.push({ title: "Blood Pressure Elevated", message: `Your blood pressure reading of ${latestV.bpSystolic}/${latestV.bpDiastolic} mmHg is elevated. Consider consulting your doctor.`, type: "danger", icon: "🩸" });
+            insights.push({ title: "Elevated Blood Pressure", message: `Your blood pressure reading of ${latestV.bpSystolic}/${latestV.bpDiastolic} mmHg is elevated. Consider consulting your doctor.`, type: "danger" });
         } else {
-            insights.push({ title: "Monitor Vitals", message: "Keep logging your vitals regularly. Consistent tracking helps detect trends early.", type: "info", icon: "📉" });
+            insights.push({ title: "Monitor Vitals", message: "Keep logging your vitals regularly. Consistent tracking helps detect trends early.", type: "info" });
         }
     } else {
-        insights.push({ title: "Start Logging Vitals", message: "Track blood pressure, heart rate, and blood sugar to get personalized health trend insights.", type: "info", icon: "🩺" });
+        insights.push({ title: "Log Vitals", message: "Track blood pressure, heart rate, and blood sugar to receive personalized health trend analysis.", type: "info" });
     }
 
     return insights.slice(0, 4);
@@ -4374,8 +4388,8 @@ function displayBmiResult(data) {
     const categoryInfo = getBmiCategoryInfo(category);
 
     statusBadge.className = "bmi-status-badge " + categoryInfo.className;
-    statusIcon.textContent = categoryInfo.icon;
-    statusText.textContent = categoryInfo.label;
+    if (statusIcon) statusIcon.innerHTML = categoryInfo.iconSvg;
+    if (statusText) statusText.textContent = categoryInfo.label;
 }
 
 function displayBmiResultView(data) {
@@ -4394,8 +4408,8 @@ function displayBmiResultView(data) {
     const categoryInfo = getBmiCategoryInfo(category);
 
     statusBadge.className = "bmi-status-badge " + categoryInfo.className;
-    statusIcon.textContent = categoryInfo.icon;
-    statusText.textContent = categoryInfo.label;
+    if (statusIcon) statusIcon.innerHTML = categoryInfo.iconSvg;
+    if (statusText) statusText.textContent = categoryInfo.label;
 }
 
 function displayHealthInsights(data) {
@@ -4439,7 +4453,7 @@ function displayHealthInsightsView(data) {
         insightsHTML += '<h4 class="insight-section-title">Health Suggestions</h4>';
         insightsHTML += '<ul class="insight-list">';
         data.healthSuggestions.forEach(suggestion => {
-            insightsHTML += `<li>${suggestion}</li>`;
+            insightsHTML += `<li>${escapeHtml(suggestion)}</li>`;
         });
         insightsHTML += '</ul></div>';
     }
@@ -4449,7 +4463,7 @@ function displayHealthInsightsView(data) {
         insightsHTML += '<h4 class="insight-section-title">Diet Recommendations</h4>';
         insightsHTML += '<ul class="insight-list">';
         data.dietRecommendations.forEach(recommendation => {
-            insightsHTML += `<li>${recommendation}</li>`;
+            insightsHTML += `<li>${escapeHtml(recommendation)}</li>`;
         });
         insightsHTML += '</ul></div>';
     }
@@ -4469,23 +4483,23 @@ function determineBmiCategory(bmi) {
 function getBmiCategoryInfo(category) {
     const categories = {
         "UNDERWEIGHT": {
-            label: "Below Healthy Weight",
-            icon: "⚠️",
+            label: "Underweight (< 18.5)",
+            iconSvg: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="14" height="14" style="display:inline-block;vertical-align:middle;margin-right:4px;"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>`,
             className: "status-underweight"
         },
         "NORMAL": {
-            label: "Healthy Weight",
-            icon: "✔",
+            label: "Healthy Weight (18.5 – 24.9)",
+            iconSvg: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="14" height="14" style="display:inline-block;vertical-align:middle;margin-right:4px;"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`,
             className: "status-normal"
         },
         "OVERWEIGHT": {
-            label: "Above Healthy Weight",
-            icon: "⚡",
+            label: "Overweight (25 – 29.9)",
+            iconSvg: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="14" height="14" style="display:inline-block;vertical-align:middle;margin-right:4px;"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>`,
             className: "status-overweight"
         },
         "OBESE": {
-            label: "Obesity Range",
-            icon: "🔴",
+            label: "Obese (≥ 30)",
+            iconSvg: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="14" height="14" style="display:inline-block;vertical-align:middle;margin-right:4px;"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>`,
             className: "status-obese"
         }
     };
@@ -6551,14 +6565,14 @@ function checkVitalsAlerts(d) {
     if (!banner || !text) return;
 
     const alerts = [];
-    if (d.bpStatus === "HIGH_STAGE2") alerts.push("⚠️ Blood pressure is critically high — consult a doctor.");
-    else if (d.bpStatus === "HIGH_STAGE1") alerts.push("⚠️ Blood pressure is elevated.");
-    if (d.bpStatus === "LOW") alerts.push("⚠️ Blood pressure is low.");
-    if (d.sugarStatus === "HIGH") alerts.push("⚠️ Blood sugar is high.");
-    if (d.sugarStatus === "LOW")  alerts.push("⚠️ Blood sugar is low — risk of hypoglycemia.");
-    if (d.tempStatus === "FEVER") alerts.push("🌡️ Fever detected — temperature above 38.5°C.");
-    if (d.heartRateStatus === "HIGH") alerts.push("💓 Heart rate is elevated.");
-    if (d.heartRateStatus === "LOW")  alerts.push("💓 Heart rate is low (bradycardia).");
+    if (d.bpStatus === "HIGH_STAGE2") alerts.push("Blood pressure is critically high — consult a doctor.");
+    else if (d.bpStatus === "HIGH_STAGE1") alerts.push("Blood pressure is elevated.");
+    if (d.bpStatus === "LOW") alerts.push("Blood pressure is low.");
+    if (d.sugarStatus === "HIGH") alerts.push("Blood sugar is high.");
+    if (d.sugarStatus === "LOW")  alerts.push("Blood sugar is low — risk of hypoglycemia.");
+    if (d.tempStatus === "FEVER") alerts.push("Fever detected — temperature above 38.5°C.");
+    if (d.heartRateStatus === "HIGH") alerts.push("Heart rate is elevated.");
+    if (d.heartRateStatus === "LOW")  alerts.push("Heart rate is low (bradycardia).");
 
     if (alerts.length > 0) {
         text.textContent = alerts.join("  |  ");
@@ -6786,20 +6800,26 @@ function renderVitalsInsights(records) {
     if (!container) return;
 
     if (!records || records.length === 0) {
-        container.innerHTML = '<p class="empty-state"><span class="empty-icon">💡</span> Log vitals to see personalized health insights.</p>';
+        container.innerHTML = `<div class="empty-state" style="padding: 1.5rem; text-align: center; color: var(--text-muted);">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-bottom: 0.5rem; display: block; margin-left: auto; margin-right: auto; opacity: 0.7;"><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41M12 6a6 6 0 0 0-6 6c0 2.22 1.21 4.16 3 5.2V19a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1v-1.8c1.79-1.04 3-2.98 3-5.2a6 6 0 0 0-6-6z"/></svg>
+            <p style="margin: 0; font-size: 0.875rem;">Log vitals to see personalized health insights.</p>
+        </div>`;
         return;
     }
 
     const insights = generateVitalsInsights(records);
     if (insights.length === 0) {
-        container.innerHTML = '<p class="empty-state"><span class="empty-icon">✅</span> All vitals look normal. Keep it up!</p>';
+        container.innerHTML = `<div class="empty-state" style="padding: 1.5rem; text-align: center; color: var(--text-muted);">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-bottom: 0.5rem; display: block; margin-left: auto; margin-right: auto; opacity: 0.7;"><polyline points="20 6 9 17 4 12"/></svg>
+            <p style="margin: 0; font-size: 0.875rem;">All vitals look normal. Keep it up!</p>
+        </div>`;
         return;
     }
 
     container.innerHTML = insights.map(i =>
         `<div class="vitals-insight-item insight-${i.type}">
-            <span class="vitals-insight-icon">${i.icon}</span>
-            <span class="vitals-insight-text">${i.text}</span>
+            <span class="vitals-insight-icon">${i.iconSvg || '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>'}</span>
+            <span class="vitals-insight-text">${escapeHtml(i.text)}</span>
         </div>`
     ).join("");
 }
@@ -6808,18 +6828,27 @@ function generateVitalsInsights(records) {
     const insights = [];
     const recent7 = records.slice(0, Math.min(records.length, 7));
 
+    const alertSvg = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+    const trendUpSvg = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>';
+    const trendDownSvg = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/><polyline points="17 18 23 18 23 12"/></svg>';
+    const checkSvg = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>';
+    const scaleSvg = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18M3 7l9-4 9 4M6 10l-3 6h6l-3-6zM18 10l-3 6h6l-3-6z"/></svg>';
+    const heartSvg = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>';
+    const tempSvg = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/></svg>';
+    const sugarSvg = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>';
+
     const bpRecords = recent7.filter(r => r.bpSystolic != null && r.bpDiastolic != null);
     if (bpRecords.length > 0) {
         const avgSys = bpRecords.reduce((s, r) => s + r.bpSystolic, 0) / bpRecords.length;
         const avgDia = bpRecords.reduce((s, r) => s + r.bpDiastolic, 0) / bpRecords.length;
         if (avgSys >= 140 || avgDia >= 90) {
-            insights.push({ type: "alert", icon: "⚠️", text: `Blood pressure has been consistently high this week (avg ${Math.round(avgSys)}/${Math.round(avgDia)} mmHg). Consider consulting a doctor.` });
+            insights.push({ type: "alert", iconSvg: alertSvg, text: `Blood pressure has been consistently high this week (avg ${Math.round(avgSys)}/${Math.round(avgDia)} mmHg). Consider consulting a doctor.` });
         } else if (avgSys >= 130) {
-            insights.push({ type: "warning", icon: "📈", text: `BP slightly elevated this week (avg ${Math.round(avgSys)}/${Math.round(avgDia)} mmHg). Monitor closely.` });
+            insights.push({ type: "warning", iconSvg: trendUpSvg, text: `BP slightly elevated this week (avg ${Math.round(avgSys)}/${Math.round(avgDia)} mmHg). Monitor closely.` });
         } else if (avgSys < 90) {
-            insights.push({ type: "warning", icon: "📉", text: `Blood pressure appears low this week. Stay hydrated and consult a doctor if symptoms persist.` });
+            insights.push({ type: "warning", iconSvg: trendDownSvg, text: `Blood pressure appears low this week. Stay hydrated and consult a doctor if symptoms persist.` });
         } else {
-            insights.push({ type: "good", icon: "✅", text: `Blood pressure is within normal range this week (avg ${Math.round(avgSys)}/${Math.round(avgDia)} mmHg).` });
+            insights.push({ type: "good", iconSvg: checkSvg, text: `Blood pressure is within normal range this week (avg ${Math.round(avgSys)}/${Math.round(avgDia)} mmHg).` });
         }
     }
 
@@ -6830,13 +6859,13 @@ function generateVitalsInsights(records) {
         const minSugar = Math.min(...sugarRecords.map(r => r.bloodSugar));
         const fluctuation = maxSugar - minSugar;
         if (avgSugar > 200) {
-            insights.push({ type: "alert", icon: "🩸", text: `Blood sugar is consistently high (avg ${Math.round(avgSugar)} mg/dL). Seek medical advice.` });
+            insights.push({ type: "alert", iconSvg: sugarSvg, text: `Blood sugar is consistently high (avg ${Math.round(avgSugar)} mg/dL). Seek medical advice.` });
         } else if (fluctuation > 80) {
-            insights.push({ type: "warning", icon: "📊", text: `Sugar levels fluctuating frequently (range: ${Math.round(minSugar)}–${Math.round(maxSugar)} mg/dL). Maintain consistent meal timing.` });
+            insights.push({ type: "warning", iconSvg: alertSvg, text: `Sugar levels fluctuating frequently (range: ${Math.round(minSugar)}–${Math.round(maxSugar)} mg/dL). Maintain consistent meal timing.` });
         } else if (avgSugar < 70) {
-            insights.push({ type: "alert", icon: "⚡", text: `Blood sugar is low on average (${Math.round(avgSugar)} mg/dL). Risk of hypoglycemia — consult your doctor.` });
+            insights.push({ type: "alert", iconSvg: alertSvg, text: `Blood sugar is low on average (${Math.round(avgSugar)} mg/dL). Risk of hypoglycemia — consult your doctor.` });
         } else {
-            insights.push({ type: "good", icon: "✅", text: `Blood sugar levels are stable this week (avg ${Math.round(avgSugar)} mg/dL).` });
+            insights.push({ type: "good", iconSvg: checkSvg, text: `Blood sugar levels are stable this week (avg ${Math.round(avgSugar)} mg/dL).` });
         }
     }
 
@@ -6846,11 +6875,11 @@ function generateVitalsInsights(records) {
         const last  = weightRecords[0].weight;
         const diff  = Math.abs(last - first);
         if (diff < 0.5) {
-            insights.push({ type: "info", icon: "⚖️", text: `Weight stable over last ${weightRecords.length} readings (${last} kg).` });
+            insights.push({ type: "info", iconSvg: scaleSvg, text: `Weight stable over last ${weightRecords.length} readings (${last} kg).` });
         } else if (last > first) {
-            insights.push({ type: "info", icon: "📈", text: `Weight increased by ${diff.toFixed(1)} kg over recent readings.` });
+            insights.push({ type: "info", iconSvg: trendUpSvg, text: `Weight increased by ${diff.toFixed(1)} kg over recent readings.` });
         } else {
-            insights.push({ type: "info", icon: "📉", text: `Weight decreased by ${diff.toFixed(1)} kg over recent readings.` });
+            insights.push({ type: "info", iconSvg: trendDownSvg, text: `Weight decreased by ${diff.toFixed(1)} kg over recent readings.` });
         }
     }
 
@@ -6858,9 +6887,9 @@ function generateVitalsInsights(records) {
     if (hrRecords.length > 0) {
         const avgHr = hrRecords.reduce((s, r) => s + r.heartRate, 0) / hrRecords.length;
         if (avgHr > 100) {
-            insights.push({ type: "warning", icon: "💓", text: `Heart rate elevated this week (avg ${Math.round(avgHr)} bpm). Consider reducing stress and caffeine.` });
+            insights.push({ type: "warning", iconSvg: heartSvg, text: `Heart rate elevated this week (avg ${Math.round(avgHr)} bpm). Consider reducing stress and caffeine.` });
         } else if (avgHr < 55) {
-            insights.push({ type: "info", icon: "💓", text: `Resting heart rate is low (avg ${Math.round(avgHr)} bpm). This may be normal for athletes.` });
+            insights.push({ type: "info", iconSvg: heartSvg, text: `Resting heart rate is low (avg ${Math.round(avgHr)} bpm). This may be normal for athletes.` });
         }
     }
 
@@ -6868,9 +6897,9 @@ function generateVitalsInsights(records) {
     if (tempRecords.length > 0) {
         const maxTemp = Math.max(...tempRecords.map(r => r.temperature));
         if (maxTemp > 38.5) {
-            insights.push({ type: "alert", icon: "🌡️", text: `Fever recorded (${maxTemp}°C). Rest, stay hydrated, and consult a doctor if it persists.` });
+            insights.push({ type: "alert", iconSvg: tempSvg, text: `Fever recorded (${maxTemp}°C). Rest, stay hydrated, and consult a doctor if it persists.` });
         } else if (maxTemp > 37.5) {
-            insights.push({ type: "warning", icon: "🌡️", text: `Slightly elevated temperature recorded (${maxTemp}°C). Monitor closely.` });
+            insights.push({ type: "warning", iconSvg: tempSvg, text: `Slightly elevated temperature recorded (${maxTemp}°C). Monitor closely.` });
         }
     }
 

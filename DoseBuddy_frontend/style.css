@@ -1050,31 +1050,37 @@ tr.due-now { animation: pulse-row 2s ease infinite; }
   transform: scale(1.05);
 }
 
-.bmi-status-badge.status-underweight {
-  background: rgba(0, 161, 155, 0.12);
-  color: #00A19B;
-  border: 1.5px solid rgba(0, 161, 155, 0.3);
+.bmi-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: var(--radius-full, 9999px);
+  font-size: 0.875rem;
+  font-weight: 600;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
 }
 
-.bmi-status-badge.status-normal {
-  background: rgba(34, 197, 94, 0.15);
-  color: #22c55e;
-  border: 1.5px solid rgba(34, 197, 94, 0.3);
-}
-
+.bmi-status-badge.status-underweight,
+.bmi-status-badge.status-normal,
 .bmi-status-badge.status-overweight {
-  background: rgba(245, 158, 11, 0.15);
-  color: #f59e0b;
-  border: 1.5px solid rgba(245, 158, 11, 0.3);
+  background: var(--surface);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
 }
 
 .bmi-status-badge.status-obese {
-  background: rgba(239, 68, 68, 0.15);
-  color: #ef4444;
-  border: 1.5px solid rgba(239, 68, 68, 0.3);
+  background: rgba(239, 68, 68, 0.08);
+  color: var(--danger, #ef4444);
+  border: 1px solid rgba(239, 68, 68, 0.3);
 }
 
 .bmi-status-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   font-size: 1.1rem;
 }
 
@@ -5177,16 +5183,38 @@ body.dark-mode .vitals-period-btn.active {
   gap: var(--space-3);
   padding: var(--space-3) var(--space-4);
   border-radius: var(--radius-md);
+  background: var(--surface);
+  border: 1px solid var(--border);
   font-size: 0.83rem;
   line-height: 1.5;
+  color: var(--text-primary);
 }
 
-.vitals-insight-item.insight-good    { background: var(--success-light); color: var(--success); }
-.vitals-insight-item.insight-warning { background: var(--warning-light); color: var(--warning); }
-.vitals-insight-item.insight-alert   { background: var(--danger-light);  color: var(--danger); }
-.vitals-insight-item.insight-info    { background: var(--primary-light); color: var(--primary); }
+.vitals-insight-item.insight-good,
+.vitals-insight-item.insight-warning,
+.vitals-insight-item.insight-info {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--text-primary);
+}
 
-.vitals-insight-icon { font-size: 1rem; flex-shrink: 0; margin-top: 1px; }
+.vitals-insight-item.insight-alert {
+  background: rgba(239, 68, 68, 0.05);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: var(--text-primary);
+}
+
+.vitals-insight-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--text-muted);
+}
+.vitals-insight-item.insight-alert .vitals-insight-icon {
+  color: var(--danger, #ef4444);
+}
 .vitals-insight-text { flex: 1; }
 
 .vitals-table {
@@ -6114,9 +6142,10 @@ body.dark-mode .adash-vp-btn.active { color: #000; }
 }
 
 .adash-ai-card {
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg, 12px);
   padding: var(--space-4);
-  border: 1px solid;
+  background: var(--surface);
+  border: 1px solid var(--border);
   position: relative;
   overflow: hidden;
   animation: adashFadeIn 0.4s ease;
@@ -6125,28 +6154,36 @@ body.dark-mode .adash-vp-btn.active { color: #000; }
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-.adash-ai-card::before {
-  content: '';
-  position: absolute; top: 0; left: 0; bottom: 0; width: 3px;
-  border-radius: var(--radius-md) 0 0 var(--radius-md);
+
+.adash-ai-card-good,
+.adash-ai-card-warning,
+.adash-ai-card-info,
+.adash-ai-card-purple,
+.adash-ai-card-indigo,
+.adash-ai-card-success {
+  background: var(--surface);
+  border-color: var(--border);
 }
 
-.adash-ai-card-good     { background: var(--success-light);  border-color: rgba(45,164,78,0.25); }
-.adash-ai-card-good::before { background: var(--success); }
-.adash-ai-card-warning  { background: var(--warning-light); border-color: rgba(217,119,6,0.25); }
-.adash-ai-card-warning::before { background: var(--warning); }
-.adash-ai-card-alert    { background: var(--danger-light);  border-color: rgba(220,38,38,0.25); }
-.adash-ai-card-alert::before { background: var(--danger); }
-.adash-ai-card-info     { background: var(--primary-light); border-color: rgba(0,161,155,0.25); }
-.adash-ai-card-info::before { background: var(--primary); }
-.adash-ai-card-purple   { background: var(--purple-light);  border-color: rgba(124,58,237,0.25); }
-.adash-ai-card-purple::before { background: var(--purple); }
-.adash-ai-card-indigo   { background: rgba(99,102,241,0.1); border-color: rgba(99,102,241,0.25); }
-.adash-ai-card-indigo::before { background: #6366f1; }
+.adash-ai-card-alert,
+.adash-ai-card-danger {
+  background: rgba(239, 68, 68, 0.05);
+  border-color: rgba(239, 68, 68, 0.25);
+}
 
-.adash-ai-card-icon { font-size: 1.4rem; margin-bottom: var(--space-2); display: block; }
+.adash-ai-card-icon {
+  margin-bottom: var(--space-2);
+  display: flex;
+  align-items: center;
+  color: var(--text-muted);
+}
+.adash-ai-card-alert .adash-ai-card-icon,
+.adash-ai-card-danger .adash-ai-card-icon {
+  color: var(--danger, #ef4444);
+}
+
 .adash-ai-card-title {
-  font-size: 0.78rem; font-weight: 700; margin-bottom: 5px;
+  font-size: 0.8125rem; font-weight: 600; margin-bottom: 5px;
   color: var(--text-primary);
 }
 .adash-ai-card-text { font-size: 0.75rem; color: var(--text-secondary); line-height: 1.55; }
@@ -6167,12 +6204,6 @@ body.dark-mode .adash-vp-btn.active { color: #000; }
   animation: adashSpin 0.7s linear infinite;
 }
 
-/* ── AI card type aliases (success = good, danger = alert) ───────────── */
-.adash-ai-card-success  { background: var(--success-light);  border-color: rgba(45,164,78,0.25); }
-.adash-ai-card-success::before { background: var(--success); }
-.adash-ai-card-danger   { background: var(--danger-light);   border-color: rgba(220,38,38,0.25); }
-.adash-ai-card-danger::before  { background: var(--danger); }
-
 /* ── BMI category pill active — generic highlight ────────────────────── */
 .adash-bmi-cat-pill.adash-bmi-cat-active {
   background: var(--primary-light); color: var(--primary);
@@ -6185,14 +6216,9 @@ body.dark-mode .adash-circ-bg              { stroke: #2a2a2a; }
 body.dark-mode .adash-score-bar-track      { background: #1a1a1a; }
 body.dark-mode .adash-dl-total             { border-top-color: #2a2a2a; }
 body.dark-mode .adash-bmi-cat-pill         { background: #1a1a1a; border-color: #2a2a2a; }
-body.dark-mode .adash-ai-card-success { background: rgba(74,222,128,0.08);  border-color: rgba(74,222,128,0.15); }
-body.dark-mode .adash-ai-card-danger  { background: rgba(248,113,113,0.08); border-color: rgba(248,113,113,0.15); }
-body.dark-mode .adash-ai-card-good    { background: rgba(74,222,128,0.08);  border-color: rgba(74,222,128,0.15); }
-body.dark-mode .adash-ai-card-warning { background: rgba(251,191,36,0.08);  border-color: rgba(251,191,36,0.15); }
-body.dark-mode .adash-ai-card-alert   { background: rgba(248,113,113,0.08); border-color: rgba(248,113,113,0.15); }
-body.dark-mode .adash-ai-card-info    { background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.08); }
-body.dark-mode .adash-ai-card-purple  { background: rgba(192,132,252,0.08); border-color: rgba(192,132,252,0.15); }
-body.dark-mode .adash-ai-card-indigo  { background: rgba(99,102,241,0.08);  border-color: rgba(99,102,241,0.15); }
+body.dark-mode .adash-ai-card              { background: #111; border-color: #222; }
+body.dark-mode .adash-ai-card-alert,
+body.dark-mode .adash-ai-card-danger       { background: rgba(239,68,68,0.08); border-color: rgba(239,68,68,0.25); }
 body.dark-mode .adash-ai-refresh-btn  { background: #111; border-color: #2a2a2a; }
 body.dark-mode .adash-vitals-period-tabs { background: #0a0a0a; border-color: #2a2a2a; }
 
@@ -6358,11 +6384,11 @@ body.dark-mode .notif-perm-default  { color: #fbbf24; }
 .bmi-result-display { display: flex; flex-direction: column; align-items: center; gap: 4px; margin-bottom: 0.75rem; }
 .bmi-result-label { font-size: 0.8125rem; color: var(--text-muted, #6b7280); text-transform: uppercase; letter-spacing: 0.05em; }
 .bmi-result-value { font-size: 2.5rem; font-weight: 700; color: var(--text-primary, #111827); line-height: 1; }
-.bmi-status-badge { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: 20px; font-size: 0.875rem; font-weight: 600; }
-.status-normal    { background: #d1fae5; color: #065f46; }
-.status-underweight { background: #fef3c7; color: #92400e; }
-.status-overweight { background: #fed7aa; color: #9a3412; }
-.status-obese     { background: #fee2e2; color: #991b1b; }
+.bmi-status-badge { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: var(--radius-full, 20px); font-size: 0.875rem; font-weight: 600; background: var(--surface); border: 1px solid var(--border); color: var(--text-primary); }
+.status-normal,
+.status-underweight,
+.status-overweight { background: var(--surface); color: var(--text-primary); border: 1px solid var(--border); }
+.status-obese     { background: rgba(239, 68, 68, 0.08); color: var(--danger, #ef4444); border: 1px solid rgba(239, 68, 68, 0.3); }
 .health-insights-content { min-height: 120px; }
 .bmi-insights-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 2rem 1rem; gap: 0.5rem; text-align: center; }
 .health-insights-results { display: flex; flex-direction: column; gap: 1rem; }
@@ -6372,22 +6398,22 @@ body.dark-mode .notif-perm-default  { color: #fbbf24; }
 .insight-list li { font-size: 0.875rem; color: var(--text-secondary, #374151); line-height: 1.5; }
 .bmi-scale-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; }
 @media (max-width: 640px) { .bmi-scale-grid { grid-template-columns: repeat(2, 1fr); } }
-.bmi-scale-item { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 0.875rem 0.5rem; border-radius: 10px; text-align: center; }
+.bmi-scale-item { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 0.875rem 0.5rem; border-radius: var(--radius-md, 10px); background: var(--surface); border: 1px solid var(--border); text-align: center; }
 .bmi-scale-icon { font-size: 1.25rem; }
 .bmi-scale-range { font-size: 0.8125rem; font-weight: 700; color: var(--text-primary); }
 .bmi-scale-label { font-size: 0.75rem; color: var(--text-muted); }
-.bmi-scale-under  { background: #fef9c3; }
-.bmi-scale-normal { background: #d1fae5; }
-.bmi-scale-over   { background: #ffedd5; }
-.bmi-scale-obese  { background: #fee2e2; }
-body.dark-mode .bmi-scale-under  { background: rgba(234,179,8,0.15); }
-body.dark-mode .bmi-scale-normal { background: rgba(16,185,129,0.15); }
-body.dark-mode .bmi-scale-over   { background: rgba(234,88,12,0.15); }
-body.dark-mode .bmi-scale-obese  { background: rgba(220,38,38,0.15); }
-body.dark-mode .status-normal    { background: rgba(16,185,129,0.2); color: #6ee7b7; }
-body.dark-mode .status-underweight { background: rgba(234,179,8,0.2); color: #fcd34d; }
-body.dark-mode .status-overweight { background: rgba(234,88,12,0.2); color: #fb923c; }
-body.dark-mode .status-obese     { background: rgba(220,38,38,0.2); color: #f87171; }
+.bmi-scale-under,
+.bmi-scale-normal,
+.bmi-scale-over,
+.bmi-scale-obese { background: var(--surface); border: 1px solid var(--border); }
+body.dark-mode .bmi-scale-under,
+body.dark-mode .bmi-scale-normal,
+body.dark-mode .bmi-scale-over,
+body.dark-mode .bmi-scale-obese { background: var(--surface); border-color: var(--border); }
+body.dark-mode .status-normal,
+body.dark-mode .status-underweight,
+body.dark-mode .status-overweight { background: var(--surface); color: var(--text-primary); border-color: var(--border); }
+body.dark-mode .status-obese     { background: rgba(239, 68, 68, 0.1); color: #f87171; border-color: rgba(239, 68, 68, 0.3); }
 
 /* ═══════════════════════════════════════════════════════════════════════════
    PRESCRIPTION OCR REVIEW INTERFACE
