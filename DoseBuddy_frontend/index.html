@@ -6,8 +6,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="DoseBuddy – Your personal medicine reminder and health companion">
 
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%232563eb'/><path d='M10 16a6 6 0 0 1 6-6h0a6 6 0 0 1 6 6v0a6 6 0 0 1-6 6h0a6 6 0 0 1-6-6z' fill='none' stroke='white' stroke-width='2'/><line x1='16' y1='10' x2='16' y2='22' stroke='white' stroke-width='2'/></svg>">
-    <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%232563eb'/><path d='M10 16a6 6 0 0 1 6-6h0a6 6 0 0 1 6 6v0a6 6 0 0 1-6 6h0a6 6 0 0 1-6-6z' fill='none' stroke='white' stroke-width='2'/><line x1='16' y1='10' x2='16' y2='22' stroke='white' stroke-width='2'/></svg>">
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2300A19B'/%3E%3Cpath d='M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z' fill='none' stroke='white' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round' transform='matrix(0.85 0 0 0.85 2.4 2.4)'/%3E%3C/svg%3E">
+    <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2300A19B'/%3E%3Cpath d='M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z' fill='none' stroke='white' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round' transform='matrix(0.85 0 0 0.85 2.4 2.4)'/%3E%3C/svg%3E">
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -29,10 +29,12 @@
 <section id="auth-view" class="view active">
     <div class="auth-page">
         <div class="auth-brand">
-            <div class="auth-logo">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="28" height="28"><path stroke-linecap="round" stroke-linejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/></svg>
+            <div class="auth-brand-row">
+                <div class="auth-logo">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="22" height="22"><path stroke-linecap="round" stroke-linejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/></svg>
+                </div>
+                <h1 class="auth-brand-name">DoseBuddy</h1>
             </div>
-            <h1 class="auth-brand-name">DoseBuddy</h1>
             <p class="auth-tagline">Your personal medicine reminder &amp; health companion</p>
         </div>
 
@@ -216,7 +218,7 @@
                         <span class="field-error" id="su-email-error"></span>
                     </div>
 
-                    <div class="form-group">
+                    <div class="form-group" style="margin-bottom: 12px;">
                         <label for="su-password">Password <span class="req-star">*</span></label>
                         <div class="input-icon-wrap">
                             <svg class="input-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
@@ -225,10 +227,10 @@
                                 <svg class="pw-eye" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
                             </button>
                         </div>
-                        <div class="pw-strength-bar" id="su-pw-strength" style="display:none;">
+                        <div class="pw-strength-bar" id="su-pw-strength" style="display:none; margin-top: 6px;">
                             <div class="pw-strength-fill" id="su-pw-fill"></div>
                         </div>
-                        <span class="pw-strength-label" id="su-pw-label"></span>
+                        <span class="pw-strength-label" id="su-pw-label" style="font-size: 0.72rem; font-weight: 600; margin-top: 2px;"></span>
                         <span class="field-error" id="su-pw-error"></span>
                     </div>
 
@@ -253,40 +255,38 @@
                         Health Profile
                     </div>
 
-                    <div class="form-row-2col">
-                        <div class="form-group">
-                            <label for="su-phone">Phone Number</label>
-                            <div class="phone-input-wrap">
-                                <select id="su-phone-code" class="phone-code-select" aria-label="Country code">
-                                    <option value="+1">US +1</option>
-                                    <option value="+44">GB +44</option>
-                                    <option value="+91" selected>IN +91</option>
-                                    <option value="+61">AU +61</option>
-                                    <option value="+81">JP +81</option>
-                                    <option value="+49">DE +49</option>
-                                    <option value="+33">FR +33</option>
-                                    <option value="+86">CN +86</option>
-                                    <option value="+55">BR +55</option>
-                                    <option value="+27">ZA +27</option>
-                                    <option value="+971">AE +971</option>
-                                    <option value="+65">SG +65</option>
-                                    <option value="+60">MY +60</option>
-                                    <option value="+92">PK +92</option>
-                                    <option value="+880">BD +880</option>
-                                </select>
-                                <input type="tel" id="su-phone" placeholder="10-digit number" autocomplete="tel">
-                            </div>
-                            <span class="field-error" id="su-phone-error"></span>
+                    <div class="form-group">
+                        <label for="su-phone">Phone Number</label>
+                        <div class="phone-input-wrap">
+                            <select id="su-phone-code" class="phone-code-select" aria-label="Country code">
+                                <option value="+1">US +1</option>
+                                <option value="+44">GB +44</option>
+                                <option value="+91" selected>IN +91</option>
+                                <option value="+61">AU +61</option>
+                                <option value="+81">JP +81</option>
+                                <option value="+49">DE +49</option>
+                                <option value="+33">FR +33</option>
+                                <option value="+86">CN +86</option>
+                                <option value="+55">BR +55</option>
+                                <option value="+27">ZA +27</option>
+                                <option value="+971">AE +971</option>
+                                <option value="+65">SG +65</option>
+                                <option value="+60">MY +60</option>
+                                <option value="+92">PK +92</option>
+                                <option value="+880">BD +880</option>
+                            </select>
+                            <input type="tel" id="su-phone" placeholder="10-digit mobile number" autocomplete="tel">
                         </div>
+                        <span class="field-error" id="su-phone-error"></span>
+                    </div>
 
-                        <div class="form-group">
-                            <label for="su-dob">Date of Birth</label>
-                            <div class="input-icon-wrap">
-                                <svg class="input-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-                                <input type="date" id="su-dob" autocomplete="bday">
-                            </div>
-                            <span class="field-error" id="su-dob-error"></span>
+                    <div class="form-group">
+                        <label for="su-dob">Date of Birth</label>
+                        <div class="input-icon-wrap">
+                            <svg class="input-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                            <input type="date" id="su-dob" autocomplete="bday" placeholder="dd-mm-yyyy">
                         </div>
+                        <span class="field-error" id="su-dob-error"></span>
                     </div>
 
                     <div class="form-group">

@@ -1453,8 +1453,8 @@ function setupNav() {
 
     if (menuLogoutBtn) {
         menuLogoutBtn.addEventListener("click", () => {
-            doLogout();
             closeUserMenu();
+            openModal("modal-logout");
         });
     }
 }
