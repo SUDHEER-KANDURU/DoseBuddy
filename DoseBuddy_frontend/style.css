@@ -3580,6 +3580,15 @@ body.dark-mode .brand-logo-circle {
   position: relative;
   width: 100%;
   min-width: 0;
+  border-radius: var(--radius-md);
+  border: 1.5px solid var(--border);
+  overflow: visible;
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.intl-phone-group:focus-within {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(0, 161, 155, 0.12);
 }
 
 .intl-country-picker {
@@ -3590,13 +3599,13 @@ body.dark-mode .brand-logo-circle {
 .intl-picker-btn {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  height: 42px;
+  gap: 6px;
+  height: 44px;
   padding: 0 10px 0 12px;
   background: var(--bg);
-  border: 1px solid var(--border);
-  border-right: none;
-  border-radius: var(--radius-md) 0 0 var(--radius-md);
+  border: none;
+  border-right: 1.5px solid var(--border);
+  border-radius: 0;
   color: var(--text-primary);
   font-size: 0.82rem;
   font-weight: 500;
@@ -3605,6 +3614,7 @@ body.dark-mode .brand-logo-circle {
   transition: background var(--transition), border-color var(--transition);
   user-select: none;
   box-sizing: border-box;
+  flex-shrink: 0;
 }
 
 .intl-picker-btn:hover {
@@ -3649,26 +3659,23 @@ body.dark-mode .brand-logo-circle {
 .intl-phone-input {
   flex: 1;
   min-width: 0;
-  height: 42px;
+  height: 44px;
   padding: 0 12px;
   background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  border: none;
   color: var(--text-primary);
   font-size: 0.85rem;
   outline: none;
-  transition: border-color var(--transition), box-shadow var(--transition), background var(--transition);
+  transition: background var(--transition);
   box-sizing: border-box;
 }
 
 .intl-phone-input:focus {
-  border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(0, 161, 155, 0.12);
   background: var(--surface);
 }
 
 .intl-phone-group:focus-within .intl-picker-btn {
-  border-color: var(--primary);
+  border-right-color: var(--primary);
 }
 
 /* Dropdown Menu */
@@ -4686,12 +4693,22 @@ body.dark-mode .profile-avatar-role {
 
 #auth-view .input-icon-wrap input,
 #auth-view .phone-input-wrap input[type="tel"],
-#auth-view .phone-code-select,
-#auth-view .intl-phone-input,
-#auth-view .intl-picker-btn {
+#auth-view .phone-code-select {
   background: #E4DDD3 !important;
   border-color: #cfc8be !important;
   color: #1a1714 !important;
+}
+
+/* Phone group: border lives on the wrapper */
+#auth-view .intl-phone-group {
+  border-color: #cfc8be !important;
+}
+
+#auth-view .intl-phone-input,
+#auth-view .intl-picker-btn {
+  background: #E4DDD3 !important;
+  color: #1a1714 !important;
+  border-color: #cfc8be !important;
 }
 
 #auth-view .intl-picker-btn:hover {
@@ -4700,15 +4717,23 @@ body.dark-mode .profile-avatar-role {
 
 #auth-view .input-icon-wrap input:focus,
 #auth-view .phone-input-wrap input[type="tel"]:focus,
-#auth-view .phone-code-select:focus,
-#auth-view .intl-phone-input:focus {
+#auth-view .phone-code-select:focus {
   border-color: #00A19B !important;
   box-shadow: 0 0 0 3px rgba(0,161,155,0.1) !important;
   background: #f5f1ec !important;
 }
 
-#auth-view .intl-phone-group:focus-within .intl-picker-btn {
+#auth-view .intl-phone-group:focus-within {
   border-color: #00A19B !important;
+  box-shadow: 0 0 0 3px rgba(0,161,155,0.1) !important;
+}
+
+#auth-view .intl-phone-group:focus-within .intl-picker-btn {
+  background: #f5f1ec !important;
+}
+
+#auth-view .intl-phone-group:focus-within .intl-phone-input {
+  background: #f5f1ec !important;
 }
 
 #auth-view .intl-dropdown-menu {
