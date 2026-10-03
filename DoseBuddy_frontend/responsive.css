@@ -1261,42 +1261,54 @@ img, canvas, svg, video { max-width: 100%; }
 
   /* Footer: sticky at the bottom, slim horizontal layout */
   .modal-footer {
+    display: flex;
     flex-direction: row;
+    align-items: center;
     gap: 8px;
     padding: 10px 14px 14px;
     flex-shrink: 0;
     background: var(--surface);
     border-top: 1px solid var(--border);
     justify-content: stretch;
+    box-sizing: border-box;
+    width: 100%;
   }
 
   /* Save button: flex-grow takes more space, Cancel is narrower */
   .modal-btn-primary {
-    flex: 1;
+    flex: 1 1 0%;
+    width: auto;
+    min-width: 0;
     min-height: 42px;
     font-size: 0.82rem;
     text-align: center;
     justify-content: center;
     border-radius: var(--radius-full);
+    box-sizing: border-box;
   }
 
   .modal-btn-secondary {
     flex: 0 0 auto;
+    width: auto;
     min-width: 80px;
     min-height: 42px;
     font-size: 0.82rem;
     text-align: center;
     justify-content: center;
     border-radius: var(--radius-full);
+    box-sizing: border-box;
   }
 
   .modal-btn-danger {
-    flex: 1;
+    flex: 1 1 0%;
+    width: auto;
+    min-width: 0;
     min-height: 42px;
     font-size: 0.82rem;
     text-align: center;
     justify-content: center;
     border-radius: var(--radius-full);
+    box-sizing: border-box;
   }
 
   /* Legal modals share the same sheet behavior as generic modals on phones */
@@ -1373,7 +1385,8 @@ img, canvas, svg, video { max-width: 100%; }
   }
 
   .modal-btn-primary,
-  .modal-btn-secondary { min-height: 40px; font-size: 0.78rem; }
+  .modal-btn-secondary,
+  .modal-btn-danger { min-height: 40px; font-size: 0.78rem; box-sizing: border-box; }
 
   .profile-avatar-preview { width: 34px; height: 34px; font-size: 0.9rem; }
 

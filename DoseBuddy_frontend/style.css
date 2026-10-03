@@ -2702,6 +2702,8 @@ body.dark-mode .sidebar-theme-knob {
   border-top: 1px solid var(--border);
   flex-shrink: 0;
   background: var(--surface);
+  box-sizing: border-box;
+  width: 100%;
 }
 
 .modal-footer-single { justify-content: flex-end; }
@@ -2712,6 +2714,9 @@ body.dark-mode .sidebar-theme-knob {
   border: none; border-radius: var(--radius-full);
   font-size: 0.82rem; font-weight: 600; cursor: pointer;
   transition: background var(--transition), transform var(--transition), box-shadow var(--transition);
+  display: inline-flex; align-items: center; justify-content: center;
+  box-sizing: border-box;
+  white-space: nowrap;
 }
 
 .modal-btn-primary:hover {
@@ -2726,6 +2731,9 @@ body.dark-mode .sidebar-theme-knob {
   border: 1px solid var(--border); border-radius: var(--radius-full);
   font-size: 0.82rem; font-weight: 500; cursor: pointer;
   transition: background var(--transition), color var(--transition);
+  display: inline-flex; align-items: center; justify-content: center;
+  box-sizing: border-box;
+  white-space: nowrap;
 }
 
 .modal-btn-secondary:hover { background: var(--border-light); color: var(--text-primary); }
@@ -2736,6 +2744,9 @@ body.dark-mode .sidebar-theme-knob {
   border: none; border-radius: var(--radius-full);
   font-size: 0.82rem; font-weight: 600; cursor: pointer;
   transition: background var(--transition), transform var(--transition);
+  display: inline-flex; align-items: center; justify-content: center;
+  box-sizing: border-box;
+  white-space: nowrap;
 }
 
 .modal-btn-danger:hover { background: #dc2626; transform: translateY(-1px); }
@@ -2974,10 +2985,46 @@ body.dark-mode .toggle-switch.active { background: var(--primary); }
   .profile-dropdown { right: 8px; width: calc(100vw - 16px); max-width: 320px; }
   .modal-form-grid  { grid-template-columns: 1fr; }
   .modal-box        { max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 32px); }
-  .modal-footer     { flex-direction: column-reverse; gap: var(--space-2); }
-  .modal-btn-primary,
-  .modal-btn-secondary,
-  .modal-btn-danger { width: 100%; justify-content: center; }
+  .modal-footer     {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px 14px;
+    box-sizing: border-box;
+    width: 100%;
+    justify-content: stretch;
+  }
+  .modal-btn-primary {
+    flex: 1 1 0%;
+    width: auto;
+    min-width: 0;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+  }
+  .modal-btn-secondary {
+    flex: 0 0 auto;
+    width: auto;
+    min-width: 80px;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+  }
+  .modal-btn-danger {
+    flex: 1 1 0%;
+    width: auto;
+    min-width: 0;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+  }
 }
 
 .notif-panel {
