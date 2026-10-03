@@ -5201,8 +5201,10 @@ function setupPrescriptionUpload() {
             const medicines = responseData.medicines || (Array.isArray(responseData) ? responseData : []);
 
             if (!Array.isArray(medicines) || medicines.length === 0) {
-                infoEl.style.color = "#b45309";
-                infoEl.textContent = "No medicines could be detected with certainty. Please ensure the prescription is clear and try again, or enter medicines manually.";
+                const failMsg = responseData.message || "Unable to reliably extract medicines from this prescription. Please verify the image or upload a clearer photo.";
+                errorEl.textContent = failMsg;
+                infoEl.textContent = "";
+                showToast(failMsg, "warning");
                 return;
             }
 

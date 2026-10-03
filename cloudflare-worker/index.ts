@@ -334,46 +334,51 @@ function bufferToBase64(buffer: ArrayBuffer): string {
   return btoa(binary);
 }
 
-const PRESCRIPTION_PROMPT = `You are an expert Clinical Pharmacist and Medical Prescription Document Parser specializing in real-world hospital and clinic prescriptions (including Indian hospital systems like Apollo Hospitals, Fortis, Max, AIIMS, and private clinic handwritten/printed prescriptions).
+const PRESCRIPTION_PROMPT = `You are an expert Clinical Pharmacist and Medical Prescription Document Parser specializing in real-world clinic and hospital prescriptions (including printed EHR summaries and handwritten doctor prescriptions).
 
 CRITICAL EXTRACTION & ORIENTATION & ZERO-HALLUCINATION RULES:
 1. AUTOMATIC ORIENTATION DETECTION:
-   - The prescription image may be uploaded in ANY orientation (0° upright, 90° clockwise, 180° upside down, 270° counter-clockwise, or photographed at an angle/tilted).
-   - Detect the natural reading orientation of the medical text and headers first.
-   - Read and extract all prescription contents in their correct natural reading direction regardless of image angle.
-2. ZERO HALLUCINATION POLICY: Extract ONLY medications and instructions physically visible in the prescription. NEVER invent a drug name, guess unreadable characters, or invent dosages/schedules not stated in the document.
-3. If any field (name, strength, schedule, duration, food relation) is smudged, illegible, ambiguous, or missing:
-   - Provide your best reading or leave blank/null.
-   - Assign a realistic confidence score (e.g., 0.30 to 0.65).
-   - Set "needsVerification": true and list "possibleAlternatives" if applicable.
-4. TABLE STRUCTURE & COLUMN ALIGNMENT:
-   - Prescriptions frequently use tabular matrices: [Medicine & Formula] | [Morning] | [Afternoon] | [Evening] | [Night] | [Instructions].
-   - Column values:
-     * "1", "0.5", "2", "✓" = quantity taken in that time slot.
-     * "-", "–", "0", or empty = NOT taken (0).
-   - Cross-verify column ticks/numbers with row text (e.g. "(Morning & Night)", "(Morning)", "(Morning, Afternoon & Night)", "Before meal", "After meal", "Before Breakfast").
-5. ENTITY DISSECTION:
-   - "brandName": Clean trade/brand name (e.g. "ESOMAC", "ACOGUT ER", "PANLIPASE", "MENOCTYL"). Strip pack quantities like "15'S", "10'S", "TAB", "CAP".
-   - "genericName": Active pharmacological ingredient if visible in parentheses or subtitle (e.g. "ESOMEPRAZOLE", "ACOTIAMIDE", "PANCREATIN", "OTILONIUM BROMIDE").
-   - "strength": Exact dosage strength with unit (e.g. "40 mg", "300 mg ER", "150 mg").
+   - The prescription image(s) may be uploaded in ANY orientation (0° upright, 90° clockwise, 180° upside down, 270° counter-clockwise, or photographed at an angle/tilted).
+   - First detect the natural reading orientation of the medical text, hospital headers, and handwriting for each page independently.
+   - Read all text in its true reading direction regardless of image rotation.
+
+2. MULTI-PAGE & UNIFIED EXTRACTION:
+   - All uploaded images/pages belong to ONE prescription.
+   - Read across all pages and consolidate every distinct medication into a single unified list.
+   - If the same medication is referenced or repeated on multiple pages, consolidate its details into ONE single entry.
+
+3. ZERO HALLUCINATION POLICY:
+   - Extract ONLY medications and instructions physically visible in the document.
+   - NEVER invent a medicine name, fabricate unreadable letters, or assume schedules not stated.
+   - If a field (e.g. food timing, duration, frequency) is not visible, leave it blank or default without dropping the medicine.
+
+4. TABLE & TIMING DISSECTION:
+   - Table columns like [Medicine] | [Morning] | [Afternoon] | [Evening] | [Night] | [Instructions]:
+     * Numbers ("1", "0.5", "2", "✓") indicate taking the dose at that slot.
+     * "-", "–", "0", or empty indicates NOT taken.
+   - Map timing slots to standard times:
+     * Morning = 08:00
+     * Afternoon = 13:00 / 14:00
+     * Evening = 18:00
+     * Night = 21:00
+
+5. FIELD NORMALIZATION:
+   - "brandName": Clean trade/brand name (e.g. "ESOMAC", "ACOGUT ER", "PANLIPASE", "MENOCTYL"). Strip pack suffixes like "15'S", "10'S", "TAB", "CAP".
+   - "genericName": Active pharmacological ingredient if visible in parentheses or subtitle (e.g. "ESOMEPRAZOLE", "ACOTIAMIDE", "PANCREATIN").
+   - "strength": Exact strength with units (e.g. "40 mg", "300 mg ER", "500 mg", "5 ml").
    - "form": "Tablet", "Capsule", "Syrup", "Suspension", "Injection", "Drops", "Ointment", "Other".
    - "dosage": Per-intake quantity and form (e.g. "1 Tablet", "1 Capsule", "5 ml").
-   - "morning": number (0, 1, 2, etc.)
-   - "afternoon": number (0, 1, 2, etc.)
-   - "evening": number (0, 1, 2, etc.)
-   - "night": number (0, 1, 2, etc.)
-   - "foodInstruction": Specific meal relation (e.g. "Before meal", "After meal", "Before Breakfast", "Before Lunch", "Before Dinner", "With food", "Empty stomach", "As directed").
-   - "startDate": Prescription/medication start date if visible (e.g. "2026-08-21" or "21-Aug-2026").
-   - "duration": Raw duration string (e.g. "2 Month(s)", "5 Days", "2 Weeks").
-   - "durationDays": Total estimated integer days (e.g. 60, 5, 14).
-   - "confidence": Float 0.0 to 1.0 (overall confidence).
-   - "nameConfidence": Float 0.0 to 1.0.
-   - "strengthConfidence": Float 0.0 to 1.0.
-   - "scheduleConfidence": Float 0.0 to 1.0.
-   - "durationConfidence": Float 0.0 to 1.0.
-   - "needsVerification": boolean (true if any confidence < 0.85 or text is ambiguous).
-   - "possibleAlternatives": Array of string candidates if name is ambiguous.
-   - "sourceText": Exact raw text row/snippet from prescription.
+   - "morning": number (0, 1, 2)
+   - "afternoon": number (0, 1, 2)
+   - "evening": number (0, 1, 2)
+   - "night": number (0, 1, 2)
+   - "foodInstruction": Food relation (e.g. "Before meal", "After meal", "Before Breakfast", "With food", "Empty stomach", "As directed").
+   - "duration": Duration string (e.g. "5 Days", "2 Month(s)", "3 Weeks").
+   - "durationDays": Integer duration in days (e.g. 5, 60, 21).
+   - "confidence": Overall extraction confidence (0.0 to 1.0).
+   - "needsVerification": boolean (true if overall confidence < 0.85 or text is ambiguous).
+   - "possibleAlternatives": array of possible alternate drug names if handwriting is ambiguous.
+   - "sourceText": Raw snippet/line from the prescription.
 
 Return ONLY a valid JSON object matching this schema:
 {
@@ -407,14 +412,47 @@ Return ONLY a valid JSON object matching this schema:
   "visitDate": "string or empty"
 }`;
 
-function normalizePrescriptionResult(rawJson: string) {
-  let parsed: any = null;
-  try {
-    parsed = JSON.parse(rawJson);
-  } catch (e) {
-    console.error("Failed to parse AI JSON response:", rawJson);
-  }
+function extractJsonFromText(rawText: string): any {
+  if (!rawText || !rawText.trim()) return null;
+  let text = rawText.trim();
+  text = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
 
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    const firstBrace = text.indexOf("{");
+    const lastBrace = text.lastIndexOf("}");
+    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+      const sub = text.substring(firstBrace, lastBrace + 1);
+      try {
+        return JSON.parse(sub);
+      } catch (e2) {
+        const cleaned = sub.replace(/,\s*([}\]])/g, "$1");
+        try {
+          return JSON.parse(cleaned);
+        } catch (e3) {}
+      }
+    }
+
+    const firstBracket = text.indexOf("[");
+    const lastBracket = text.lastIndexOf("]");
+    if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
+      const sub = text.substring(firstBracket, lastBracket + 1);
+      try {
+        return JSON.parse(sub);
+      } catch (e2) {
+        const cleaned = sub.replace(/,\s*([}\]])/g, "$1");
+        try {
+          return JSON.parse(cleaned);
+        } catch (e3) {}
+      }
+    }
+  }
+  return null;
+}
+
+function normalizePrescriptionResult(rawJson: string) {
+  const parsed = extractJsonFromText(rawJson);
   let list: any[] = [];
   if (parsed) {
     if (Array.isArray(parsed)) {
@@ -428,8 +466,14 @@ function normalizePrescriptionResult(rawJson: string) {
 
   const normalized = list.map((m: any) => {
     const rawBrand = String(m.brandName || m.name || m.medicineName || m.drug || "").trim();
-    const cleanBrand = rawBrand.replace(/\b\d+['’]?[sS]\b/g, "").replace(/\b(?:TAB|CAP|SYR|INJ)\b/gi, "").replace(/\s+/g, " ").trim();
-    const genericName = String(m.genericName || "").trim();
+    const cleanBrand = rawBrand
+      .replace(/^(?:TAB\.?|CAP\.?|SYR\.?|INJ\.?|OINT\.?|DRP\.?)\s+/i, "")
+      .replace(/\b\d+['’]?[sS]\b/g, "")
+      .replace(/\b(?:TAB|CAP|SYR|INJ)\b/gi, "")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    const genericName = String(m.genericName || "").replace(/^\((.*)\)$/, "$1").trim();
     const strength = String(m.strength || "").trim();
     const form = String(m.form || "Tablet").trim();
     const dosage = String(m.dosage || (form ? `1 ${form}` : "1 Tablet")).trim();
@@ -461,7 +505,7 @@ function normalizePrescriptionResult(rawJson: string) {
     if (evening > 0)   scheduleList.push({ timeOfDay: "evening", quantity: evening, time: "18:00" });
     if (night > 0)     scheduleList.push({ timeOfDay: "night", quantity: night, time: "21:00" });
 
-    const foodInstruction = String(m.foodInstruction || m.food_instruction || m.instructions || "").trim();
+    const foodInstruction = String(m.foodInstruction || m.food_instruction || m.instructions || "Before meal").trim();
 
     let durationDays = m.durationDays ? Number(m.durationDays) : (m.duration_days ? Number(m.duration_days) : null);
     let durationStr = String(m.duration || "").trim();
@@ -492,7 +536,6 @@ function normalizePrescriptionResult(rawJson: string) {
     const overallConf = typeof m.confidence === "number" ? m.confidence : Math.min(nameConf, strengthConf, schedConf, durConf);
 
     const needsVerify = Boolean(m.needsVerification || m.needs_confirmation || overallConf < 0.85 || nameConf < 0.85 || !cleanBrand);
-
     const displayName = cleanBrand ? (strength && !cleanBrand.toLowerCase().includes(strength.toLowerCase()) ? `${cleanBrand} ${strength}` : cleanBrand) : "Unknown Medicine";
 
     return {
@@ -536,6 +579,86 @@ function normalizePrescriptionResult(rawJson: string) {
   };
 }
 
+function mergeExtractedResults(results: Array<{ medicines: any[]; patientName?: string; doctorName?: string; visitDate?: string }>) {
+  const mergedMeds: any[] = [];
+  let patientName = "";
+  let doctorName = "";
+  let visitDate = "";
+
+  function getMedKey(med: any): string {
+    const raw = String(med.brandName || med.name || med.medicineName || "").toLowerCase();
+    const clean = raw.replace(/[^a-z0-9]/g, "");
+    const str = String(med.strength || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    return `${clean}__${str}`;
+  }
+
+  for (const res of results) {
+    if (!patientName && res.patientName) patientName = res.patientName;
+    if (!doctorName && res.doctorName) doctorName = res.doctorName;
+    if (!visitDate && res.visitDate) visitDate = res.visitDate;
+
+    if (Array.isArray(res.medicines)) {
+      for (const med of res.medicines) {
+        if (!med.brandName && !med.name && !med.medicineName) continue;
+        const key = getMedKey(med);
+
+        const existingIdx = mergedMeds.findIndex(m => {
+          const exKey = getMedKey(m);
+          if (exKey === key && key !== "__") return true;
+
+          // Fuzzy match on core medicine name if strength matches or is absent
+          const nameA = String(m.brandName || m.name || "").toLowerCase().replace(/[^a-z]/g, "");
+          const nameB = String(med.brandName || med.name || "").toLowerCase().replace(/[^a-z]/g, "");
+          if (nameA && nameB && (nameA === nameB || nameA.includes(nameB) || nameB.includes(nameA))) {
+            const strA = String(m.strength || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+            const strB = String(med.strength || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+            return !strA || !strB || strA === strB;
+          }
+          return false;
+        });
+
+        if (existingIdx !== -1) {
+          const existing = mergedMeds[existingIdx];
+          // Merge fields, picking non-empty / richer data
+          const mergedItem = {
+            ...existing,
+            brandName: existing.brandName || med.brandName,
+            genericName: existing.genericName || med.genericName,
+            strength: existing.strength || med.strength,
+            dosage: existing.dosage || med.dosage,
+            form: existing.form || med.form,
+            foodInstruction: (existing.foodInstruction && existing.foodInstruction !== "Before meal") ? existing.foodInstruction : (med.foodInstruction || existing.foodInstruction),
+            morning: Boolean(existing.morning || med.morning),
+            afternoon: Boolean(existing.afternoon || med.afternoon),
+            evening: Boolean(existing.evening || med.evening),
+            night: Boolean(existing.night || med.night),
+            durationDays: Math.max(existing.durationDays || 30, med.durationDays || 30),
+            duration: existing.duration || med.duration,
+            confidence: Math.max(existing.confidence || 0, med.confidence || 0),
+            nameConfidence: Math.max(existing.nameConfidence || 0, med.nameConfidence || 0),
+            sourceText: existing.sourceText || med.sourceText
+          };
+
+          const combinedTimes = Array.from(new Set([...(existing.times || []), ...(med.times || [])]));
+          mergedItem.times = combinedTimes.length > 0 ? combinedTimes : ["08:00"];
+          mergedMeds[existingIdx] = mergedItem;
+        } else {
+          mergedMeds.push(med);
+        }
+      }
+    }
+  }
+
+  return {
+    medicines: mergedMeds,
+    patientName,
+    doctorName,
+    visitDate,
+    disclaimer: "AI-assisted extraction — please verify all medicines, dosage, timing and duration against your prescription before saving.",
+    extractedCount: mergedMeds.length
+  };
+}
+
 async function parsePrescriptionWithAi(env: Env, base64: string, mimeType: string, textContent?: string) {
   let rawJson = "";
 
@@ -555,7 +678,7 @@ async function parsePrescriptionWithAi(env: Env, base64: string, mimeType: strin
               ]
             }],
             generationConfig: {
-              temperature: 0.1,
+              temperature: 0.0,
               responseMimeType: "application/json"
             }
           })
@@ -596,7 +719,7 @@ async function parsePrescriptionWithAi(env: Env, base64: string, mimeType: strin
                 { type: "image_url", image_url: { url: `data:${mimeType || "image/jpeg"};base64,${base64}` } }
               ]
             }],
-            temperature: 0.1,
+            temperature: 0.0,
             response_format: { type: "json_object" }
           })
         });
@@ -629,7 +752,7 @@ async function parsePrescriptionWithAi(env: Env, base64: string, mimeType: strin
             { role: "system", content: PRESCRIPTION_PROMPT },
             { role: "user", content: `Prescription text:\n${textContent}` }
           ],
-          temperature: 0.1,
+          temperature: 0.0,
           response_format: { type: "json_object" }
         })
       });
@@ -642,12 +765,75 @@ async function parsePrescriptionWithAi(env: Env, base64: string, mimeType: strin
     }
   }
 
-  // Clean markdown fences if any
-  if (rawJson) {
-    rawJson = rawJson.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+  return normalizePrescriptionResult(rawJson);
+}
+
+async function parsePrescriptionBatchWithAi(
+  env: Env,
+  items: Array<{ base64: string; mimeType: string; textContent: string }>
+) {
+  if (items.length === 0) {
+    return normalizePrescriptionResult("");
   }
 
-  return normalizePrescriptionResult(rawJson);
+  const validImages = items.filter(i => i.base64 && i.base64.trim().length > 0);
+
+  // If multiple images are present, attempt a unified multi-image single call first
+  if (env.GEMINI_API_KEY && validImages.length > 0) {
+    const models = [env.GEMINI_MODEL || "gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.0-flash"];
+    for (const model of models) {
+      try {
+        const parts: any[] = [
+          {
+            text: PRESCRIPTION_PROMPT + (validImages.length > 1
+              ? `\n\nMULTI-PAGE NOTE: The user has uploaded ${validImages.length} images/pages belonging to ONE SINGLE prescription. Consolidate medications across all pages, deduplicate repeating items, and return one unified JSON result.`
+              : "")
+          }
+        ];
+
+        for (const img of validImages) {
+          parts.push({
+            inlineData: {
+              mimeType: img.mimeType || "image/jpeg",
+              data: img.base64
+            }
+          });
+        }
+
+        const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${env.GEMINI_API_KEY}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts }],
+            generationConfig: {
+              temperature: 0.0,
+              responseMimeType: "application/json"
+            }
+          })
+        });
+
+        if (resp.ok) {
+          const data = await resp.json<any>();
+          const candidate = data.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (candidate && candidate.trim()) {
+            const unifiedResult = normalizePrescriptionResult(candidate.trim());
+            if (unifiedResult.medicines && unifiedResult.medicines.length > 0) {
+              return unifiedResult;
+            }
+          }
+        }
+      } catch (err) {
+        console.error(`Gemini unified multi-image batch error on model ${model}:`, err);
+      }
+    }
+  }
+
+  // Fallback: Parse each page/item individually and merge results
+  const individualResults = await Promise.all(
+    items.map(item => parsePrescriptionWithAi(env, item.base64, item.mimeType, item.textContent))
+  );
+
+  return mergeExtractedResults(individualResults);
 }
 
 async function callAi(env: Env, prompt: string): Promise<Response> {
@@ -873,50 +1059,6 @@ export default {
         return await callAi(env, `Give safe, non-diagnostic guidance for these symptoms: ${symptoms}`);
       }
 
-function mergeExtractedResults(results: Array<{ medicines: any[]; patientName?: string; doctorName?: string; visitDate?: string }>) {
-  const mergedMeds: any[] = [];
-  const seenMap = new Map<string, any>();
-  let patientName = "";
-  let doctorName = "";
-  let visitDate = "";
-
-  for (const res of results) {
-    if (!patientName && res.patientName) patientName = res.patientName;
-    if (!doctorName && res.doctorName) doctorName = res.doctorName;
-    if (!visitDate && res.visitDate) visitDate = res.visitDate;
-
-    if (Array.isArray(res.medicines)) {
-      for (const med of res.medicines) {
-        const rawName = String(med.brandName || med.name || med.medicineName || "").trim().toLowerCase();
-        const strength = String(med.strength || "").trim().toLowerCase();
-        const key = `${rawName.replace(/[^a-z0-9]/g, "")}_${strength.replace(/[^a-z0-9]/g, "")}`;
-        if (!key || key === "_") continue;
-
-        if (seenMap.has(key)) {
-          const existing = seenMap.get(key);
-          if ((med.confidence || 0) > (existing.confidence || 0)) {
-            const idx = mergedMeds.indexOf(existing);
-            if (idx !== -1) mergedMeds[idx] = med;
-            seenMap.set(key, med);
-          }
-        } else {
-          seenMap.set(key, med);
-          mergedMeds.push(med);
-        }
-      }
-    }
-  }
-
-  return {
-    medicines: mergedMeds,
-    patientName,
-    doctorName,
-    visitDate,
-    disclaimer: "AI-assisted extraction — please verify all medicines, dosage, timing and duration against your prescription before saving.",
-    extractedCount: mergedMeds.length
-  };
-}
-
       if ((path === "/api/prescription/upload" || path === "/api/prescriptions/upload" || path === "/api/prescription/upload/") && request.method === "POST") {
         const itemsToProcess: Array<{ base64: string; mimeType: string; textContent: string }> = [];
 
@@ -990,11 +1132,7 @@ function mergeExtractedResults(results: Array<{ medicines: any[]; patientName?: 
           return json({ message: "No image or text data provided for extraction" }, 400);
         }
 
-        const extractionResults = await Promise.all(
-          itemsToProcess.map(item => parsePrescriptionWithAi(env, item.base64, item.mimeType, item.textContent))
-        );
-
-        const mergedResult = mergeExtractedResults(extractionResults);
+        const mergedResult = await parsePrescriptionBatchWithAi(env, itemsToProcess);
         return json(mergedResult);
       }
 
