@@ -176,18 +176,18 @@ let _lastScheduledDate = "";   // "" means "never scheduled yet"
 let weeklyChart = null;
 
 const ACTIVITY_TYPES = {
-    MEDICINE_ADDED:        { icon: "💊", dot: "activity-dot-added",    badge: "badge-blue",   label: "Medicine Added"    },
-    DOSE_TAKEN:            { icon: "✅", dot: "activity-dot-taken",    badge: "badge-green",  label: "Dose Taken"        },
-    DOSE_MISSED:           { icon: "⚠️", dot: "activity-dot-missed",   badge: "badge-red",    label: "Missed Dose"       },
-    DOSE_SCHEDULED:        { icon: "📅", dot: "activity-dot-pending",  badge: "badge-blue",   label: "Dose Scheduled"    },
-    BMI_CALCULATED:        { icon: "📊", dot: "activity-dot-bmi",      badge: "badge-purple", label: "BMI Updated"       },
-    SYMPTOM_CHECK:         { icon: "🩺", dot: "activity-dot-symptom",  badge: "badge-orange", label: "Symptom Check"     },
-    AI_MEDICINE_INFO:      { icon: "🔍", dot: "activity-dot-ai",       badge: "badge-purple", label: "Medicine Search"   },
-    PROFILE_UPDATED:       { icon: "👤", dot: "activity-dot-profile",  badge: "badge-blue",   label: "Profile Updated"   },
-    MEDICINE_DELETED:      { icon: "🗑️", dot: "activity-dot-missed",   badge: "badge-red",    label: "Medicine Removed"  },
-    PASSWORD_CHANGED:      { icon: "🔒", dot: "activity-dot-profile",  badge: "badge-green",  label: "Security Update"   },
-    PRESCRIPTION_UPLOADED: { icon: "📄", dot: "activity-dot-added",    badge: "badge-blue",   label: "Prescription"      },
-    VITALS_LOGGED:         { icon: "🩺", dot: "activity-dot-bmi",      badge: "badge-green",  label: "Vitals Logged"     },
+    MEDICINE_ADDED:        { icon: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/></svg>`, dot: "activity-dot-added",    badge: "badge-blue",   label: "Medicine Added"    },
+    DOSE_TAKEN:            { icon: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>`, dot: "activity-dot-taken",    badge: "badge-green",  label: "Dose Taken"        },
+    DOSE_MISSED:           { icon: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>`, dot: "activity-dot-missed",   badge: "badge-red",    label: "Missed Dose"       },
+    DOSE_SCHEDULED:        { icon: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.253M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/></svg>`, dot: "activity-dot-pending",  badge: "badge-blue",   label: "Dose Scheduled"    },
+    BMI_CALCULATED:        { icon: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/></svg>`, dot: "activity-dot-bmi",      badge: "badge-purple", label: "BMI Updated"       },
+    SYMPTOM_CHECK:         { icon: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z"/></svg>`, dot: "activity-dot-symptom",  badge: "badge-orange", label: "Symptom Check"     },
+    AI_MEDICINE_INFO:      { icon: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>`, dot: "activity-dot-ai",       badge: "badge-purple", label: "Medicine Search"   },
+    PROFILE_UPDATED:       { icon: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"/></svg>`, dot: "activity-dot-profile",  badge: "badge-blue",   label: "Profile Updated"   },
+    MEDICINE_DELETED:      { icon: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"/></svg>`, dot: "activity-dot-missed",   badge: "badge-red",    label: "Medicine Removed"  },
+    PASSWORD_CHANGED:      { icon: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"/></svg>`, dot: "activity-dot-profile",  badge: "badge-green",  label: "Security Update"   },
+    PRESCRIPTION_UPLOADED: { icon: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/></svg>`, dot: "activity-dot-added",    badge: "badge-blue",   label: "Prescription"      },
+    VITALS_LOGGED:         { icon: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M3 12h2l2-7 3 14 3-10 2 3h6"/></svg>`, dot: "activity-dot-bmi",      badge: "badge-green",  label: "Vitals Logged"     },
 };
 
 function formatActivityTime(dateTimeStr) {
@@ -232,7 +232,6 @@ async function renderRecentActivity() {
         if (!activities || activities.length === 0) {
             container.innerHTML = `
                 <div class="activity-empty">
-                    <span class="activity-empty-icon">📋</span>
                     <p class="activity-empty-text">No activity yet. Start by adding a medicine or marking a dose.</p>
                 </div>`;
             return;
@@ -257,7 +256,7 @@ async function renderRecentActivity() {
             html += `
                 <div class="activity-item ${clickable}" ${navAttr}>
                     <div class="activity-icon-wrap ${def.dot}">
-                        <span class="activity-icon-emoji" aria-hidden="true">${def.icon}</span>
+                        <span class="activity-icon-svg" aria-hidden="true">${def.icon}</span>
                     </div>
                     <div class="activity-info">
                         <div class="activity-name">${activity.message}</div>
@@ -292,7 +291,6 @@ async function renderRecentActivity() {
         console.error("Error loading activities:", error);
         container.innerHTML = `
             <div class="activity-empty">
-                <span class="activity-empty-icon">⚠️</span>
                 <p class="activity-empty-text">Unable to load activity feed. Please try again later.</p>
             </div>`;
     }
@@ -1601,33 +1599,23 @@ function setupMedicineForm() {
 
 /**
  * updateGreeting()
- * Determines the appropriate greeting, emoji, and today's formatted date
+ * Determines the appropriate greeting and today's formatted date
  * based on the user's local browser time, then updates the DOM elements.
- *
- * Time ranges:
- *   Morning   05:00 – 11:59  → 🌅
- *   Afternoon 12:00 – 16:59  → ☀️
- *   Evening   17:00 – 20:59  → 🌇
- *   Night     21:00 – 04:59  → 🌙
  */
 function updateGreeting() {
     const now = new Date();
     const hour = now.getHours();
 
-    let greetingText, emoji;
+    let greetingText;
 
     if (hour >= 5 && hour < 12) {
         greetingText = "Good Morning";
-        emoji = "🌅";
     } else if (hour >= 12 && hour < 17) {
         greetingText = "Good Afternoon";
-        emoji = "☀️";
     } else if (hour >= 17 && hour < 21) {
         greetingText = "Good Evening";
-        emoji = "🌇";
     } else {
         greetingText = "Good Night";
-        emoji = "🌙";
     }
 
     // Format today's date as "Thursday, June 4, 2026"
@@ -1643,7 +1631,7 @@ function updateGreeting() {
         const name = currentUser && currentUser.name
             ? `, ${currentUser.name.split(" ")[0]}`
             : "";
-        greetingEl.textContent = `${greetingText}${name} ${emoji}`;
+        greetingEl.textContent = `${greetingText}${name}`;
     }
 
     const dateEl = document.getElementById("dashboard-date");
@@ -1832,7 +1820,7 @@ async function renderDashboard() {
                 const btn = document.createElement("button");
 
                 if (doseStatus === "TAKEN" || isMissed) {
-                    btn.textContent = doseStatus === "TAKEN" ? "✔" : "Missed";
+                    btn.textContent = doseStatus === "TAKEN" ? "Taken" : "Missed";
                     btn.className = "action-btn action-btn-disabled";
                     btn.disabled = true;
                 } else {
@@ -2131,16 +2119,9 @@ async function renderHistory() {
             const statusPill = document.createElement("span");
             statusPill.className = "status-pill";
             if (statusLower === "taken")        statusPill.classList.add("status-taken");
-            else if (statusLower === "missed")  {
-                statusPill.classList.add("status-missed");
-                const icon = document.createElement("span");
-                icon.textContent = "⚠️";
-                icon.style.marginRight = "4px";
-                statusPill.insertBefore(icon, statusPill.firstChild);
-            }
-            else                                
-            statusPill.classList.add("status-pending");
-            statusPill.textContent += log.status;
+            else if (statusLower === "missed")  statusPill.classList.add("status-missed");
+            else                                statusPill.classList.add("status-pending");
+            statusPill.textContent = log.status;
             statusTd.appendChild(statusPill);
 
             tr.appendChild(dateTd);
@@ -2792,11 +2773,11 @@ function adashRenderStatCards(meds, stats, todayLogs, bmiHistory, vitalsHist, sk
 
     // Adherence trend text
     const takenTrend = document.getElementById("adash-taken-trend");
-    if (takenTrend) takenTrend.textContent = adher >= 80 ? "↑ Good progress" : adher >= 60 ? "→ On track" : "↓ Needs work";
+    if (takenTrend) takenTrend.textContent = adher >= 80 ? "Good progress" : adher >= 60 ? "On track" : "Needs work";
 
     const missedTrend = document.getElementById("adash-missed-trend");
     if (missedTrend) {
-        missedTrend.textContent = missed === 0 ? "✓ Perfect!" : missed <= 3 ? "Low" : "Needs attention";
+        missedTrend.textContent = missed === 0 ? "Normal" : missed <= 3 ? "Low" : "Needs attention";
         missedTrend.className = "adash-sc-trend " + (missed === 0 ? "adash-trend-up" : "adash-trend-down");
     }
 
@@ -3317,7 +3298,7 @@ async function adashRenderAiInsights(stats, bmiHistory, vitalsHist, streak, forc
         const streakStr  = curStreak > 0 ? `${curStreak}-day streak` : "No active streak";
 
         const prompt = `You are a friendly healthcare assistant. Provide 4 concise health insights (each max 2 sentences) as JSON array.
-Each insight has: title (string), message (string), type (one of: success, warning, info, danger), icon (emoji).
+Each insight has: title (string), message (string), type (one of: success, warning, info, danger).
 
 Patient data:
 - Medication adherence: ${adherence}% (${taken} taken, ${missed} missed)
@@ -3327,7 +3308,7 @@ Patient data:
 - Most missed medicine: ${stats.mostMissedMedicine || "None"}
 
 Return ONLY a valid JSON array. No markdown, no code blocks. Example:
-[{"title":"Great Adherence","message":"Your 85% rate exceeds the 80% target.","type":"success","icon":"✅"}]`;
+[{"title":"Great Adherence","message":"Your 85% rate exceeds the 80% target.","type":"success"}]`;
 
         const res = await authFetch(`${API_BASE}/medicine/ai-info?name=${encodeURIComponent(prompt)}&userId=${currentUser.id}`,
             { signal: AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined });
@@ -3636,17 +3617,17 @@ function triggerDoseNotification(med, dateStr, displayTime) {
     // ── Always add to in-app notification panel ──────────────────────────
     addNotification(
         "reminder",
-        `💊 Time to take ${med.name}`,
+        `Time to take ${med.name}`,
         `${med.dosage} — scheduled at ${displayTime}`
     );
 
     // ── Always show in-app toast as a visible fallback ───────────────────
-    showToast(`💊 Reminder: ${med.name} (${med.dosage}) at ${displayTime}`, "info", 8000);
+    showToast(`Reminder: ${med.name} (${med.dosage}) at ${displayTime}`, "info", 8000);
 
     // ── Browser Notification (if permission granted) ─────────────────────
     if ("Notification" in window && Notification.permission === "granted") {
         try {
-            const notification = new Notification("DoseBuddy Reminder 💊", {
+            const notification = new Notification("DoseBuddy Reminder", {
                 body: `Time to take ${med.name} (${med.dosage})`,
                 icon: "https://cdn-icons-png.flaticon.com/512/2966/2966327.png",
                 tag: key,          // browser deduplication by OS
@@ -4006,7 +3987,7 @@ async function searchAiMedicineInfo() {
     }
 
     if (!_aiLock()) {
-        resultBox.textContent = "⏳ Another AI request is in progress. Please wait a moment.";
+        resultBox.textContent = "Another AI request is in progress. Please wait a moment.";
         return;
     }
 
@@ -4052,7 +4033,7 @@ async function searchAiMedicineInfoView() {
 
     if (!_aiLock()) {
         resultBox.style.display = "block";
-        resultBox.textContent = "⏳ Another AI request is in progress. Please wait a moment.";
+        resultBox.textContent = "Another AI request is in progress. Please wait a moment.";
         return;
     }
 
@@ -4099,7 +4080,7 @@ async function checkSymptomsView() {
 
     if (!_aiLock()) {
         resultBox.style.display = "block";
-        resultBox.textContent = "⏳ Another AI request is in progress. Please wait a moment.";
+        resultBox.textContent = "Another AI request is in progress. Please wait a moment.";
         return;
     }
 
@@ -4147,7 +4128,7 @@ document.addEventListener("click", async function(e){
         }
 
         if (!_aiLock()) {
-            result.textContent = "⏳ Another AI request is in progress. Please wait a moment.";
+            result.textContent = "Another AI request is in progress. Please wait a moment.";
             return;
         }
 
@@ -4321,7 +4302,7 @@ async function calculateBmi() {
         invalidateDataCache("/bmi/", "/activities/");
         _jsonCache.set(`${API_BASE}/bmi/latest/${currentUser.id}`, { data, at: Date.now() });
 
-        showToast("BMI calculated successfully! 🎉", "success");
+        showToast("BMI calculated successfully!", "success");
         try { await refreshActivityFeed(); } catch(e) {}
 
         const bmiVal = data.bmiValue ? data.bmiValue.toFixed(1) : "?";
@@ -4392,7 +4373,7 @@ async function calculateBmiView() {
         invalidateDataCache("/bmi/", "/activities/");
         _jsonCache.set(`${API_BASE}/bmi/latest/${currentUser.id}`, { data, at: Date.now() });
 
-        showToast("BMI calculated successfully! 🎉", "success");
+        showToast("BMI calculated successfully!", "success");
         try { await refreshActivityFeed(); } catch(e) {}
 
     } catch (error) {
@@ -4694,12 +4675,12 @@ function setupNotificationsUI(){
 
 // Section config for Medicine Assistant structured response
 const MED_SECTIONS = [
-    { key: "MEDICINE OVERVIEW",       icon: "💊", label: "Medicine Overview"       },
-    { key: "DOSAGE INFORMATION",      icon: "📋", label: "Dosage Information"      },
-    { key: "COMMON USES",             icon: "✅", label: "Common Uses"             },
-    { key: "WARNINGS & PRECAUTIONS",  icon: "⚠️", label: "Warnings & Precautions" },
-    { key: "SIDE EFFECTS",            icon: "🔍", label: "Side Effects"            },
-    { key: "WHEN TO CONSULT A DOCTOR",icon: "🩺", label: "When to Consult a Doctor"},
+    { key: "MEDICINE OVERVIEW",       icon: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/></svg>`, label: "Medicine Overview"       },
+    { key: "DOSAGE INFORMATION",      icon: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>`, label: "Dosage Information"      },
+    { key: "COMMON USES",             icon: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`, label: "Common Uses"             },
+    { key: "WARNINGS & PRECAUTIONS",  icon: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>`, label: "Warnings & Precautions" },
+    { key: "SIDE EFFECTS",            icon: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>`, label: "Side Effects"            },
+    { key: "WHEN TO CONSULT A DOCTOR",icon: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z"/></svg>`, label: "When to Consult a Doctor"},
 ];
 
 function formatMedicineResponse(text) {
@@ -5439,7 +5420,7 @@ function setupPrescriptionUpload() {
                 // Clean manual Add Medicine form so it remains empty after batch save
                 resetMedicineForm();
 
-                showToast(`✓ Successfully added ${savedCount} medicine(s) from prescription to your DoseBuddy schedule!`, "success");
+                showToast(`Successfully added ${savedCount} medicine(s) from prescription to your DoseBuddy schedule!`, "success");
                 if (reviewSection) reviewSection.style.display = "none";
                 currentExtractedMeds = [];
                 rawFile = null;
@@ -5567,7 +5548,9 @@ function showNotifPermissionBanner() {
     banner.setAttribute("role", "alert");
     banner.innerHTML = `
         <div class="notif-banner-content">
-            <span class="notif-banner-icon">🔔</span>
+            <span class="notif-banner-icon">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"/></svg>
+            </span>
             <p class="notif-banner-text">Enable browser notifications to get dose reminders on time.</p>
             <div class="notif-banner-actions">
                 <button class="notif-banner-allow" id="notif-banner-allow-btn">Enable Notifications</button>
@@ -5586,11 +5569,11 @@ function showNotifPermissionBanner() {
             banner.classList.remove("notif-banner-visible");
             setTimeout(() => banner.remove(), 300);
             if (permission === "granted") {
-                showToast("🔔 Notifications enabled! You'll get dose reminders on time.", "success", 5000);
+                showToast("Notifications enabled! You'll get dose reminders on time.", "success", 5000);
                 // Re-schedule now that we have permission
                 scheduleMedicineReminders();
             } else if (permission === "denied") {
-                showToast("Notifications blocked. To enable, click the 🔒 icon in your browser's address bar.", "warning", 8000);
+                showToast("Notifications blocked. To enable, click the lock icon in your browser's address bar.", "warning", 8000);
             }
         });
     });
@@ -5635,15 +5618,15 @@ function updateNotifPermissionStatus() {
 
     const perm = Notification.permission;
     if (perm === "granted") {
-        statusText.textContent  = "✅ Notifications are enabled.";
+        statusText.textContent  = "Notifications are enabled.";
         statusText.className    = "notif-perm-text notif-perm-granted";
         enableBtn.style.display = "none";
     } else if (perm === "denied") {
-        statusText.textContent  = "🚫 Notifications are blocked. Open your browser settings (🔒 in address bar) to allow them for this site.";
+        statusText.textContent  = "Notifications are blocked. Open your browser settings to allow them for this site.";
         statusText.className    = "notif-perm-text notif-perm-denied";
         enableBtn.style.display = "none";
     } else {
-        statusText.textContent  = "⚠️ Notifications are not enabled yet.";
+        statusText.textContent  = "Notifications are not enabled yet.";
         statusText.className    = "notif-perm-text notif-perm-default";
         enableBtn.style.display = "inline-flex";
     }
@@ -6004,14 +5987,14 @@ document.addEventListener("DOMContentLoaded", () => {
         requestNotificationPermission().then(permission => {
             updateNotifPermissionStatus();
             if (permission === "granted") {
-                showToast("🔔 Notifications enabled! You'll get dose reminders on time.", "success", 5000);
+                showToast("Notifications enabled! You'll get dose reminders on time.", "success", 5000);
                 // Remove the banner if it was showing
                 const banner = document.getElementById("notif-permission-banner");
                 if (banner) { banner.classList.remove("notif-banner-visible"); setTimeout(() => banner.remove(), 300); }
                 // Re-schedule now that we have permission
                 scheduleMedicineReminders();
             } else if (permission === "denied") {
-                showToast("Notifications blocked. Click the 🔒 icon in your browser's address bar to allow them.", "warning", 8000);
+                showToast("Notifications blocked. Click the lock icon in your browser's address bar to allow them.", "warning", 8000);
             }
         });
     });
@@ -6131,11 +6114,11 @@ document.addEventListener("DOMContentLoaded", () => {
 let notifStore = []; 
 
 const NOTIF_ICONS = {
-    missed:      { emoji: "⏰", color: "notif-icon-orange" },
-    reminder:    { emoji: "💊", color: "notif-icon-blue"   },
-    adherence:   { emoji: "🏆", color: "notif-icon-green"  },
-    ai:          { emoji: "🤖", color: "notif-icon-purple" },
-    info:        { emoji: "ℹ️",  color: "notif-icon-blue"   },
+    missed:      { iconSvg: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`, color: "notif-icon-orange" },
+    reminder:    { iconSvg: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/></svg>`, color: "notif-icon-blue"   },
+    adherence:   { iconSvg: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 18.75h-9m9 0a3 3 0 013 3h-15a3 3 0 013-3m9 0v-3.375c0-.621-.504-1.125-1.125-1.125h-.871M7.5 18.75v-3.375c0-.621.504-1.125 1.125-1.125h.872m5.003 0H9.497m5.003 0A3.375 3.375 0 0017.875 12V6.375c0-.621-.504-1.125-1.125-1.125H7.25c-.621 0-1.125.504-1.125 1.125V12a3.375 3.375 0 003.375 3.375m6.375-7.5h2.25a2.25 2.25 0 012.25 2.25v.75a2.25 2.25 0 01-2.25 2.25h-2.25m-9-5.25H4.875A2.25 2.25 0 002.625 9.75v.75a2.25 2.25 0 002.25 2.25h2.25"/></svg>`, color: "notif-icon-green"  },
+    ai:          { iconSvg: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z"/></svg>`, color: "notif-icon-purple" },
+    info:        { iconSvg: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z"/></svg>`, color: "notif-icon-blue"   },
 };
 
 function timeAgo(ts) {
@@ -6165,7 +6148,7 @@ function renderNotificationPanel() {
         div.className = `notif-item${item.unread ? " notif-item-unread" : ""}`;
         div.dataset.id = item.id;
         div.innerHTML = `
-            <div class="notif-item-icon ${icon.color}">${icon.emoji}</div>
+            <div class="notif-item-icon ${icon.color}">${icon.iconSvg}</div>
             <div class="notif-item-body">
                 <p class="notif-item-title">${item.title}</p>
                 <p class="notif-item-desc">${item.desc}</p>
@@ -6216,37 +6199,37 @@ const ONBOARDING_KEY = "dosebuddy_onboarding_done";
 
 const ONBOARDING_STEPS = [
     {
-        title:  "Welcome to DoseBuddy 👋",
+        title:  "Welcome to DoseBuddy",
         desc:   "Your personal medicine reminder and health companion. Let us show you around in a few quick steps.",
         target: null,
         pos:    "center",
     },
     {
-        title:  "Sidebar Navigation 🗂️",
+        title:  "Sidebar Navigation",
         desc:   "Use the sidebar to switch between Dashboard, Add Medicine, Reports, History, and AI tools.",
         target: "#user-menu",
         pos:    "right",
     },
     {
-        title:  "Add Your Medicines 💊",
+        title:  "Add Your Medicines",
         desc:   "Click Add Medicine to set up your medication schedule. You can also upload a prescription to auto-fill.",
         target: "[data-view='add-medicine-view']",
         pos:    "right",
     },
     {
-        title:  "Notification Bell 🔔",
+        title:  "Notification Bell",
         desc:   "Click the bell to see missed doses, reminders, and health tips. The badge shows unread count.",
         target: "#notification-bell",
         pos:    "bottom",
     },
     {
-        title:  "Your Profile 👤",
+        title:  "Your Profile",
         desc:   "Click your avatar to access Profile Settings, Notification Preferences, Help, and Security.",
         target: "#nav-user-avatar",
         pos:    "bottom",
     },
     {
-        title:  "Dark Mode 🌙",
+        title:  "Dark Mode",
         desc:   "Toggle dark mode anytime using the button at the bottom of the sidebar. Your preference is saved.",
         target: "#menu-theme-toggle",
         pos:    "right",
@@ -6278,7 +6261,7 @@ function showOnboardingStep(step) {
     titleEl.textContent = data.title;
     descEl.textContent  = data.desc;
     stepEl.textContent  = `Step ${step + 1} of ${ONBOARDING_STEPS.length}`;
-    nextBtn.textContent = step === ONBOARDING_STEPS.length - 1 ? "Finish ✔" : "Next →";
+    nextBtn.textContent = step === ONBOARDING_STEPS.length - 1 ? "Finish" : "Next";
 
     overlay.style.display  = "block";
     tooltip.style.display  = "block";
@@ -7022,7 +7005,7 @@ async function recalculateStreak() {
 
         const streak = data.currentStreak || 0;
         if (streak > 0 && [3, 7, 14, 30, 60, 100].includes(streak)) {
-            showToast(`🔥 ${streak}-day streak! Keep it up!`, "success", 4000);
+            showToast(`${streak}-day streak! Keep it up!`, "success", 4000);
             triggerConfetti();
         }
     } catch (err) {
@@ -7063,11 +7046,7 @@ function applyStreakToUI(data, animate) {
         }
     }
     if (fireEl) {
-        if (currentStreak === 0)       fireEl.textContent = "💊";
-        else if (currentStreak < 3)    fireEl.textContent = "🔥";
-        else if (currentStreak < 7)    fireEl.textContent = "🔥";
-        else if (currentStreak < 30)   fireEl.textContent = "⚡";
-        else                           fireEl.textContent = "🏆";
+        fireEl.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="22" height="22"><path stroke-linecap="round" stroke-linejoin="round" d="M15.362 5.214A8.252 8.252 0 0112 21 8.25 8.25 0 016.038 7.048 8.287 8.287 0 009 9.6a8.983 8.983 0 013.361-6.867 8.21 8.21 0 003 2.48z"/></svg>';
     }
 
     const weekCount = document.getElementById("streak-week-count");
@@ -7120,7 +7099,7 @@ function setMilestoneBar(barId, pctId, current, target) {
     if (!bar || !pct) return;
     const progress = Math.min(100, Math.round((current / target) * 100));
     bar.style.width = progress + "%";
-    pct.textContent = progress >= 100 ? "✓" : progress + "%";
+    pct.textContent = progress >= 100 ? "100%" : progress + "%";
 }
 
 function renderBadgesGrid(containerId, allBadges, newlyUnlocked) {
@@ -7134,7 +7113,7 @@ function renderBadgesGrid(containerId, allBadges, newlyUnlocked) {
             : "badge-locked";
         return `
             <div class="badge-item ${cls}" title="${badge.description}">
-                ${!badge.unlocked ? '<span class="badge-lock-icon">🔒</span>' : ""}
+                ${!badge.unlocked ? '<span class="badge-lock-icon"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"/></svg></span>' : ""}
                 <span class="badge-emoji">${badge.icon}</span>
                 <span class="badge-title">${badge.title}</span>
                 <span class="badge-desc">${badge.description}</span>

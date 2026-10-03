@@ -29,9 +29,11 @@
 <section id="auth-view" class="view active">
     <div class="auth-page">
         <div class="auth-brand">
-            <div class="auth-logo">💊</div>
+            <div class="auth-logo">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="28" height="28"><path stroke-linecap="round" stroke-linejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/></svg>
+            </div>
             <h1 class="auth-brand-name">DoseBuddy</h1>
-            <p class="auth-tagline">Your personal medicine reminder & health companion</p>
+            <p class="auth-tagline">Your personal medicine reminder &amp; health companion</p>
         </div>
 
         <div class="auth-card">
@@ -106,7 +108,9 @@
             <!-- ── OTP Verification Form ─────────────────────────────────── -->
             <form id="otp-verify-form" style="display:none;" novalidate>
                 <div style="text-align:center; margin-bottom:20px;">
-                    <div style="font-size:48px; margin-bottom:8px;">📧</div>
+                    <div style="display:flex; justify-content:center; margin-bottom:12px;">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.75" stroke="currentColor" width="44" height="44" style="color:var(--primary);"><path stroke-linecap="round" stroke-linejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75"/></svg>
+                    </div>
                     <h2 style="color:#1e293b; margin:0 0 4px;">Verify Your Email</h2>
                     <p style="color:#64748b; font-size:14px;" id="otp-subtitle">Enter the 6-digit code sent to your email</p>
                 </div>
@@ -136,7 +140,9 @@
             <!-- ── Forgot Password Form ──────────────────────────────────── -->
             <form id="forgot-password-form" style="display:none;" novalidate>
                 <div style="text-align:center; margin-bottom:20px;">
-                    <div style="font-size:48px; margin-bottom:8px;">🔒</div>
+                    <div style="display:flex; justify-content:center; margin-bottom:12px;">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.75" stroke="currentColor" width="44" height="44" style="color:var(--primary);"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"/></svg>
+                    </div>
                     <h2 style="color:#1e293b; margin:0 0 4px;">Reset Password</h2>
                     <p style="color:#64748b; font-size:14px;">Enter your email to receive a reset code</p>
                 </div>
@@ -240,21 +246,21 @@
                             <label for="su-phone">Phone Number</label>
                             <div class="phone-input-wrap">
                                 <select id="su-phone-code" class="phone-code-select" aria-label="Country code">
-                                    <option value="+1">🇺🇸 +1</option>
-                                    <option value="+44">🇬🇧 +44</option>
-                                    <option value="+91" selected>🇮🇳 +91</option>
-                                    <option value="+61">🇦🇺 +61</option>
-                                    <option value="+81">🇯🇵 +81</option>
-                                    <option value="+49">🇩🇪 +49</option>
-                                    <option value="+33">🇫🇷 +33</option>
-                                    <option value="+86">🇨🇳 +86</option>
-                                    <option value="+55">🇧🇷 +55</option>
-                                    <option value="+27">🇿🇦 +27</option>
-                                    <option value="+971">🇦🇪 +971</option>
-                                    <option value="+65">🇸🇬 +65</option>
-                                    <option value="+60">🇲🇾 +60</option>
-                                    <option value="+92">🇵🇰 +92</option>
-                                    <option value="+880">🇧🇩 +880</option>
+                                    <option value="+1">US +1</option>
+                                    <option value="+44">UK +44</option>
+                                    <option value="+91" selected>IN +91</option>
+                                    <option value="+61">AU +61</option>
+                                    <option value="+81">JP +81</option>
+                                    <option value="+49">DE +49</option>
+                                    <option value="+33">FR +33</option>
+                                    <option value="+86">CN +86</option>
+                                    <option value="+55">BR +55</option>
+                                    <option value="+27">ZA +27</option>
+                                    <option value="+971">AE +971</option>
+                                    <option value="+65">SG +65</option>
+                                    <option value="+60">MY +60</option>
+                                    <option value="+92">PK +92</option>
+                                    <option value="+880">BD +880</option>
                                 </select>
                                 <input type="tel" id="su-phone" placeholder="10-digit number" autocomplete="tel">
                             </div>
@@ -275,19 +281,15 @@
                         <label>Gender</label>
                         <div class="gender-cards" id="gender-cards">
                             <button type="button" class="gender-card" data-value="Male">
-                                <span class="gender-card-icon">♂</span>
                                 <span class="gender-card-label">Male</span>
                             </button>
                             <button type="button" class="gender-card" data-value="Female">
-                                <span class="gender-card-icon">♀</span>
                                 <span class="gender-card-label">Female</span>
                             </button>
                             <button type="button" class="gender-card" data-value="Other">
-                                <span class="gender-card-icon">⚧</span>
                                 <span class="gender-card-label">Other</span>
                             </button>
                             <button type="button" class="gender-card" data-value="Prefer not to say">
-                                <span class="gender-card-icon">🔒</span>
                                 <span class="gender-card-label">Prefer not to say</span>
                             </button>
                         </div>
@@ -301,21 +303,21 @@
                         </label>
                         <div class="phone-input-wrap">
                             <select id="su-emergency-code" class="phone-code-select" aria-label="Emergency contact country code">
-                                <option value="+1">🇺🇸 +1</option>
-                                <option value="+44">🇬🇧 +44</option>
-                                <option value="+91" selected>🇮🇳 +91</option>
-                                <option value="+61">🇦🇺 +61</option>
-                                <option value="+81">🇯🇵 +81</option>
-                                <option value="+49">🇩🇪 +49</option>
-                                <option value="+33">🇫🇷 +33</option>
-                                <option value="+86">🇨🇳 +86</option>
-                                <option value="+55">🇧🇷 +55</option>
-                                <option value="+27">🇿🇦 +27</option>
-                                <option value="+971">🇦🇪 +971</option>
-                                <option value="+65">🇸🇬 +65</option>
-                                <option value="+60">🇲🇾 +60</option>
-                                <option value="+92">🇵🇰 +92</option>
-                                <option value="+880">🇧🇩 +880</option>
+                                <option value="+1">US +1</option>
+                                <option value="+44">UK +44</option>
+                                <option value="+91" selected>IN +91</option>
+                                <option value="+61">AU +61</option>
+                                <option value="+81">JP +81</option>
+                                <option value="+49">DE +49</option>
+                                <option value="+33">FR +33</option>
+                                <option value="+86">CN +86</option>
+                                <option value="+55">BR +55</option>
+                                <option value="+27">ZA +27</option>
+                                <option value="+971">AE +971</option>
+                                <option value="+65">SG +65</option>
+                                <option value="+60">MY +60</option>
+                                <option value="+92">PK +92</option>
+                                <option value="+880">BD +880</option>
                             </select>
                             <input type="tel" id="su-emergency" placeholder="Emergency contact number" autocomplete="off">
                         </div>
@@ -414,8 +416,8 @@
             </p>
 
             <div class="auth-disclaimer">
-                <span class="disclaimer-icon">⚠️</span>
-                DoseBuddy is a reminder tool only. Always follow your doctor's advice.
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16" style="flex-shrink:0;"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>
+                <span>DoseBuddy is a reminder tool only. Always follow your doctor's advice.</span>
             </div>
         </div>
     </div>
@@ -425,7 +427,9 @@
     <div class="legal-modal">
         <div class="legal-modal-header">
             <div class="legal-modal-title-row">
-                <div class="legal-modal-icon">📋</div>
+                <div class="legal-modal-icon">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                </div>
                 <div>
                     <h3 id="terms-modal-title" class="legal-modal-title">Terms &amp; Conditions</h3>
                     <p class="legal-modal-sub">DoseBuddy Health Management Platform</p>
@@ -438,42 +442,36 @@
         <div class="legal-modal-body">
             <div class="legal-section">
                 <div class="legal-section-header">
-                    <span class="legal-section-icon">💊</span>
                     <h4>Reminder Disclaimer</h4>
                 </div>
                 <p>DoseBuddy is a medicine reminder and health management assistant only. It does <strong>not</strong> replace professional medical advice, diagnosis, or treatment. Always seek the advice of your physician or other qualified health provider with any questions you may have regarding a medical condition.</p>
             </div>
             <div class="legal-section">
                 <div class="legal-section-header">
-                    <span class="legal-section-icon">🩺</span>
                     <h4>Medical Responsibility</h4>
                 </div>
                 <p>Users must consult their doctors or licensed healthcare professionals before changing, stopping, or starting any medication routine. DoseBuddy does not provide medical diagnoses or prescriptions. The app is a tool to help you remember your existing prescribed medications.</p>
             </div>
             <div class="legal-section">
                 <div class="legal-section-header">
-                    <span class="legal-section-icon">👤</span>
                     <h4>User Responsibility</h4>
                 </div>
                 <p>Users are solely responsible for keeping their medication information accurate and up to date within the application. DoseBuddy is not liable for any harm resulting from incorrect medication data entered by the user. Always verify medication details with your healthcare provider.</p>
             </div>
             <div class="legal-section">
                 <div class="legal-section-header">
-                    <span class="legal-section-icon">🔔</span>
                     <h4>Notification Disclaimer</h4>
                 </div>
                 <p>Reminder notifications may depend on your device settings, internet connectivity, and browser permissions. DoseBuddy cannot guarantee delivery of all notifications. Users should not rely solely on app notifications for critical medication timing. Always maintain a backup reminder system.</p>
             </div>
             <div class="legal-section">
                 <div class="legal-section-header">
-                    <span class="legal-section-icon">🚨</span>
                     <h4>Emergency Disclaimer</h4>
                 </div>
                 <p>DoseBuddy is <strong>not</strong> an emergency medical service. In case of a medical emergency, call your local emergency services immediately (e.g., 911, 112, or 999). The emergency contact feature is for informational purposes only and does not guarantee emergency response.</p>
             </div>
             <div class="legal-section">
                 <div class="legal-section-header">
-                    <span class="legal-section-icon">⚖️</span>
                     <h4>Acceptance of Terms</h4>
                 </div>
                 <p>By creating an account and using DoseBuddy, you acknowledge that you have read, understood, and agree to be bound by these Terms &amp; Conditions. These terms may be updated periodically. Continued use of the application constitutes acceptance of any revised terms.</p>
@@ -489,7 +487,9 @@
     <div class="legal-modal">
         <div class="legal-modal-header">
             <div class="legal-modal-title-row">
-                <div class="legal-modal-icon">🔒</div>
+                <div class="legal-modal-icon">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+                </div>
                 <div>
                     <h3 id="privacy-modal-title" class="legal-modal-title">Privacy Policy</h3>
                     <p class="legal-modal-sub">How DoseBuddy handles your data</p>
@@ -502,35 +502,30 @@
         <div class="legal-modal-body">
             <div class="legal-section">
                 <div class="legal-section-header">
-                    <span class="legal-section-icon">🗄️</span>
                     <h4>Data Privacy &amp; Storage</h4>
                 </div>
                 <p>Your user profile and medicine data are stored securely in our database for the sole purpose of providing app functionality. We do not sell, rent, or share your personal health information with third parties without your explicit consent.</p>
             </div>
             <div class="legal-section">
                 <div class="legal-section-header">
-                    <span class="legal-section-icon">📊</span>
                     <h4>Data We Collect</h4>
                 </div>
                 <p>We collect the information you provide during registration (name, email, phone, date of birth, gender, emergency contact) and your medication data (medicine names, dosages, schedules, intake logs). This data is used exclusively to power your personal health dashboard.</p>
             </div>
             <div class="legal-section">
                 <div class="legal-section-header">
-                    <span class="legal-section-icon">🤖</span>
                     <h4>AI Features &amp; Data Usage</h4>
                 </div>
                 <p>When you use AI-powered features (Medicine Assistant, Symptom Checker), your queries may be processed by third-party AI services. We do not send personally identifiable information to AI services — only the specific query text you enter.</p>
             </div>
             <div class="legal-section">
                 <div class="legal-section-header">
-                    <span class="legal-section-icon">🔐</span>
                     <h4>Data Security</h4>
                 </div>
                 <p>We implement reasonable technical and organizational measures to protect your data. However, no method of transmission over the internet is 100% secure. You are responsible for maintaining the confidentiality of your account credentials.</p>
             </div>
             <div class="legal-section">
                 <div class="legal-section-header">
-                    <span class="legal-section-icon">🗑️</span>
                     <h4>Your Rights</h4>
                 </div>
                 <p>You have the right to access, correct, or delete your personal data at any time through your profile settings. You may also request complete account deletion by contacting our support team at dosebuddy.health@gmail.com.</p>
@@ -550,7 +545,9 @@
                 <span></span><span></span><span></span>
             </button>
             <div class="nav-brand">
-                <div class="brand-logo-circle">💊</div>
+                <div class="brand-logo-circle">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/></svg>
+                </div>
                 <span class="brand-title">DoseBuddy</span>
             </div>
         </div>
@@ -577,7 +574,9 @@
                     <div class="notif-items-list" id="notification-list">
                     </div>
                     <div class="notif-empty" id="notif-empty-state" style="display:none;">
-                        <div class="notif-empty-icon">🔔</div>
+                        <div class="notif-empty-icon">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.75" stroke="currentColor" width="32" height="32"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"/></svg>
+                        </div>
                         <p class="notif-empty-text">You're all caught up!</p>
                         <p class="notif-empty-sub">No new notifications</p>
                     </div>
@@ -668,7 +667,7 @@
 
             <div class="greeting-row">
                 <div class="greeting-left">
-                    <h1 class="greeting-title" id="greeting-text">Good Morning 🌅</h1>
+                    <h1 class="greeting-title" id="greeting-text">Good Morning</h1>
                     <p class="greeting-sub" id="dashboard-date">Stay on track with your medications today.</p>
                     <span class="caregiver-patient-note" id="caregiver-patient-note"></span>
                 </div>
@@ -755,7 +754,7 @@
                         </table>
                     </div>
                     <p id="no-meds-message" class="empty-state" style="display:none;">
-                        <span class="empty-icon">💊</span>
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.75" stroke="currentColor" width="24" height="24" style="margin-bottom:6px; opacity:0.6;"><path stroke-linecap="round" stroke-linejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/></svg>
                         No medicines scheduled for today.
                     </p>
                 </div>
@@ -782,7 +781,9 @@
                 <div class="card streak-card" id="streak-main-card">
                     <div class="streak-card-inner">
                         <div class="streak-fire-wrap">
-                            <span class="streak-fire-icon" id="streak-fire-icon">🔥</span>
+                            <span class="streak-fire-icon" id="streak-fire-icon">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="22" height="22"><path stroke-linecap="round" stroke-linejoin="round" d="M15.362 5.214A8.252 8.252 0 0112 21 8.25 8.25 0 016.038 7.048 8.287 8.287 0 009 9.6a8.983 8.983 0 013.361-6.867 8.21 8.21 0 003 2.48z"/></svg>
+                            </span>
                             <div class="streak-fire-glow" id="streak-fire-glow"></div>
                         </div>
                         <div class="streak-info">
@@ -823,7 +824,9 @@
                     <div class="milestone-list" id="milestone-list">
                         <div class="milestone-item">
                             <div class="milestone-meta">
-                                <span class="milestone-icon">🔥</span>
+                                <span class="milestone-icon">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M15.362 5.214A8.252 8.252 0 0112 21 8.25 8.25 0 016.038 7.048 8.287 8.287 0 009 9.6a8.983 8.983 0 013.361-6.867 8.21 8.21 0 003 2.48z"/></svg>
+                                </span>
                                 <span class="milestone-name">3-Day Streak</span>
                                 <span class="milestone-pct" id="ms-3day-pct">0%</span>
                             </div>
@@ -833,7 +836,9 @@
                         </div>
                         <div class="milestone-item">
                             <div class="milestone-meta">
-                                <span class="milestone-icon">⚡</span>
+                                <span class="milestone-icon">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"/></svg>
+                                </span>
                                 <span class="milestone-name">7-Day Streak</span>
                                 <span class="milestone-pct" id="ms-7day-pct">0%</span>
                             </div>
@@ -843,7 +848,9 @@
                         </div>
                         <div class="milestone-item">
                             <div class="milestone-meta">
-                                <span class="milestone-icon">🏆</span>
+                                <span class="milestone-icon">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 18.75h-9m9 0a3 3 0 013 3h-15a3 3 0 013-3m9 0v-3.375c0-.621-.504-1.125-1.125-1.125h-.871M7.5 18.75v-3.375c0-.621.504-1.125 1.125-1.125h.872m5.003 0H9.497m5.003 0A3.375 3.375 0 0017.875 12V6.375c0-.621-.504-1.125-1.125-1.125H7.25c-.621 0-1.125.504-1.125 1.125V12a3.375 3.375 0 003.375 3.375m6.375-7.5h2.25a2.25 2.25 0 012.25 2.25v.75a2.25 2.25 0 01-2.25 2.25h-2.25m-9-5.25H4.875A2.25 2.25 0 002.625 9.75v.75a2.25 2.25 0 002.25 2.25h2.25"/></svg>
+                                </span>
                                 <span class="milestone-name">30-Day Streak</span>
                                 <span class="milestone-pct" id="ms-30day-pct">0%</span>
                             </div>
@@ -853,7 +860,9 @@
                         </div>
                         <div class="milestone-item">
                             <div class="milestone-meta">
-                                <span class="milestone-icon">🌟</span>
+                                <span class="milestone-icon">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.563.563 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.563.563 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z"/></svg>
+                                </span>
                                 <span class="milestone-name">Perfect Week</span>
                                 <span class="milestone-pct" id="ms-week-pct">0%</span>
                             </div>
@@ -883,10 +892,10 @@
                         <h3 class="card-title">Recent Activity</h3>
                         <p class="card-subtitle">Your latest dose history</p>
                     </div>
-                    <button class="text-btn nav-btn menu-link" data-view="history-view">View All →</button>
+                    <button class="text-btn nav-btn menu-link" data-view="history-view">View All</button>
                 </div>
                 <div id="recent-activity-list" class="activity-list">
-                    <p class="empty-state"><span class="empty-icon">📋</span> No recent activity yet.</p>
+                    <p class="empty-state">No recent activity yet.</p>
                 </div>
             </div>
 
@@ -896,7 +905,9 @@
 
             <div class="addmed-page-header">
                 <div class="addmed-header-left">
-                    <div class="addmed-header-icon">💊</div>
+                    <div class="addmed-header-icon">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="20" height="20"><path stroke-linecap="round" stroke-linejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/></svg>
+                    </div>
                     <div>
                         <h2 class="page-title">Add Medicine</h2>
                         <p class="page-subtitle">Fill in the form manually or upload a prescription to auto-fill.</p>
@@ -1204,7 +1215,6 @@
                         <h3 class="card-title">Activity Log</h3>
                         <p class="card-subtitle">All doses recorded in the system</p>
                     </div>
-                    <span class="card-badge">All Time</span>
                 </div>
 
                 <div class="table-wrapper">
@@ -1223,11 +1233,13 @@
                 </div>
 
                 <div id="history-empty" class="history-empty-state" style="display:none;">
-                    <div class="history-empty-icon">🕐</div>
+                    <div class="history-empty-icon">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.75" stroke="currentColor" width="36" height="36"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                    </div>
                     <p class="history-empty-title">No history yet</p>
                     <p class="history-empty-sub">Mark doses as taken on the dashboard and they'll appear here.</p>
                     <button class="primary-btn nav-btn menu-link" data-view="dashboard-view" style="margin-top:var(--space-4);">
-                        Go to Dashboard →
+                        Go to Dashboard
                     </button>
                 </div>
             </div>
@@ -1872,7 +1884,6 @@
                             <h3 class="card-title">Log Vitals</h3>
                             <p class="card-subtitle">Record your current health measurements</p>
                         </div>
-                        <span class="card-badge">New Entry</span>
                     </div>
 
                     <form id="vitals-form" novalidate>
@@ -1980,7 +1991,6 @@
                             <h3 class="card-title">Trends</h3>
                             <p class="card-subtitle" id="vitals-chart-period-label">Last 7 days</p>
                         </div>
-                        <span class="card-badge">Charts</span>
                     </div>
 
                     <div class="vitals-chart-block">
@@ -2127,7 +2137,9 @@
             </div>
 
             <div class="ai-disclaimer-card">
-                <div class="ai-disclaimer-icon">⚠️</div>
+                <div class="ai-disclaimer-icon">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>
+                </div>
                 <div class="ai-disclaimer-content">
                     <h4 class="ai-disclaimer-title">Important Medical Disclaimer</h4>
                     <p class="ai-disclaimer-text">
@@ -2224,7 +2236,7 @@
     <div class="modal-box modal-box-sm">
         <div class="modal-header"><div class="modal-header-icon green-bg"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z"/></svg></div><div><h3 class="modal-title" id="modal-help-title">Help &amp; Support</h3><p class="modal-subtitle">We are here to help you</p></div><button class="modal-close" data-modal="modal-help" aria-label="Close">&times;</button></div>
         <div class="modal-body">
-            <div class="help-contact-card"><div class="help-contact-icon">&#x2709;</div><div><p class="help-contact-label">Support Email</p><p class="help-contact-email">dosebuddy.health@gmail.com</p></div><button class="help-copy-btn" id="help-copy-email" title="Copy email"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="15" height="15"><path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184"/></svg></button><a class="help-mailto-btn" href="mailto:dosebuddy.health@gmail.com">Send Email</a></div>
+            <div class="help-contact-card"><div class="help-contact-icon"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75"/></svg></div><div><p class="help-contact-label">Support Email</p><p class="help-contact-email">dosebuddy.health@gmail.com</p></div><button class="help-copy-btn" id="help-copy-email" title="Copy email"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="15" height="15"><path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184"/></svg></button><a class="help-mailto-btn" href="mailto:dosebuddy.health@gmail.com">Send Email</a></div>
             <div class="modal-section-label">Frequently Asked Questions</div>
             <div class="faq-list">
                 <details class="faq-item"><summary class="faq-question">How do I add a medicine?</summary><p class="faq-answer">Go to <strong>Add Medicine</strong> in the sidebar. Fill in the medicine name, dosage, instructions, start/end dates, and reminder times. You can also upload a prescription image to auto-fill the form using AI.</p></details>
@@ -2274,11 +2286,11 @@
 
 <div id="onboarding-tooltip" class="onboarding-tooltip" role="dialog" aria-modal="true" aria-labelledby="ob-title" style="display:none;">
     <div class="ob-step-indicator" id="ob-step-indicator">Step 1 of 6</div>
-    <h4 class="ob-title" id="ob-title">Welcome to DoseBuddy 👋</h4>
+    <h4 class="ob-title" id="ob-title">Welcome to DoseBuddy</h4>
     <p class="ob-desc" id="ob-desc">Let us show you around in a few quick steps.</p>
     <div class="ob-footer">
         <button class="ob-skip-btn" id="ob-skip-btn">Skip tour</button>
-        <button class="ob-next-btn" id="ob-next-btn">Next →</button>
+        <button class="ob-next-btn" id="ob-next-btn">Next</button>
     </div>
 </div>
 <script>
