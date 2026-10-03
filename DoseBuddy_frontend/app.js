@@ -4975,123 +4975,131 @@ const MED_SECTIONS = [
     { key: "WHEN TO CONSULT A DOCTOR",icon: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z"/></svg>`, label: "When to Consult a Doctor"},
 ];
 
-function formatMedicineResponse(text) {
-    if (!text) return "";
-
-    // Clean markdown artifacts
-    const clean = text
-        .replace(/\*\*/g, "")
-        .replace(/\*/g, "")
-        .replace(/#{1,6}\s*/g, "");
-
-    // Build a map of section key → content by splitting on known headings
-    const sectionMap = {};
-    let remainder = clean;
-
-    // Build a regex that matches any of the section headings (with colon)
-    const headingPattern = new RegExp(
-        "(" + MED_SECTIONS.map(s => s.key.replace(/[&]/g, "\\&") + ":").join("|") + ")",
-        "gi"
-    );
-
-    const parts = remainder.split(headingPattern);
-    // parts alternates: [pre-text, heading, content, heading, content, ...]
-    let lastKey = null;
-    for (let i = 0; i < parts.length; i++) {
-        const part = parts[i].trim();
-        if (!part) continue;
-
-        // Check if this part is a heading
-        const matchedSection = MED_SECTIONS.find(s =>
-            part.toUpperCase().startsWith(s.key)
-        );
-        if (matchedSection) {
-            lastKey = matchedSection.key;
-        } else if (lastKey) {
-            sectionMap[lastKey] = (sectionMap[lastKey] || "") + part;
-        }
-    }
-
-    // If no structured sections found, fall back to generic formatting
-    if (Object.keys(sectionMap).length === 0) {
-        return formatAiText(text);
-    }
-
-    // Render structured card
-    let html = '<div class="med-response-card">';
-
-    MED_SECTIONS.forEach(section => {
-        const content = sectionMap[section.key];
-        if (!content || !content.trim()) return;
-
-        const formattedContent = content.trim()
-            .replace(/\n\s*[-•]\s*/g, "\n• ")   // normalise bullet chars
-            .replace(/^[-•]\s*/gm, "• ")
-            .split("\n")
-            .filter(line => line.trim())
-            .map(line => {
-                const trimmed = line.trim();
-                if (trimmed.startsWith("•")) {
-                    return `<li>${escapeHtml(trimmed.slice(1).trim())}</li>`;
-                }
-                return `<p class="med-section-text">${escapeHtml(trimmed)}</p>`;
-            })
-            .join("");
-
-        // Wrap consecutive <li> elements in a <ul>
-        const wrappedContent = formattedContent
-            .replace(/(<li>.*?<\/li>)+/gs, match => `<ul class="med-section-list">${match}</ul>`);
-
-        html += `
-            <div class="med-section">
-                <div class="med-section-header">
-                    <span class="med-section-icon">${section.icon}</span>
-                    <span class="med-section-title">${section.label}</span>
-                </div>
-                <div class="med-section-body">${wrappedContent}</div>
-            </div>`;
-    });
-
-    // Append disclaimer line if present (last sentence after all sections)
-    const disclaimerMatch = clean.match(/Always consult[^.]+\./i);
-    if (disclaimerMatch) {
-        html += `<div class="med-response-disclaimer">${escapeHtml(disclaimerMatch[0])}</div>`;
-    }
-
-    html += "</div>";
-    return html;
-}
-
 function escapeHtml(str) {
-    return str
+    if (!str) return "";
+    return String(str)
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;");
 }
 
-function formatAiText(text){
+function renderMarkdown(text) {
+    if (!text) return "";
 
-    if(!text) return "";
+    const lines = text.split("\n");
+    let html = "";
+    let i = 0;
+    let inList = false;
+    let inOrderedList = false;
+    let inTable = false;
+    let tableRows = [];
 
-    return text
-        .replace(/#{1,6}\s*/g,"")
+    function flushList() {
+        if (inList) { html += "</ul>"; inList = false; }
+        if (inOrderedList) { html += "</ol>"; inOrderedList = false; }
+    }
 
-        .replace(/\*\*/g,"")
-        .replace(/\*/g,"")
+    function flushTable() {
+        if (!inTable) return;
+        inTable = false;
+        if (tableRows.length < 2) { tableRows = []; return; }
+        html += '<div class="ai-table-wrap"><table class="ai-table">';
+        tableRows.forEach((row, idx) => {
+            const tag = idx === 0 ? "th" : "td";
+            const cells = row.split("|").map(c => c.trim()).filter((c, ci, arr) => ci > 0 && ci < arr.length - 1);
+            if (idx === 1 && cells.every(c => /^[-: ]+$/.test(c))) return; // skip separator row
+            html += "<tr>" + cells.map(c => `<${tag}>${inlineFormat(c)}</${tag}>`).join("") + "</tr>";
+        });
+        html += "</table></div>";
+        tableRows = [];
+    }
 
-        .replace(/^\.\s*/gm,"")
-        .replace(/\n\s*\n/g,"\n")
-        .replace(/Medicine Type:/g,'<div class="ai-heading">Medicine Type</div>')
-        .replace(/What It Is Used For:/g,'<div class="ai-heading">What It Is Used For</div>')
-        .replace(/How It Helps the Body:/g,'<div class="ai-heading">How It Helps the Body</div>')
-        .replace(/General Safety Notes:/g,'<div class="ai-heading">General Safety Notes</div>')
-        .replace(/Possible Causes:/g,'<div class="ai-heading">Possible Causes</div>')
-        .replace(/What the Person Can Do:/g,'<div class="ai-heading">What You Can Do</div>')
-        .replace(/When to See a Doctor:/g,'<div class="ai-heading">When to See a Doctor</div>')
+    function inlineFormat(str) {
+        return str
+            .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+            .replace(/\*(.+?)\*/g, "<em>$1</em>")
+            .replace(/`(.+?)`/g, "<code>$1</code>");
+    }
 
-        .replace(/^- /gm,"• ")
-        .replace(/\n/g,"<br>");
+    while (i < lines.length) {
+        const line = lines[i];
+        const trimmed = line.trim();
+
+        // Table row
+        if (trimmed.startsWith("|") && trimmed.endsWith("|")) {
+            flushList();
+            inTable = true;
+            tableRows.push(trimmed);
+            i++; continue;
+        } else if (inTable) {
+            flushTable();
+        }
+
+        // Headings
+        const hMatch = trimmed.match(/^(#{1,4})\s+(.+)/);
+        if (hMatch) {
+            flushList();
+            const level = Math.min(hMatch[1].length + 1, 4);
+            html += `<h${level} class="ai-h${level}">${inlineFormat(hMatch[2])}</h${level}>`;
+            i++; continue;
+        }
+
+        // Horizontal rule
+        if (/^[-*_]{3,}$/.test(trimmed)) {
+            flushList(); html += "<hr class='ai-hr'>"; i++; continue;
+        }
+
+        // Unordered list
+        const ulMatch = trimmed.match(/^[-*•]\s+(.+)/);
+        if (ulMatch) {
+            if (!inList) { flushList(); html += '<ul class="ai-ul">'; inList = true; }
+            html += `<li>${inlineFormat(ulMatch[1])}</li>`;
+            i++; continue;
+        }
+
+        // Ordered list
+        const olMatch = trimmed.match(/^\d+\.\s+(.+)/);
+        if (olMatch) {
+            if (!inOrderedList) { flushList(); html += '<ol class="ai-ol">'; inOrderedList = true; }
+            html += `<li>${inlineFormat(olMatch[1])}</li>`;
+            i++; continue;
+        }
+
+        // Empty line — close open blocks
+        if (!trimmed) {
+            flushList();
+            i++; continue;
+        }
+
+        // Bold-only line (acts as a section heading)
+        const boldLine = trimmed.match(/^\*\*(.+)\*\*:?$/);
+        if (boldLine) {
+            flushList();
+            html += `<p class="ai-bold-heading">${inlineFormat(trimmed)}</p>`;
+            i++; continue;
+        }
+
+        // Normal paragraph
+        flushList();
+        html += `<p class="ai-p">${inlineFormat(trimmed)}</p>`;
+        i++;
+    }
+
+    flushList();
+    flushTable();
+
+    return `<div class="ai-response-body">${html}</div>`;
+}
+
+function formatMedicineResponse(text) {
+    if (!text) return "";
+    return renderMarkdown(text);
+}
+
+function formatAiText(text) {
+    if (!text) return "";
+    return renderMarkdown(text);
 }
 
 function setupPrescriptionUpload() {
@@ -5165,7 +5173,7 @@ function setupPrescriptionUpload() {
             return;
         }
 
-        filesListEl.style.display = "grid";
+        filesListEl.style.display = "flex";
         filesListEl.innerHTML = uploadedFiles.map(f => {
             const thumbHtml = f.isImage && f.thumbUrl
                 ? `<img src="${f.thumbUrl}" alt="Prescription thumbnail" class="upload-file-thumb" />`
@@ -5177,10 +5185,12 @@ function setupPrescriptionUpload() {
 
             return `
                 <div class="upload-file-card" data-id="${f.id}">
-                    ${thumbHtml}
-                    <div class="upload-file-meta">
-                        <span class="upload-file-name" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</span>
-                        <span class="upload-file-size">${formatFileSize(f.size)}</span>
+                    <div class="upload-file-left">
+                        ${thumbHtml}
+                        <div class="upload-file-meta">
+                            <span class="upload-file-name" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</span>
+                            <span class="upload-file-size">${formatFileSize(f.size)}</span>
+                        </div>
                     </div>
                     <button type="button" class="upload-file-remove-btn" data-id="${f.id}" title="Remove file" aria-label="Remove ${escapeHtml(f.name)}">
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" width="14" height="14">
@@ -5372,13 +5382,13 @@ function setupPrescriptionUpload() {
         });
     }
 
-    if (cancelBtn) {
-        cancelBtn.addEventListener("click", () => {
-            clearAllUploadedFiles();
-        });
-    }
+    // Single authoritative processing flag — prevents double-click duplicate requests
+    let _prxProcessing = false;
 
     autofillBtn.addEventListener("click", async () => {
+        // Double-click / re-entry guard
+        if (_prxProcessing) return;
+
         errorEl.textContent = "";
         infoEl.textContent  = "";
         infoEl.style.color  = "";
@@ -5396,13 +5406,15 @@ function setupPrescriptionUpload() {
             return;
         }
 
+        // Enter processing state — ONE loading indicator only (the button)
+        _prxProcessing = true;
         const originalBtnText = autofillBtn.innerHTML;
         autofillBtn.innerHTML = `
-            <svg class="btn-spinner" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" width="16" height="16" style="animation: spin 1s linear infinite;">
+            <svg class="btn-spinner" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" width="16" height="16" style="animation: spin 1s linear infinite; flex-shrink:0;">
                 <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" style="opacity:0.25;"></circle>
                 <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" style="opacity:0.75;"></path>
             </svg>
-            Extracting with AI...
+            Analyzing Prescription...
         `;
         autofillBtn.disabled = true;
 
@@ -5446,7 +5458,16 @@ function setupPrescriptionUpload() {
 
             if (!uploadRes.ok) {
                 const errData = await uploadRes.json().catch(() => ({}));
-                errorEl.textContent = errData.message || "Failed to parse prescription.";
+                const status = uploadRes.status;
+                if (status === 401 || status === 403) {
+                    errorEl.textContent = "Authentication error. Please log out and log in again.";
+                } else if (status === 400) {
+                    errorEl.textContent = errData.message || "Invalid file. Please check the file and try again.";
+                } else if (status >= 500) {
+                    errorEl.textContent = "The prescription analysis service is temporarily unavailable. Please try again.";
+                } else {
+                    errorEl.textContent = errData.message || "Failed to parse prescription. Please try again.";
+                }
                 return;
             }
 
@@ -5454,7 +5475,7 @@ function setupPrescriptionUpload() {
             const medicines = responseData.medicines || (Array.isArray(responseData) ? responseData : []);
 
             if (!Array.isArray(medicines) || medicines.length === 0) {
-                const failMsg = responseData.message || "Unable to reliably extract medicines from this prescription. Please verify the image or upload a clearer photo.";
+                const failMsg = "No medication could be identified in this prescription. Please ensure the image is clear, well-lit, and shows the medicine list.";
                 errorEl.textContent = failMsg;
                 infoEl.textContent = "";
                 showToast(failMsg, "warning");
@@ -5483,7 +5504,7 @@ function setupPrescriptionUpload() {
                 strengthConfidence: typeof m.strengthConfidence === "number" ? m.strengthConfidence : 0.9,
                 scheduleConfidence: typeof m.scheduleConfidence === "number" ? m.scheduleConfidence : 0.9,
                 durationConfidence: typeof m.durationConfidence === "number" ? m.durationConfidence : 0.9,
-                needsVerification: Boolean(m.needsVerification || m.needs_confirmation || (m.confidence && m.confidence < 0.85) || !m.name),
+                needsVerification: Boolean(m.needsVerification || m.needs_confirmation || (m.confidence && m.confidence < 0.65) || !m.name),
                 possibleAlternatives: Array.isArray(m.possibleAlternatives) ? m.possibleAlternatives : [],
                 sourceText: m.sourceText || m.source_text || ""
             }));
@@ -5503,8 +5524,14 @@ function setupPrescriptionUpload() {
 
         } catch (err) {
             console.error("[Prescription] Extraction error:", err);
-            errorEl.textContent = "Error: " + err.message;
+            if (err && err.message && err.message.toLowerCase().includes("fetch")) {
+                errorEl.textContent = "Could not reach the prescription analysis service. Please check your connection.";
+            } else {
+                errorEl.textContent = "Prescription analysis failed. Please try again.";
+            }
         } finally {
+            // Always reset — no matter how the operation ended
+            _prxProcessing = false;
             autofillBtn.disabled = false;
             autofillBtn.innerHTML = originalBtnText;
         }
@@ -5824,11 +5851,7 @@ function setupPrescriptionUpload() {
                 showToast(`Successfully added ${savedCount} medicine(s) from prescription to your DoseBuddy schedule!`, "success");
                 if (reviewSection) reviewSection.style.display = "none";
                 currentExtractedMeds = [];
-                rawFile = null;
-                preprocessedBase64 = null;
-                if (fileInput) fileInput.value = "";
-                if (previewBox) previewBox.style.display = "none";
-                fileNameEl.textContent = "";
+                clearAllUploadedFiles();
                 infoEl.textContent = "";
 
                 invalidateDataCache("/medications/", "/logs/summary/", "/logs/adherence/", "/streaks/");
@@ -5844,11 +5867,7 @@ function setupPrescriptionUpload() {
         cancelBtn.addEventListener("click", () => {
             if (reviewSection) reviewSection.style.display = "none";
             currentExtractedMeds = [];
-            rawFile = null;
-            preprocessedBase64 = null;
-            if (fileInput) fileInput.value = "";
-            if (previewBox) previewBox.style.display = "none";
-            fileNameEl.textContent = "";
+            clearAllUploadedFiles();
             infoEl.textContent = "";
             errorEl.textContent = "";
         });

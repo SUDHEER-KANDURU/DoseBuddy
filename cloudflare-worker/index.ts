@@ -517,7 +517,7 @@ function normalizePrescriptionResult(rawJson: string) {
     const durConf = typeof m.durationConfidence === "number" ? m.durationConfidence : (typeof m.duration_confidence === "number" ? m.duration_confidence : nameConf);
     const overallConf = typeof m.confidence === "number" ? m.confidence : Math.min(nameConf, strengthConf, schedConf, durConf);
 
-    const needsVerify = Boolean(m.needsVerification || m.needs_confirmation || overallConf < 0.85 || nameConf < 0.85 || !cleanBrand);
+    const needsVerify = Boolean(m.needsVerification || m.needs_confirmation || overallConf < 0.65 || nameConf < 0.65 || !cleanBrand);
     const displayName = cleanBrand ? (strength && !cleanBrand.toLowerCase().includes(strength.toLowerCase()) ? `${cleanBrand} ${strength}` : cleanBrand) : "Unknown Medicine";
 
     return {
@@ -646,7 +646,8 @@ async function parsePrescriptionWithAi(env: Env, base64: string, mimeType: strin
 
   // 1. Try Gemini Vision / Document understanding if API key is available
   if (env.GEMINI_API_KEY && base64) {
-    const models = [env.GEMINI_MODEL || "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"];
+    // gemini-2.0-flash and gemini-1.5-* were shut down June 2026. Use current stable models.
+    const models = [env.GEMINI_MODEL || "gemini-2.5-flash", "gemini-2.5-flash-lite"];
     for (const model of models) {
       try {
         const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${env.GEMINI_API_KEY}`, {
@@ -670,13 +671,17 @@ async function parsePrescriptionWithAi(env: Env, base64: string, mimeType: strin
           const candidate = data.candidates?.[0]?.content?.parts?.[0]?.text;
           if (candidate && candidate.trim()) {
             rawJson = candidate.trim();
+            console.log(`[Prescription] Gemini ${model} returned ${candidate.length} chars`);
             break;
+          } else {
+            console.warn(`[Prescription] Gemini ${model} returned empty candidate`);
           }
         } else {
-          console.warn(`Gemini model ${model} returned status ${resp.status}`);
+          const errBody = await resp.text().catch(() => "");
+          console.warn(`[Prescription] Gemini ${model} HTTP ${resp.status}: ${errBody.slice(0, 200)}`);
         }
       } catch (err) {
-        console.error(`Gemini model ${model} error:`, err);
+        console.error(`[Prescription] Gemini model ${model} error:`, err);
       }
     }
   }
@@ -763,7 +768,8 @@ async function parsePrescriptionBatchWithAi(
 
   // Unified multi-file/multi-page single call first
   if (env.GEMINI_API_KEY && validMedia.length > 0) {
-    const models = [env.GEMINI_MODEL || "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"];
+    // gemini-2.0-flash and gemini-1.5-* were shut down June 2026. Use current stable models.
+    const models = [env.GEMINI_MODEL || "gemini-2.5-flash", "gemini-2.5-flash-lite"];
     for (const model of models) {
       try {
         const parts: any[] = [
@@ -800,13 +806,19 @@ async function parsePrescriptionBatchWithAi(
           const candidate = data.candidates?.[0]?.content?.parts?.[0]?.text;
           if (candidate && candidate.trim()) {
             const unifiedResult = normalizePrescriptionResult(candidate.trim());
+            console.log(`[Prescription] Batch Gemini ${model}: ${unifiedResult.medicines?.length ?? 0} medicines extracted`);
             if (unifiedResult.medicines && unifiedResult.medicines.length > 0) {
               return unifiedResult;
             }
+          } else {
+            console.warn(`[Prescription] Batch Gemini ${model} empty candidate`);
           }
+        } else {
+          const errBody = await resp.text().catch(() => "");
+          console.warn(`[Prescription] Batch Gemini ${model} HTTP ${resp.status}: ${errBody.slice(0, 200)}`);
         }
       } catch (err) {
-        console.error(`Gemini unified batch error on model ${model}:`, err);
+        console.error(`[Prescription] Batch Gemini ${model} error:`, err);
       }
     }
   }
@@ -824,8 +836,7 @@ async function callAi(env: Env, prompt: string): Promise<Response> {
   if (env.GEMINI_API_KEY) {
     const models = [
       env.GEMINI_MODEL || "gemini-2.5-flash",
-      "gemini-1.5-flash",
-      "gemini-2.0-flash"
+      "gemini-2.5-flash-lite"
     ];
     for (const model of models) {
       try {
@@ -1114,6 +1125,8 @@ export default {
         if (itemsToProcess.length === 0) {
           return json({ message: "No image or text data provided for extraction" }, 400);
         }
+
+        console.log(`[Prescription] Processing ${itemsToProcess.length} item(s): ${itemsToProcess.map(i => `${i.mimeType}/${i.base64 ? Math.round(i.base64.length * 0.75 / 1024) + "KB" : "text:" + i.textContent.length + "ch"}`).join(", ")}`);
 
         const mergedResult = await parsePrescriptionBatchWithAi(env, itemsToProcess);
         return json(mergedResult);
