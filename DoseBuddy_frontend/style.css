@@ -6353,6 +6353,101 @@ body.dark-mode .status-obese     { background: rgba(220,38,38,0.2); color: #f871
     animation: fadeIn 0.3s ease;
 }
 
+.prescription-review-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: var(--space-4, 16px);
+    flex-wrap: wrap;
+}
+
+.prescription-review-title-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.prx-title-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.prx-header-svg {
+    width: 20px;
+    height: 20px;
+    color: var(--primary, #00A19B);
+    flex-shrink: 0;
+}
+
+.prx-heading {
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--text-primary, #0f172a);
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.prx-count-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 9px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    background: var(--primary-light, #e0f2fe);
+    color: var(--primary, #00A19B);
+    white-space: nowrap;
+    line-height: 1.4;
+}
+
+body.dark-mode .prx-count-pill {
+    background: rgba(0, 161, 155, 0.2);
+    color: #38bdf8;
+}
+
+.prx-subtitle {
+    margin: 0;
+    font-size: 0.78rem;
+    color: var(--text-muted, #64748b);
+}
+
+.prx-ai-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 16px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.prx-badge-ai {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.prx-slot-icon {
+    width: 13px;
+    height: 13px;
+    stroke: currentColor;
+    flex-shrink: 0;
+}
+
+.prx-alert-icon {
+    color: #d97706;
+    flex-shrink: 0;
+}
+
 .prx-safety-disclaimer {
     display: flex;
     align-items: flex-start;

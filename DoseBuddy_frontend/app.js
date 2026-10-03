@@ -5027,15 +5027,14 @@ function setupPrescriptionUpload() {
             renderPrescriptionReview(responseData);
 
             infoEl.style.color = "#15803d";
-            infoEl.textContent = `✨ ${currentExtractedMeds.length} medicine(s) detected. Please review and verify below before saving.`;
+            infoEl.textContent = `${currentExtractedMeds.length} medicine(s) detected. Please review and verify below before saving.`;
             showToast(`Detected ${currentExtractedMeds.length} medicines from prescription. Review below.`, "info");
 
         } catch (err) {
             console.error("[Prescription] Extraction error:", err);
             errorEl.textContent = "Error: " + err.message;
         } finally {
-            autofillBtn.textContent = "Auto Fill from Prescription";
-            autofillBtn.disabled    = false;
+            autofillBtn.disabled = false;
             autofillBtn.classList.remove("btn-loading");
         }
     });
@@ -5075,16 +5074,16 @@ function setupPrescriptionUpload() {
             itemEl.id = item.id;
 
             const nameStatusHtml = item.nameConfidence >= 0.85
-                ? `<span class="prx-badge-status prx-badge-verified">✓ Name (${Math.round(item.nameConfidence * 100)}%)</span>`
-                : `<span class="prx-badge-status prx-badge-warning">⚠️ Verify Name</span>`;
+                ? `<span class="prx-badge-status prx-badge-verified"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" width="12" height="12"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>Name (${Math.round(item.nameConfidence * 100)}%)</span>`
+                : `<span class="prx-badge-status prx-badge-warning"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="12" height="12"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>Verify Name</span>`;
 
             const schedStatusHtml = item.scheduleConfidence >= 0.85
-                ? `<span class="prx-badge-status prx-badge-verified">✓ Schedule</span>`
-                : `<span class="prx-badge-status prx-badge-warning">⚠️ Verify Schedule</span>`;
+                ? `<span class="prx-badge-status prx-badge-verified"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" width="12" height="12"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>Schedule</span>`
+                : `<span class="prx-badge-status prx-badge-warning"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="12" height="12"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>Verify Schedule</span>`;
 
             const overallBadge = (!item.needsVerification && item.confidence >= 0.85)
-                ? `<span class="prx-badge-status prx-badge-verified" style="font-weight:700;">✓ Verified (${Math.round(item.confidence * 100)}%)</span>`
-                : `<span class="prx-badge-status prx-badge-warning" style="font-weight:700;">⚠️ Please verify</span>`;
+                ? `<span class="prx-badge-status prx-badge-verified" style="font-weight:700;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" width="12" height="12"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>Verified (${Math.round(item.confidence * 100)}%)</span>`
+                : `<span class="prx-badge-status prx-badge-warning" style="font-weight:700;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="12" height="12"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>Please verify</span>`;
 
             itemEl.innerHTML = `
                 <div class="prx-med-header">
@@ -5137,8 +5136,11 @@ function setupPrescriptionUpload() {
                         <input type="number" min="1" max="365" class="prx-input-duration" data-id="${item.id}" value="${item.durationDays || 30}">
                     </div>
                     <div class="prx-form-group" style="justify-content: flex-end;">
-                        <button type="button" class="secondary-btn prx-fill-single-btn" data-id="${item.id}" style="padding: 6px 12px; font-size: 0.78rem; align-self: flex-start;">
-                            Fill in Form ↗
+                        <button type="button" class="secondary-btn prx-fill-single-btn" data-id="${item.id}" style="padding: 6px 12px; font-size: 0.78rem; align-self: flex-start; display: inline-flex; align-items: center; gap: 4px;">
+                            Fill in Form
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="13" height="13">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 19.5l15-15m0 0H8.25m11.25 0v11.25" />
+                            </svg>
                         </button>
                     </div>
                 </div>
@@ -5147,19 +5149,33 @@ function setupPrescriptionUpload() {
                     <span class="prx-timing-label">Daily Intake:</span>
                     <label class="prx-time-chip ${item.morning ? 'active' : ''}">
                         <input type="checkbox" class="prx-cb-time" data-id="${item.id}" data-slot="morning" ${item.morning ? 'checked' : ''}>
-                        🌅 Morning (08:00)
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="13" height="13" class="prx-slot-icon">
+                            <circle cx="12" cy="12" r="4"/>
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>
+                        </svg>
+                        Morning (08:00)
                     </label>
                     <label class="prx-time-chip ${item.afternoon ? 'active' : ''}">
                         <input type="checkbox" class="prx-cb-time" data-id="${item.id}" data-slot="afternoon" ${item.afternoon ? 'checked' : ''}>
-                        ☀️ Afternoon (13:00)
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="13" height="13" class="prx-slot-icon">
+                            <circle cx="12" cy="12" r="5"/>
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M5.64 18.36l-1.42 1.42M18.36 5.64l-1.42 1.42"/>
+                        </svg>
+                        Afternoon (13:00)
                     </label>
                     <label class="prx-time-chip ${item.evening ? 'active' : ''}">
                         <input type="checkbox" class="prx-cb-time" data-id="${item.id}" data-slot="evening" ${item.evening ? 'checked' : ''}>
-                        🌆 Evening (18:00)
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="13" height="13" class="prx-slot-icon">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v5m0 0l-2.5-2.5M12 8l2.5-2.5M3 18h18M5 14a7 7 0 0114 0"/>
+                        </svg>
+                        Evening (18:00)
                     </label>
                     <label class="prx-time-chip ${item.night ? 'active' : ''}">
                         <input type="checkbox" class="prx-cb-time" data-id="${item.id}" data-slot="night" ${item.night ? 'checked' : ''}>
-                        🌙 Night (21:00)
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="13" height="13" class="prx-slot-icon">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z"/>
+                        </svg>
+                        Night (21:00)
                     </label>
                 </div>
             `;
