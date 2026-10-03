@@ -4751,13 +4751,17 @@ function formatAiText(text){
 }
 
 function setupPrescriptionUpload() {
-    const fileInput   = document.getElementById("prescription-file-input");
-    const browseBtn   = document.getElementById("prescription-browse-btn");
-    const dropZone    = document.getElementById("prescription-drop-zone");
-    const fileNameEl  = document.getElementById("prescription-file-name");
-    const autofillBtn = document.getElementById("prescription-autofill-btn");
-    const errorEl     = document.getElementById("prescription-error");
-    const infoEl      = document.getElementById("prescription-info");
+    const fileInput     = document.getElementById("prescription-file-input");
+    const browseBtn     = document.getElementById("prescription-browse-btn");
+    const dropZone      = document.getElementById("prescription-drop-zone");
+    const fileNameEl    = document.getElementById("prescription-file-name");
+    const previewBox    = document.getElementById("prescription-preview-box");
+    const previewImg    = document.getElementById("prescription-preview-img");
+    const rotateLeftBtn = document.getElementById("prx-rotate-left-btn");
+    const rotateRightBtn= document.getElementById("prx-rotate-right-btn");
+    const autofillBtn   = document.getElementById("prescription-autofill-btn");
+    const errorEl       = document.getElementById("prescription-error");
+    const infoEl        = document.getElementById("prescription-info");
 
     const reviewSection = document.getElementById("prescription-review-section");
     const countEl       = document.getElementById("prx-detected-count");
@@ -4771,13 +4775,15 @@ function setupPrescriptionUpload() {
         return;
     }
 
-    let selectedFile = null;
+    let rawFile = null;
+    let currentRotation = 0;
+    let preprocessedBase64 = null;
     let currentExtractedMeds = [];
 
     browseBtn.addEventListener("click", () => fileInput.click());
 
     fileInput.addEventListener("change", () => {
-        if (fileInput.files && fileInput.files[0]) setFile(fileInput.files[0]);
+        if (fileInput.files && fileInput.files[0]) handleFileSelect(fileInput.files[0]);
     });
 
     dropZone.addEventListener("dragover", (e) => {
@@ -4789,24 +4795,137 @@ function setupPrescriptionUpload() {
         e.preventDefault();
         dropZone.classList.remove("drag-over");
         const file = e.dataTransfer.files[0];
-        if (file) setFile(file);
+        if (file) handleFileSelect(file);
     });
 
-    function setFile(file) {
-        selectedFile = file;
+    async function handleFileSelect(file) {
+        rawFile = file;
+        currentRotation = 0;
         fileNameEl.textContent = `Selected: ${file.name}`;
         errorEl.textContent = "";
         infoEl.textContent = "";
         infoEl.style.color = "";
         if (reviewSection) reviewSection.style.display = "none";
+
+        if (file.type.startsWith("image/")) {
+            await processAndPreviewImage();
+        } else {
+            if (previewBox) previewBox.style.display = "none";
+            preprocessedBase64 = null;
+        }
+    }
+
+    async function processAndPreviewImage() {
+        if (!rawFile) return;
+        try {
+            const res = await preprocessImageCanvas(rawFile, currentRotation);
+            preprocessedBase64 = res.base64;
+            if (previewBox && previewImg) {
+                previewImg.src = res.base64;
+                previewBox.style.display = "block";
+            }
+        } catch (e) {
+            console.warn("[Prescription] Image preprocessing error:", e);
+        }
+    }
+
+    if (rotateLeftBtn) {
+        rotateLeftBtn.addEventListener("click", async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            currentRotation = (currentRotation - 90 + 360) % 360;
+            await processAndPreviewImage();
+        });
+    }
+
+    if (rotateRightBtn) {
+        rotateRightBtn.addEventListener("click", async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            currentRotation = (currentRotation + 90) % 360;
+            await processAndPreviewImage();
+        });
+    }
+
+    function preprocessImageCanvas(file, rotationDegrees) {
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = new Image();
+                img.onload = () => {
+                    const rads = (rotationDegrees * Math.PI) / 180;
+                    const is90or270 = rotationDegrees === 90 || rotationDegrees === 270;
+                    
+                    let srcW = img.naturalWidth || img.width;
+                    let srcH = img.naturalHeight || img.height;
+
+                    const maxDim = 2400;
+                    if (srcW > maxDim || srcH > maxDim) {
+                        if (srcW > srcH) {
+                            srcH = Math.round((srcH * maxDim) / srcW);
+                            srcW = maxDim;
+                        } else {
+                            srcW = Math.round((srcW * maxDim) / srcH);
+                            srcH = maxDim;
+                        }
+                    }
+
+                    const canvas = document.createElement("canvas");
+                    canvas.width  = is90or270 ? srcH : srcW;
+                    canvas.height = is90or270 ? srcW : srcH;
+
+                    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+                    if (!ctx) {
+                        resolve({ base64: e.target.result });
+                        return;
+                    }
+
+                    ctx.translate(canvas.width / 2, canvas.height / 2);
+                    ctx.rotate(rads);
+                    ctx.drawImage(img, -srcW / 2, -srcH / 2, srcW, srcH);
+
+                    // Adaptive contrast enhancement
+                    try {
+                        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                        const d = imgData.data;
+                        let minLum = 255, maxLum = 0;
+                        for (let i = 0; i < d.length; i += 32) {
+                            const lum = (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000;
+                            if (lum < minLum) minLum = lum;
+                            if (lum > maxLum) maxLum = lum;
+                        }
+                        if (maxLum - minLum > 35 && (minLum > 15 || maxLum < 240)) {
+                            const factor = 255 / (maxLum - minLum);
+                            for (let i = 0; i < d.length; i += 4) {
+                                d[i]     = Math.min(255, Math.max(0, (d[i] - minLum) * factor));
+                                d[i + 1] = Math.min(255, Math.max(0, (d[i + 1] - minLum) * factor));
+                                d[i + 2] = Math.min(255, Math.max(0, (d[i + 2] - minLum) * factor));
+                            }
+                            ctx.putImageData(imgData, 0, 0);
+                        }
+                    } catch (lumErr) {
+                        console.warn("[Prescription] Contrast filter skipped:", lumErr);
+                    }
+
+                    const optimizedDataUrl = canvas.toDataURL("image/jpeg", 0.94);
+                    resolve({ base64: optimizedDataUrl });
+                };
+                img.onerror = () => resolve({ base64: e.target.result });
+                img.src = e.target.result;
+            };
+            reader.onerror = () => resolve({ base64: null });
+            reader.readAsDataURL(file);
+        });
     }
 
     if (cancelBtn) {
         cancelBtn.addEventListener("click", () => {
             currentExtractedMeds = [];
             if (reviewSection) reviewSection.style.display = "none";
-            selectedFile = null;
+            rawFile = null;
+            preprocessedBase64 = null;
             if (fileInput) fileInput.value = "";
+            if (previewBox) previewBox.style.display = "none";
             fileNameEl.textContent = "";
             infoEl.textContent = "";
             errorEl.textContent = "";
@@ -4818,7 +4937,7 @@ function setupPrescriptionUpload() {
         infoEl.textContent  = "";
         infoEl.style.color  = "";
 
-        if (!selectedFile) {
+        if (!rawFile) {
             errorEl.textContent = "Please select a prescription file first.";
             return;
         }
@@ -4836,13 +4955,25 @@ function setupPrescriptionUpload() {
         autofillBtn.classList.add("btn-loading");
 
         try {
-            const formData = new FormData();
-            formData.append("file", selectedFile);
-
-            const uploadRes = await authFetch(`${API_BASE}/prescription/upload`, {
-                method: "POST",
-                body:   formData
-            });
+            let uploadRes;
+            if (preprocessedBase64 && preprocessedBase64.startsWith("data:")) {
+                // Send preprocessed contrast-enhanced & rotated base64
+                uploadRes = await authFetch(`${API_BASE}/prescription/upload`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        image: preprocessedBase64,
+                        mimeType: "image/jpeg"
+                    })
+                });
+            } else {
+                const formData = new FormData();
+                formData.append("file", rawFile);
+                uploadRes = await authFetch(`${API_BASE}/prescription/upload`, {
+                    method: "POST",
+                    body:   formData
+                });
+            }
 
             if (!uploadRes.ok) {
                 const errData = await uploadRes.json().catch(() => ({}));
@@ -4861,20 +4992,29 @@ function setupPrescriptionUpload() {
 
             currentExtractedMeds = medicines.map((m, idx) => ({
                 id: `prx_item_${Date.now()}_${idx}`,
-                name: m.name || m.medicineName || "",
+                brandName: m.brandName || m.name || m.medicineName || "",
+                genericName: m.genericName || "",
+                name: m.name || m.medicineName || m.brandName || "",
                 strength: m.strength || "",
                 dosage: m.dosage || "1 Tablet",
                 form: m.form || "Tablet",
-                instructions: m.food_instruction || m.instructions || "Before meal",
-                durationDays: m.duration_days || (m.duration_value ? m.duration_value * (m.duration_unit === "months" ? 30 : 7) : 30),
+                foodInstruction: m.foodInstruction || m.food_instruction || m.instructions || "Before meal",
+                startDate: m.startDate || "",
+                duration: m.duration || `${m.durationDays || 30} Days`,
+                durationDays: m.durationDays || (m.duration_days ? m.duration_days : (m.duration_value ? m.duration_value * (m.duration_unit === "months" ? 30 : 7) : 30)),
                 morning: Boolean(m.morning || (m.times && m.times.includes("08:00"))),
                 afternoon: Boolean(m.afternoon || (m.times && (m.times.includes("13:00") || m.times.includes("14:00")))),
                 evening: Boolean(m.evening || (m.times && m.times.includes("18:00"))),
                 night: Boolean(m.night || (m.times && (m.times.includes("20:00") || m.times.includes("21:00")))),
                 times: Array.isArray(m.times) ? m.times : ["08:00"],
                 confidence: typeof m.confidence === "number" ? m.confidence : 0.9,
-                needsConfirmation: Boolean(m.needs_confirmation || (m.confidence && m.confidence < 0.85) || !m.name),
-                sourceText: m.source_text || ""
+                nameConfidence: typeof m.nameConfidence === "number" ? m.nameConfidence : (typeof m.name_confidence === "number" ? m.name_confidence : 0.9),
+                strengthConfidence: typeof m.strengthConfidence === "number" ? m.strengthConfidence : 0.9,
+                scheduleConfidence: typeof m.scheduleConfidence === "number" ? m.scheduleConfidence : 0.9,
+                durationConfidence: typeof m.durationConfidence === "number" ? m.durationConfidence : 0.9,
+                needsVerification: Boolean(m.needsVerification || m.needs_confirmation || (m.confidence && m.confidence < 0.85) || !m.name),
+                possibleAlternatives: Array.isArray(m.possibleAlternatives) ? m.possibleAlternatives : [],
+                sourceText: m.sourceText || m.source_text || ""
             }));
 
             currentExtractedMeds.forEach(m => {
@@ -4908,9 +5048,13 @@ function setupPrescriptionUpload() {
 
         if (metaBar) {
             const metaParts = [];
-            if (data.patient_name) metaParts.push(`<strong>Patient:</strong> ${escapeHtml(data.patient_name)}`);
-            if (data.doctor_name)  metaParts.push(`<strong>Doctor:</strong> ${escapeHtml(data.doctor_name)}`);
-            if (data.visit_date)   metaParts.push(`<strong>Date:</strong> ${escapeHtml(data.visit_date)}`);
+            const patient = data.patientName || data.patient_name;
+            const doctor  = data.doctorName  || data.doctor_name;
+            const date    = data.visitDate   || data.visit_date;
+
+            if (patient) metaParts.push(`<strong>Patient:</strong> ${escapeHtml(patient)}`);
+            if (doctor)  metaParts.push(`<strong>Doctor:</strong> ${escapeHtml(doctor)}`);
+            if (date)    metaParts.push(`<strong>Visit Date:</strong> ${escapeHtml(date)}`);
             if (metaParts.length > 0) {
                 metaBar.innerHTML = metaParts.join(" &nbsp;|&nbsp; ");
                 metaBar.style.display = "flex";
@@ -4923,20 +5067,28 @@ function setupPrescriptionUpload() {
 
         currentExtractedMeds.forEach((item, index) => {
             const itemEl = document.createElement("div");
-            itemEl.className = `prx-med-item ${item.needsConfirmation ? "needs-verify" : "verified"}`;
+            itemEl.className = `prx-med-item ${item.needsVerification ? "needs-verify" : "verified"}`;
             itemEl.id = item.id;
 
-            const isVerified = !item.needsConfirmation && item.confidence >= 0.85;
-            const badgeHtml = isVerified
-                ? `<span class="prx-badge-status prx-badge-verified">✓ Verified (${Math.round(item.confidence * 100)}%)</span>`
-                : `<span class="prx-badge-status prx-badge-warning">⚠️ Please verify</span>`;
+            const nameStatusHtml = item.nameConfidence >= 0.85
+                ? `<span class="prx-badge-status prx-badge-verified">✓ Name (${Math.round(item.nameConfidence * 100)}%)</span>`
+                : `<span class="prx-badge-status prx-badge-warning">⚠️ Verify Name</span>`;
+
+            const schedStatusHtml = item.scheduleConfidence >= 0.85
+                ? `<span class="prx-badge-status prx-badge-verified">✓ Schedule</span>`
+                : `<span class="prx-badge-status prx-badge-warning">⚠️ Verify Schedule</span>`;
+
+            const overallBadge = (!item.needsVerification && item.confidence >= 0.85)
+                ? `<span class="prx-badge-status prx-badge-verified" style="font-weight:700;">✓ Verified (${Math.round(item.confidence * 100)}%)</span>`
+                : `<span class="prx-badge-status prx-badge-warning" style="font-weight:700;">⚠️ Please verify</span>`;
 
             itemEl.innerHTML = `
                 <div class="prx-med-header">
                     <div class="prx-med-title-row">
                         <strong>#${index + 1}</strong>
-                        ${badgeHtml}
-                        ${item.sourceText ? `<small style="color:var(--text-muted); font-size:0.7rem; margin-left:auto;" title="${escapeHtml(item.sourceText)}">${escapeHtml(item.sourceText.substring(0, 40))}...</small>` : ""}
+                        ${overallBadge}
+                        ${nameStatusHtml}
+                        ${schedStatusHtml}
                     </div>
                     <div style="display:flex; gap:6px;">
                         <button type="button" class="prx-del-btn" title="Remove this medicine" data-action="delete" data-id="${item.id}">
@@ -4947,22 +5099,35 @@ function setupPrescriptionUpload() {
                     </div>
                 </div>
 
+                ${item.sourceText ? `<div style="background:rgba(0,0,0,0.03); padding:4px 8px; border-radius:4px; font-size:0.72rem; color:var(--text-muted); margin-bottom:8px; font-family:monospace;">Rx text: ${escapeHtml(item.sourceText)}</div>` : ""}
+
                 <div class="prx-form-grid">
                     <div class="prx-form-group">
-                        <label>Medicine Name *</label>
-                        <input type="text" class="prx-input-name" data-id="${item.id}" value="${escapeHtml(item.name)}" placeholder="e.g. Esomac">
+                        <label>Brand / Medicine Name *</label>
+                        <input type="text" class="prx-input-brand" data-id="${item.id}" value="${escapeHtml(item.brandName || item.name)}" placeholder="e.g. Esomac">
                     </div>
                     <div class="prx-form-group">
-                        <label>Dosage / Strength</label>
-                        <input type="text" class="prx-input-dosage" data-id="${item.id}" value="${escapeHtml(item.dosage || item.strength)}" placeholder="e.g. 40 mg">
+                        <label>Generic Ingredient</label>
+                        <input type="text" class="prx-input-generic" data-id="${item.id}" value="${escapeHtml(item.genericName)}" placeholder="e.g. Esomeprazole">
                     </div>
                     <div class="prx-form-group">
-                        <label>Food Instructions</label>
-                        <input type="text" class="prx-input-instructions" data-id="${item.id}" value="${escapeHtml(item.instructions)}" placeholder="e.g. Before meal">
+                        <label>Strength & Form</label>
+                        <input type="text" class="prx-input-strength" data-id="${item.id}" value="${escapeHtml(item.strength || item.dosage)}" placeholder="e.g. 40 mg Tablet">
                     </div>
                 </div>
 
-                <div class="prx-form-grid" style="grid-template-columns: 1fr 1fr; margin-bottom: 6px;">
+                <div class="prx-form-grid">
+                    <div class="prx-form-group">
+                        <label>Food Instruction</label>
+                        <select class="prx-select-food" data-id="${item.id}">
+                            <option value="Before meal" ${item.foodInstruction === 'Before meal' ? 'selected' : ''}>Before meal</option>
+                            <option value="After meal" ${item.foodInstruction === 'After meal' ? 'selected' : ''}>After meal</option>
+                            <option value="Before Breakfast" ${item.foodInstruction === 'Before Breakfast' ? 'selected' : ''}>Before Breakfast</option>
+                            <option value="With food" ${item.foodInstruction === 'With food' ? 'selected' : ''}>With food</option>
+                            <option value="Empty stomach" ${item.foodInstruction === 'Empty stomach' ? 'selected' : ''}>Empty stomach</option>
+                            <option value="As directed" ${item.foodInstruction === 'As directed' ? 'selected' : ''}>As directed</option>
+                        </select>
+                    </div>
                     <div class="prx-form-group">
                         <label>Duration (Days)</label>
                         <input type="number" min="1" max="365" class="prx-input-duration" data-id="${item.id}" value="${item.durationDays || 30}">
@@ -4975,7 +5140,7 @@ function setupPrescriptionUpload() {
                 </div>
 
                 <div class="prx-timing-row">
-                    <span class="prx-timing-label">Schedule:</span>
+                    <span class="prx-timing-label">Daily Intake:</span>
                     <label class="prx-time-chip ${item.morning ? 'active' : ''}">
                         <input type="checkbox" class="prx-cb-time" data-id="${item.id}" data-slot="morning" ${item.morning ? 'checked' : ''}>
                         🌅 Morning (08:00)
@@ -4998,24 +5163,38 @@ function setupPrescriptionUpload() {
             medsListEl.appendChild(itemEl);
         });
 
-        medsListEl.querySelectorAll(".prx-input-name").forEach(inp => {
+        // Event listeners
+        medsListEl.querySelectorAll(".prx-input-brand").forEach(inp => {
             inp.addEventListener("input", (e) => {
                 const item = currentExtractedMeds.find(m => m.id === e.target.dataset.id);
-                if (item) item.name = e.target.value.trim();
+                if (item) {
+                    item.brandName = e.target.value.trim();
+                    item.name = item.brandName;
+                }
             });
         });
 
-        medsListEl.querySelectorAll(".prx-input-dosage").forEach(inp => {
+        medsListEl.querySelectorAll(".prx-input-generic").forEach(inp => {
             inp.addEventListener("input", (e) => {
                 const item = currentExtractedMeds.find(m => m.id === e.target.dataset.id);
-                if (item) item.dosage = e.target.value.trim();
+                if (item) item.genericName = e.target.value.trim();
             });
         });
 
-        medsListEl.querySelectorAll(".prx-input-instructions").forEach(inp => {
+        medsListEl.querySelectorAll(".prx-input-strength").forEach(inp => {
             inp.addEventListener("input", (e) => {
                 const item = currentExtractedMeds.find(m => m.id === e.target.dataset.id);
-                if (item) item.instructions = e.target.value.trim();
+                if (item) {
+                    item.strength = e.target.value.trim();
+                    item.dosage = item.strength;
+                }
+            });
+        });
+
+        medsListEl.querySelectorAll(".prx-select-food").forEach(sel => {
+            sel.addEventListener("change", (e) => {
+                const item = currentExtractedMeds.find(m => m.id === e.target.dataset.id);
+                if (item) item.foodInstruction = e.target.value;
             });
         });
 
@@ -5052,13 +5231,13 @@ function setupPrescriptionUpload() {
                 const item = currentExtractedMeds.find(m => m.id === btn.dataset.id);
                 if (item) {
                     fillMedicineForm({
-                        medicineName: item.name,
-                        dosage: item.dosage,
-                        instructions: item.instructions,
+                        medicineName: item.brandName || item.name,
+                        dosage: item.strength || item.dosage,
+                        instructions: item.foodInstruction,
                         duration_days: item.durationDays,
                         times: getTimesFromSchedule(item)
                     });
-                    showToast(`Filled form with ${item.name}`, "info");
+                    showToast(`Filled form with ${item.brandName || item.name}`, "info");
                     const formCard = document.querySelector(".addmed-form-card");
                     if (formCard) formCard.scrollIntoView({ behavior: "smooth", block: "start" });
                 }
@@ -5096,8 +5275,11 @@ function setupPrescriptionUpload() {
             let failCount  = 0;
 
             for (const item of currentExtractedMeds) {
-                const name = (item.name || "").trim();
-                if (!name) {
+                const brand = (item.brandName || item.name || "").trim();
+                const gen = (item.genericName || "").trim();
+                const fullName = brand + (gen && !brand.toLowerCase().includes(gen.toLowerCase()) ? ` (${gen})` : "");
+
+                if (!fullName.trim()) {
                     failCount++;
                     continue;
                 }
@@ -5115,9 +5297,9 @@ function setupPrescriptionUpload() {
 
                 const payload = {
                     userId:       currentUser.id,
-                    name,
-                    dosage:       item.dosage || "As prescribed",
-                    instructions: item.instructions || "",
+                    name:         fullName,
+                    dosage:       item.strength || item.dosage || "As prescribed",
+                    instructions: item.foodInstruction || "",
                     startDate:    todayStr,
                     endDate:      endDateStr,
                     times
@@ -5148,8 +5330,10 @@ function setupPrescriptionUpload() {
                 showToast(`✓ Successfully added ${savedCount} medicine(s) to your DoseBuddy schedule!`, "success");
                 if (reviewSection) reviewSection.style.display = "none";
                 currentExtractedMeds = [];
-                selectedFile = null;
+                rawFile = null;
+                preprocessedBase64 = null;
                 if (fileInput) fileInput.value = "";
+                if (previewBox) previewBox.style.display = "none";
                 fileNameEl.textContent = "";
                 infoEl.textContent = "";
 
@@ -5170,9 +5354,9 @@ function setupPrescriptionUpload() {
         const startEl = document.getElementById("med-start-date");
         const endEl   = document.getElementById("med-end-date");
 
-        if (nameEl)  nameEl.value  = result.medicineName || result.name || "";
+        if (nameEl)  nameEl.value  = result.medicineName || result.name || result.brandName || "";
         if (doseEl)  doseEl.value  = result.dosage || result.strength || "";
-        if (instrEl) instrEl.value = result.food_instruction || result.instructions || "";
+        if (instrEl) instrEl.value = result.foodInstruction || result.food_instruction || result.instructions || "";
 
         const _now = new Date();
         const todayStr = [
@@ -5184,7 +5368,7 @@ function setupPrescriptionUpload() {
         if (startEl && !startEl.value) startEl.value = todayStr;
 
         if (endEl) {
-            const days = result.duration_days || 30;
+            const days = result.durationDays || result.duration_days || 30;
             const endD = new Date();
             endD.setDate(endD.getDate() + days);
             endEl.value = [

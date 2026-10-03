@@ -945,6 +945,13 @@
                             </button>
 
                             <p id="prescription-file-name" class="upload-file-selected"></p>
+                            <div id="prescription-preview-box" class="upload-preview-box" style="display:none; margin-top: 10px;">
+                                <img id="prescription-preview-img" class="upload-preview-img" alt="Prescription preview" style="max-height: 140px; border-radius: 6px; border: 1px solid var(--border); object-fit: contain; margin: 0 auto; display: block;">
+                                <div class="upload-preview-tools" style="display: flex; justify-content: center; gap: 8px; margin-top: 6px;">
+                                    <button type="button" class="upload-tool-btn secondary-btn" id="prx-rotate-left-btn" style="padding: 4px 10px; font-size: 0.72rem;">↺ Rotate Left</button>
+                                    <button type="button" class="upload-tool-btn secondary-btn" id="prx-rotate-right-btn" style="padding: 4px 10px; font-size: 0.72rem;">↻ Rotate Right</button>
+                                </div>
+                            </div>
                         </div>
 
                         <div class="upload-formats">
