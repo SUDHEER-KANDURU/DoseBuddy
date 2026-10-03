@@ -793,6 +793,260 @@ function setupSignupSteps() {
             setButtonLoading(submitBtn, false, "Create Account");
         }
     });
+
+    setupIntlCountryPickers();
+}
+
+const INTL_COUNTRIES = [
+    { name: "India", code: "IN", dial: "+91" },
+    { name: "United States", code: "US", dial: "+1" },
+    { name: "United Kingdom", code: "GB", dial: "+44" },
+    { name: "Canada", code: "CA", dial: "+1" },
+    { name: "Australia", code: "AU", dial: "+61" },
+    { name: "United Arab Emirates", code: "AE", dial: "+971" },
+    { name: "Singapore", code: "SG", dial: "+65" },
+    { name: "Germany", code: "DE", dial: "+49" },
+    { name: "France", code: "FR", dial: "+33" },
+    { name: "Japan", code: "JP", dial: "+81" },
+    { name: "China", code: "CN", dial: "+86" },
+    { name: "Brazil", code: "BR", dial: "+55" },
+    { name: "South Africa", code: "ZA", dial: "+27" },
+    { name: "Malaysia", code: "MY", dial: "+60" },
+    { name: "Pakistan", code: "PK", dial: "+92" },
+    { name: "Bangladesh", code: "BD", dial: "+880" },
+    { name: "Saudi Arabia", code: "SA", dial: "+966" },
+    { name: "Qatar", code: "QA", dial: "+974" },
+    { name: "Kuwait", code: "KW", dial: "+965" },
+    { name: "Oman", code: "OM", dial: "+968" },
+    { name: "Bahrain", code: "BH", dial: "+973" },
+    { name: "Sri Lanka", code: "LK", dial: "+94" },
+    { name: "Nepal", code: "NP", dial: "+977" },
+    { name: "New Zealand", code: "NZ", dial: "+64" },
+    { name: "Ireland", code: "IE", dial: "+353" },
+    { name: "Italy", code: "IT", dial: "+39" },
+    { name: "Spain", code: "ES", dial: "+34" },
+    { name: "Netherlands", code: "NL", dial: "+31" },
+    { name: "Switzerland", code: "CH", dial: "+41" },
+    { name: "Sweden", code: "SE", dial: "+46" },
+    { name: "Norway", code: "NO", dial: "+47" },
+    { name: "Denmark", code: "DK", dial: "+45" },
+    { name: "Finland", code: "FI", dial: "+358" },
+    { name: "South Korea", code: "KR", dial: "+82" },
+    { name: "Indonesia", code: "ID", dial: "+62" },
+    { name: "Philippines", code: "PH", dial: "+63" },
+    { name: "Thailand", code: "TH", dial: "+66" },
+    { name: "Vietnam", code: "VN", dial: "+84" },
+    { name: "Mexico", code: "MX", dial: "+52" },
+    { name: "Argentina", code: "AR", dial: "+54" },
+    { name: "Colombia", code: "CO", dial: "+57" },
+    { name: "Chile", code: "CL", dial: "+56" },
+    { name: "Peru", code: "PE", dial: "+51" },
+    { name: "Egypt", code: "EG", dial: "+20" },
+    { name: "Nigeria", code: "NG", dial: "+234" },
+    { name: "Kenya", code: "KE", dial: "+254" },
+    { name: "Ghana", code: "GH", dial: "+233" },
+    { name: "Turkey", code: "TR", dial: "+90" },
+    { name: "Greece", code: "GR", dial: "+30" },
+    { name: "Portugal", code: "PT", dial: "+351" },
+    { name: "Poland", code: "PL", dial: "+48" },
+    { name: "Austria", code: "AT", dial: "+43" },
+    { name: "Belgium", code: "BE", dial: "+32" },
+    { name: "Czech Republic", code: "CZ", dial: "+420" },
+    { name: "Hungary", code: "HU", dial: "+36" },
+    { name: "Romania", code: "RO", dial: "+40" },
+    { name: "Israel", code: "IL", dial: "+972" },
+    { name: "Hong Kong", code: "HK", dial: "+852" },
+    { name: "Taiwan", code: "TW", dial: "+886" },
+    { name: "Afghanistan", code: "AF", dial: "+93" },
+    { name: "Albania", code: "AL", dial: "+355" },
+    { name: "Algeria", code: "DZ", dial: "+213" },
+    { name: "Andorra", code: "AD", dial: "+376" },
+    { name: "Angola", code: "AO", dial: "+244" },
+    { name: "Armenia", code: "AM", dial: "+374" },
+    { name: "Azerbaijan", code: "AZ", dial: "+994" },
+    { name: "Bahamas", code: "BS", dial: "+1-242" },
+    { name: "Barbados", code: "BB", dial: "+1-246" },
+    { name: "Belarus", code: "BY", dial: "+375" },
+    { name: "Belize", code: "BZ", dial: "+501" },
+    { name: "Benin", code: "BJ", dial: "+229" },
+    { name: "Bhutan", code: "BT", dial: "+975" },
+    { name: "Bolivia", code: "BO", dial: "+591" },
+    { name: "Bosnia and Herzegovina", code: "BA", dial: "+387" },
+    { name: "Botswana", code: "BW", dial: "+267" },
+    { name: "Brunei", code: "BN", dial: "+673" },
+    { name: "Bulgaria", code: "BG", dial: "+359" },
+    { name: "Cambodia", code: "KH", dial: "+855" },
+    { name: "Cameroon", code: "CM", dial: "+237" },
+    { name: "Costa Rica", code: "CR", dial: "+506" },
+    { name: "Croatia", code: "HR", dial: "+385" },
+    { name: "Cyprus", code: "CY", dial: "+357" },
+    { name: "Ecuador", code: "EC", dial: "+593" },
+    { name: "Estonia", code: "EE", dial: "+372" },
+    { name: "Ethiopia", code: "ET", dial: "+251" },
+    { name: "Fiji", code: "FJ", dial: "+679" },
+    { name: "Georgia", code: "GE", dial: "+995" },
+    { name: "Guatemala", code: "GT", dial: "+502" },
+    { name: "Iceland", code: "IS", dial: "+354" },
+    { name: "Jamaica", code: "JM", dial: "+1-876" },
+    { name: "Jordan", code: "JO", dial: "+962" },
+    { name: "Kazakhstan", code: "KZ", dial: "+7" },
+    { name: "Latvia", code: "LV", dial: "+371" },
+    { name: "Lebanon", code: "LB", dial: "+961" },
+    { name: "Lithuania", code: "LT", dial: "+370" },
+    { name: "Luxembourg", code: "LU", dial: "+352" },
+    { name: "Maldives", code: "MV", dial: "+960" },
+    { name: "Malta", code: "MT", dial: "+356" },
+    { name: "Mauritius", code: "MU", dial: "+230" },
+    { name: "Monaco", code: "MC", dial: "+377" },
+    { name: "Morocco", code: "MA", dial: "+212" },
+    { name: "Panama", code: "PA", dial: "+507" },
+    { name: "Paraguay", code: "PY", dial: "+595" },
+    { name: "Serbia", code: "RS", dial: "+381" },
+    { name: "Slovakia", code: "SK", dial: "+421" },
+    { name: "Slovenia", code: "SI", dial: "+386" },
+    { name: "Tanzania", code: "TZ", dial: "+255" },
+    { name: "Uganda", code: "UG", dial: "+256" },
+    { name: "Ukraine", code: "UA", dial: "+380" },
+    { name: "Uruguay", code: "UY", dial: "+598" },
+    { name: "Uzbekistan", code: "UZ", dial: "+998" },
+    { name: "Zimbabwe", code: "ZW", dial: "+263" }
+];
+
+function setupIntlCountryPickers() {
+    const pickers = document.querySelectorAll(".intl-country-picker");
+    if (pickers.length === 0) return;
+
+    pickers.forEach(picker => {
+        const targetId = picker.dataset.target;
+        const hiddenInput = document.getElementById(targetId);
+        const btn = picker.querySelector(".intl-picker-btn");
+        const dropdown = picker.querySelector(".intl-dropdown-menu");
+        const searchInput = picker.querySelector(".intl-search-input");
+        const listContainer = picker.querySelector(".intl-country-list");
+
+        if (!btn || !dropdown || !listContainer) return;
+
+        let selectedCountry = INTL_COUNTRIES.find(c => c.code === "IN") || INTL_COUNTRIES[0];
+
+        function getFlagImgUrl(code) {
+            return `https://flagcdn.com/w40/${code.toLowerCase()}.png`;
+        }
+
+        function updateTrigger(c) {
+            selectedCountry = c;
+            if (hiddenInput) {
+                hiddenInput.value = c.dial;
+                hiddenInput.dataset.country = c.code;
+            }
+            const flagSpan = btn.querySelector(".intl-flag-icon");
+            const codeSpan = btn.querySelector(".intl-picker-code");
+            if (flagSpan) {
+                flagSpan.innerHTML = `<img src="${getFlagImgUrl(c.code)}" alt="${c.name}" class="intl-flag-img" onerror="this.style.display='none';">`;
+            }
+            if (codeSpan) {
+                codeSpan.textContent = `${c.code} ${c.dial}`;
+            }
+        }
+
+        function renderList(filtered) {
+            if (filtered.length === 0) {
+                listContainer.innerHTML = `<div class="intl-no-results">No countries found</div>`;
+                return;
+            }
+
+            listContainer.innerHTML = filtered.map((c, i) => {
+                const isSelected = c.code === selectedCountry.code;
+                return `
+                    <div class="intl-country-item ${isSelected ? 'selected' : ''}" data-code="${c.code}" data-index="${i}" role="option" aria-selected="${isSelected}">
+                        <span class="intl-flag-icon"><img src="${getFlagImgUrl(c.code)}" alt="${c.name}" class="intl-flag-img" onerror="this.style.display='none';"></span>
+                        <span class="intl-country-name">${escapeHtml(c.name)}</span>
+                        <span class="intl-country-dial">${c.dial}</span>
+                    </div>
+                `;
+            }).join("");
+
+            listContainer.querySelectorAll(".intl-country-item").forEach(item => {
+                item.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                    const code = item.dataset.code;
+                    const found = INTL_COUNTRIES.find(c => c.code === code);
+                    if (found) {
+                        updateTrigger(found);
+                    }
+                    closeDropdown();
+                });
+            });
+        }
+
+        function openDropdown() {
+            document.querySelectorAll(".intl-dropdown-menu").forEach(d => {
+                if (d !== dropdown) d.style.display = "none";
+            });
+            document.querySelectorAll(".intl-picker-btn").forEach(b => {
+                if (b !== btn) b.setAttribute("aria-expanded", "false");
+            });
+
+            dropdown.style.display = "flex";
+            btn.setAttribute("aria-expanded", "true");
+            if (searchInput) {
+                searchInput.value = "";
+                renderList(INTL_COUNTRIES);
+                setTimeout(() => searchInput.focus(), 50);
+            }
+        }
+
+        function closeDropdown() {
+            dropdown.style.display = "none";
+            btn.setAttribute("aria-expanded", "false");
+        }
+
+        btn.addEventListener("click", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (dropdown.style.display === "flex") {
+                closeDropdown();
+            } else {
+                openDropdown();
+            }
+        });
+
+        if (searchInput) {
+            searchInput.addEventListener("input", (e) => {
+                const q = e.target.value.trim().toLowerCase();
+                if (!q) {
+                    renderList(INTL_COUNTRIES);
+                    return;
+                }
+                const filtered = INTL_COUNTRIES.filter(c => 
+                    c.name.toLowerCase().includes(q) || 
+                    c.dial.toLowerCase().includes(q) || 
+                    c.code.toLowerCase().includes(q)
+                );
+                renderList(filtered);
+            });
+
+            searchInput.addEventListener("keydown", (e) => {
+                if (e.key === "Escape") {
+                    closeDropdown();
+                    btn.focus();
+                } else if (e.key === "Enter") {
+                    e.preventDefault();
+                    const firstItem = listContainer.querySelector(".intl-country-item");
+                    if (firstItem) firstItem.click();
+                }
+            });
+        }
+
+        // Initialize default (India)
+        updateTrigger(selectedCountry);
+    });
+
+    document.addEventListener("click", (e) => {
+        if (!e.target.closest(".intl-country-picker")) {
+            document.querySelectorAll(".intl-dropdown-menu").forEach(d => d.style.display = "none");
+            document.querySelectorAll(".intl-picker-btn").forEach(b => b.setAttribute("aria-expanded", "false"));
+        }
+    });
 }
 
 function goToSignupStep(step) {
@@ -5151,7 +5405,6 @@ function setupPrescriptionUpload() {
             Extracting with AI...
         `;
         autofillBtn.disabled = true;
-        autofillBtn.classList.add("btn-loading");
 
         try {
             let uploadRes;
@@ -5253,7 +5506,6 @@ function setupPrescriptionUpload() {
             errorEl.textContent = "Error: " + err.message;
         } finally {
             autofillBtn.disabled = false;
-            autofillBtn.classList.remove("btn-loading");
             autofillBtn.innerHTML = originalBtnText;
         }
     });

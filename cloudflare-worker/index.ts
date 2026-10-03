@@ -324,61 +324,43 @@ function buildVitalResponse(r: Json) {
 }
 
 function bufferToBase64(buffer: ArrayBuffer): string {
+  if (typeof Buffer !== "undefined") {
+    return Buffer.from(buffer).toString("base64");
+  }
   const bytes = new Uint8Array(buffer);
   let binary = "";
-  const chunkSize = 8192;
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    const chunk = bytes.subarray(i, i + chunkSize);
-    binary += String.fromCharCode.apply(null, chunk as unknown as number[]);
+  const len = bytes.byteLength;
+  const chunkSize = 16384;
+  for (let i = 0; i < len; i += chunkSize) {
+    const end = Math.min(i + chunkSize, len);
+    binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, end)));
   }
   return btoa(binary);
 }
 
-const PRESCRIPTION_PROMPT = `You are an expert Clinical Pharmacist and Medical Prescription Document Parser specializing in real-world clinic and hospital prescriptions (including printed EHR summaries and handwritten doctor prescriptions).
+const PRESCRIPTION_PROMPT = `You are an expert Clinical Pharmacist and Medical Prescription Document Parser specializing in outpatient, inpatient, printed EHR summaries, and doctor prescriptions.
 
-CRITICAL EXTRACTION & ORIENTATION & ZERO-HALLUCINATION RULES:
-1. AUTOMATIC ORIENTATION DETECTION:
-   - The prescription image(s) may be uploaded in ANY orientation (0° upright, 90° clockwise, 180° upside down, 270° counter-clockwise, or photographed at an angle/tilted).
-   - First detect the natural reading orientation of the medical text, hospital headers, and handwriting for each page independently.
-   - Read all text in its true reading direction regardless of image rotation.
+CRITICAL EXTRACTION & ORIENTATION RULES:
+1. AUTOMATIC ORIENTATION & MULTI-PAGE UNDERSTANDING:
+   - The document or image(s) may be in ANY orientation (0° upright, 90° clockwise, 180° inverted, 270° counter-clockwise, or photographed at an angle).
+   - Determine reading orientation independently for each page/document.
+   - Read all text in its true visual orientation. All uploaded pages/files belong to ONE SINGLE prescription.
 
-2. MULTI-PAGE & UNIFIED EXTRACTION:
-   - All uploaded images/pages belong to ONE prescription.
-   - Read across all pages and consolidate every distinct medication into a single unified list.
-   - If the same medication is referenced or repeated on multiple pages, consolidate its details into ONE single entry.
-
-3. ZERO HALLUCINATION POLICY:
-   - Extract ONLY medications and instructions physically visible in the document.
-   - NEVER invent a medicine name, fabricate unreadable letters, or assume schedules not stated.
-   - If a field (e.g. food timing, duration, frequency) is not visible, leave it blank or default without dropping the medicine.
-
-4. TABLE & TIMING DISSECTION:
-   - Table columns like [Medicine] | [Morning] | [Afternoon] | [Evening] | [Night] | [Instructions]:
-     * Numbers ("1", "0.5", "2", "✓") indicate taking the dose at that slot.
-     * "-", "–", "0", or empty indicates NOT taken.
-   - Map timing slots to standard times:
+2. TABLE & SCHEDULE DISSECTION (ROW-TO-COLUMN PRESERVATION):
+   - In prescriptions with schedule tables containing columns such as [Medicine] | [Morning] | [Afternoon] | [Evening] | [Night] | [Instructions]:
+     * A dosage value ("1", "0.5", "2", "✓") in a column belongs ONLY to the medicine row on that exact same horizontal line.
+     * Never shift timing values between rows.
+     * Columns with "-", "–", "0", or empty mean that slot is NOT taken (value = 0).
+   - Standard slot times:
      * Morning = 08:00
      * Afternoon = 13:00 / 14:00
      * Evening = 18:00
      * Night = 21:00
 
-5. FIELD NORMALIZATION:
-   - "brandName": Clean trade/brand name (e.g. "ESOMAC", "ACOGUT ER", "PANLIPASE", "MENOCTYL"). Strip pack suffixes like "15'S", "10'S", "TAB", "CAP".
-   - "genericName": Active pharmacological ingredient if visible in parentheses or subtitle (e.g. "ESOMEPRAZOLE", "ACOTIAMIDE", "PANCREATIN").
-   - "strength": Exact strength with units (e.g. "40 mg", "300 mg ER", "500 mg", "5 ml").
-   - "form": "Tablet", "Capsule", "Syrup", "Suspension", "Injection", "Drops", "Ointment", "Other".
-   - "dosage": Per-intake quantity and form (e.g. "1 Tablet", "1 Capsule", "5 ml").
-   - "morning": number (0, 1, 2)
-   - "afternoon": number (0, 1, 2)
-   - "evening": number (0, 1, 2)
-   - "night": number (0, 1, 2)
-   - "foodInstruction": Food relation (e.g. "Before meal", "After meal", "Before Breakfast", "With food", "Empty stomach", "As directed").
-   - "duration": Duration string (e.g. "5 Days", "2 Month(s)", "3 Weeks").
-   - "durationDays": Integer duration in days (e.g. 5, 60, 21).
-   - "confidence": Overall extraction confidence (0.0 to 1.0).
-   - "needsVerification": boolean (true if overall confidence < 0.85 or text is ambiguous).
-   - "possibleAlternatives": array of possible alternate drug names if handwriting is ambiguous.
-   - "sourceText": Raw snippet/line from the prescription.
+3. ZERO HALLUCINATION POLICY:
+   - Extract ONLY medications and instructions physically visible in the document.
+   - Strip packaging terms like "15'S", "10'S", "TAB", "CAP", "SYR", "INJ" from the clean brand name, but preserve the strength (e.g. "ESOMAC 40MG").
+   - Extract generic name if present in parentheses (e.g. "ESOMEPRAZOLE 40MG").
 
 Return ONLY a valid JSON object matching this schema:
 {
@@ -393,7 +375,7 @@ Return ONLY a valid JSON object matching this schema:
       "afternoon": 0,
       "evening": 0,
       "night": 0,
-      "foodInstruction": "string",
+      "foodInstruction": "string (e.g. Before meal, After meal, Before Breakfast, With food)",
       "startDate": "string or empty",
       "duration": "string",
       "durationDays": 30,
@@ -662,9 +644,9 @@ function mergeExtractedResults(results: Array<{ medicines: any[]; patientName?: 
 async function parsePrescriptionWithAi(env: Env, base64: string, mimeType: string, textContent?: string) {
   let rawJson = "";
 
-  // 1. Try Gemini Vision if API key is available
+  // 1. Try Gemini Vision / Document understanding if API key is available
   if (env.GEMINI_API_KEY && base64) {
-    const models = [env.GEMINI_MODEL || "gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.0-flash"];
+    const models = [env.GEMINI_MODEL || "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"];
     for (const model of models) {
       try {
         const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${env.GEMINI_API_KEY}`, {
@@ -699,8 +681,9 @@ async function parsePrescriptionWithAi(env: Env, base64: string, mimeType: strin
     }
   }
 
-  // 2. Fallback to Groq Vision if Gemini did not produce a result and Groq is available
-  if (!rawJson && env.GROQ_API_KEY && base64) {
+  // 2. Fallback to Groq Vision ONLY for images (Groq does not support application/pdf)
+  const isImage = (mimeType || "").startsWith("image/");
+  if (!rawJson && env.GROQ_API_KEY && base64 && isImage) {
     const visionModels = ["llama-3.2-90b-vision-preview", "llama-3.2-11b-vision-preview"];
     for (const vModel of visionModels) {
       try {
@@ -776,26 +759,26 @@ async function parsePrescriptionBatchWithAi(
     return normalizePrescriptionResult("");
   }
 
-  const validImages = items.filter(i => i.base64 && i.base64.trim().length > 0);
+  const validMedia = items.filter(i => i.base64 && i.base64.trim().length > 0);
 
-  // If multiple images are present, attempt a unified multi-image single call first
-  if (env.GEMINI_API_KEY && validImages.length > 0) {
-    const models = [env.GEMINI_MODEL || "gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.0-flash"];
+  // Unified multi-file/multi-page single call first
+  if (env.GEMINI_API_KEY && validMedia.length > 0) {
+    const models = [env.GEMINI_MODEL || "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"];
     for (const model of models) {
       try {
         const parts: any[] = [
           {
-            text: PRESCRIPTION_PROMPT + (validImages.length > 1
-              ? `\n\nMULTI-PAGE NOTE: The user has uploaded ${validImages.length} images/pages belonging to ONE SINGLE prescription. Consolidate medications across all pages, deduplicate repeating items, and return one unified JSON result.`
+            text: PRESCRIPTION_PROMPT + (validMedia.length > 1
+              ? `\n\nMULTI-PAGE NOTE: The user has uploaded ${validMedia.length} files/pages belonging to ONE SINGLE prescription. Consolidate medications across all pages, preserve row-level schedule table assignments, deduplicate repeating items, and return one unified JSON result.`
               : "")
           }
         ];
 
-        for (const img of validImages) {
+        for (const item of validMedia) {
           parts.push({
             inlineData: {
-              mimeType: img.mimeType || "image/jpeg",
-              data: img.base64
+              mimeType: item.mimeType || "image/jpeg",
+              data: item.base64
             }
           });
         }
@@ -823,7 +806,7 @@ async function parsePrescriptionBatchWithAi(
           }
         }
       } catch (err) {
-        console.error(`Gemini unified multi-image batch error on model ${model}:`, err);
+        console.error(`Gemini unified batch error on model ${model}:`, err);
       }
     }
   }

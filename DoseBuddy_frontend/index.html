@@ -257,25 +257,23 @@
 
                     <div class="form-group">
                         <label for="su-phone">Phone Number</label>
-                        <div class="phone-input-wrap">
-                            <select id="su-phone-code" class="phone-code-select" aria-label="Country code">
-                                <option value="+1">US +1</option>
-                                <option value="+44">GB +44</option>
-                                <option value="+91" selected>IN +91</option>
-                                <option value="+61">AU +61</option>
-                                <option value="+81">JP +81</option>
-                                <option value="+49">DE +49</option>
-                                <option value="+33">FR +33</option>
-                                <option value="+86">CN +86</option>
-                                <option value="+55">BR +55</option>
-                                <option value="+27">ZA +27</option>
-                                <option value="+971">AE +971</option>
-                                <option value="+65">SG +65</option>
-                                <option value="+60">MY +60</option>
-                                <option value="+92">PK +92</option>
-                                <option value="+880">BD +880</option>
-                            </select>
-                            <input type="tel" id="su-phone" placeholder="10-digit mobile number" autocomplete="tel">
+                        <div class="intl-phone-group">
+                            <div class="intl-country-picker" id="su-phone-picker" data-target="su-phone-code">
+                                <input type="hidden" id="su-phone-code" value="+91" data-country="IN">
+                                <button type="button" class="intl-picker-btn" id="su-phone-picker-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="Select Country Code">
+                                    <span class="intl-flag-icon"><img src="https://flagcdn.com/w40/in.png" alt="India" class="intl-flag-img"></span>
+                                    <span class="intl-picker-code">IN +91</span>
+                                    <svg class="intl-chevron" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" width="12" height="12"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5"/></svg>
+                                </button>
+                                <div class="intl-dropdown-menu" id="su-phone-dropdown" role="listbox" style="display: none;">
+                                    <div class="intl-search-wrap">
+                                        <svg class="intl-search-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>
+                                        <input type="text" class="intl-search-input" placeholder="Search country or code..." autocomplete="off">
+                                    </div>
+                                    <div class="intl-country-list"></div>
+                                </div>
+                            </div>
+                            <input type="tel" id="su-phone" class="intl-phone-input" placeholder="10-digit mobile number" autocomplete="tel">
                         </div>
                         <span class="field-error" id="su-phone-error"></span>
                     </div>
@@ -313,25 +311,23 @@
                             Emergency Contact
                             <span class="label-hint">For caregiver alerts</span>
                         </label>
-                        <div class="phone-input-wrap">
-                            <select id="su-emergency-code" class="phone-code-select" aria-label="Emergency contact country code">
-                                <option value="+1">US +1</option>
-                                <option value="+44">GB +44</option>
-                                <option value="+91" selected>IN +91</option>
-                                <option value="+61">AU +61</option>
-                                <option value="+81">JP +81</option>
-                                <option value="+49">DE +49</option>
-                                <option value="+33">FR +33</option>
-                                <option value="+86">CN +86</option>
-                                <option value="+55">BR +55</option>
-                                <option value="+27">ZA +27</option>
-                                <option value="+971">AE +971</option>
-                                <option value="+65">SG +65</option>
-                                <option value="+60">MY +60</option>
-                                <option value="+92">PK +92</option>
-                                <option value="+880">BD +880</option>
-                            </select>
-                            <input type="tel" id="su-emergency" placeholder="Emergency contact number" autocomplete="off">
+                        <div class="intl-phone-group">
+                            <div class="intl-country-picker" id="su-emergency-picker" data-target="su-emergency-code">
+                                <input type="hidden" id="su-emergency-code" value="+91" data-country="IN">
+                                <button type="button" class="intl-picker-btn" id="su-emergency-picker-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="Select Emergency Country Code">
+                                    <span class="intl-flag-icon"><img src="https://flagcdn.com/w40/in.png" alt="India" class="intl-flag-img"></span>
+                                    <span class="intl-picker-code">IN +91</span>
+                                    <svg class="intl-chevron" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" width="12" height="12"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5"/></svg>
+                                </button>
+                                <div class="intl-dropdown-menu" id="su-emergency-dropdown" role="listbox" style="display: none;">
+                                    <div class="intl-search-wrap">
+                                        <svg class="intl-search-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="14" height="14"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>
+                                        <input type="text" class="intl-search-input" placeholder="Search country or code..." autocomplete="off">
+                                    </div>
+                                    <div class="intl-country-list"></div>
+                                </div>
+                            </div>
+                            <input type="tel" id="su-emergency" class="intl-phone-input" placeholder="Emergency contact number" autocomplete="off">
                         </div>
                         <span class="field-error" id="su-emergency-error"></span>
                     </div>
