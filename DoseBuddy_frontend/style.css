@@ -3576,19 +3576,12 @@ body.dark-mode .brand-logo-circle {
 /* International Phone Number Component */
 .intl-phone-group {
   display: flex;
-  align-items: stretch;
+  align-items: center;
+  gap: 8px;
   position: relative;
   width: 100%;
   min-width: 0;
-  border-radius: var(--radius-md);
-  border: 1.5px solid var(--border);
-  overflow: visible;
-  transition: border-color var(--transition), box-shadow var(--transition);
-}
-
-.intl-phone-group:focus-within {
-  border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(0, 161, 155, 0.12);
+  /* No shared border — each pill owns its own */
 }
 
 .intl-country-picker {
@@ -3601,20 +3594,31 @@ body.dark-mode .brand-logo-circle {
   align-items: center;
   gap: 6px;
   height: 44px;
-  padding: 0 10px 0 12px;
+  padding: 0 12px;
   background: var(--bg);
-  border: none;
-  border-right: 1.5px solid var(--border);
-  border-radius: 0;
+  border: 1.5px solid var(--border);
+  border-radius: 999px;
   color: var(--text-primary);
   font-size: 0.82rem;
   font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
-  transition: background var(--transition), border-color var(--transition);
+  transition: background var(--transition), border-color var(--transition), box-shadow var(--transition);
   user-select: none;
   box-sizing: border-box;
   flex-shrink: 0;
+}
+
+.intl-picker-btn:hover {
+  background: var(--surface);
+  border-color: var(--primary);
+}
+
+.intl-picker-btn:focus,
+.intl-picker-btn[aria-expanded="true"] {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(0, 161, 155, 0.12);
 }
 
 .intl-picker-btn:hover {
@@ -3660,17 +3664,20 @@ body.dark-mode .brand-logo-circle {
   flex: 1;
   min-width: 0;
   height: 44px;
-  padding: 0 12px;
+  padding: 0 16px;
   background: var(--bg);
-  border: none;
+  border: 1.5px solid var(--border);
+  border-radius: 999px;
   color: var(--text-primary);
   font-size: 0.85rem;
   outline: none;
-  transition: background var(--transition);
+  transition: border-color var(--transition), box-shadow var(--transition), background var(--transition);
   box-sizing: border-box;
 }
 
 .intl-phone-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(0, 161, 155, 0.12);
   background: var(--surface);
 }
 
@@ -4701,7 +4708,7 @@ body.dark-mode .profile-avatar-role {
 
 /* Phone group: border lives on the wrapper */
 #auth-view .intl-phone-group {
-  border-color: #cfc8be !important;
+  border-color: transparent !important;
 }
 
 #auth-view .intl-phone-input,
@@ -4715,25 +4722,22 @@ body.dark-mode .profile-avatar-role {
   background: #d8d0c4 !important;
 }
 
-#auth-view .input-icon-wrap input:focus,
-#auth-view .phone-input-wrap input[type="tel"]:focus,
-#auth-view .phone-code-select:focus {
+#auth-view .intl-phone-input:focus {
   border-color: #00A19B !important;
   box-shadow: 0 0 0 3px rgba(0,161,155,0.1) !important;
   background: #f5f1ec !important;
 }
 
-#auth-view .intl-phone-group:focus-within {
+#auth-view .intl-picker-btn:focus,
+#auth-view .intl-picker-btn[aria-expanded="true"] {
   border-color: #00A19B !important;
   box-shadow: 0 0 0 3px rgba(0,161,155,0.1) !important;
+  background: #f5f1ec !important;
 }
 
 #auth-view .intl-phone-group:focus-within .intl-picker-btn {
-  background: #f5f1ec !important;
-}
-
-#auth-view .intl-phone-group:focus-within .intl-phone-input {
-  background: #f5f1ec !important;
+  border-color: #cfc8be !important;
+  box-shadow: none !important;
 }
 
 #auth-view .intl-dropdown-menu {
