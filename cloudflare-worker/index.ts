@@ -336,19 +336,23 @@ function bufferToBase64(buffer: ArrayBuffer): string {
 
 const PRESCRIPTION_PROMPT = `You are an expert Clinical Pharmacist and Medical Prescription Document Parser specializing in real-world hospital and clinic prescriptions (including Indian hospital systems like Apollo Hospitals, Fortis, Max, AIIMS, and private clinic handwritten/printed prescriptions).
 
-CRITICAL EXTRACTION & ZERO-HALLUCINATION RULES:
-1. ZERO HALLUCINATION POLICY: Extract ONLY medications and instructions physically visible in the prescription image. NEVER invent a drug, guess unreadable characters, or replace an unreadable name with a popular drug.
-2. If any field (name, strength, schedule, duration, food relation) is smudged, illegible, ambiguous, or missing:
+CRITICAL EXTRACTION & ORIENTATION & ZERO-HALLUCINATION RULES:
+1. AUTOMATIC ORIENTATION DETECTION:
+   - The prescription image may be uploaded in ANY orientation (0° upright, 90° clockwise, 180° upside down, 270° counter-clockwise, or photographed at an angle/tilted).
+   - Detect the natural reading orientation of the medical text and headers first.
+   - Read and extract all prescription contents in their correct natural reading direction regardless of image angle.
+2. ZERO HALLUCINATION POLICY: Extract ONLY medications and instructions physically visible in the prescription. NEVER invent a drug name, guess unreadable characters, or invent dosages/schedules not stated in the document.
+3. If any field (name, strength, schedule, duration, food relation) is smudged, illegible, ambiguous, or missing:
    - Provide your best reading or leave blank/null.
    - Assign a realistic confidence score (e.g., 0.30 to 0.65).
    - Set "needsVerification": true and list "possibleAlternatives" if applicable.
-3. TABLE STRUCTURE & COLUMN ALIGNMENT:
+4. TABLE STRUCTURE & COLUMN ALIGNMENT:
    - Prescriptions frequently use tabular matrices: [Medicine & Formula] | [Morning] | [Afternoon] | [Evening] | [Night] | [Instructions].
    - Column values:
      * "1", "0.5", "2", "✓" = quantity taken in that time slot.
      * "-", "–", "0", or empty = NOT taken (0).
    - Cross-verify column ticks/numbers with row text (e.g. "(Morning & Night)", "(Morning)", "(Morning, Afternoon & Night)", "Before meal", "After meal", "Before Breakfast").
-4. ENTITY DISSECTION:
+5. ENTITY DISSECTION:
    - "brandName": Clean trade/brand name (e.g. "ESOMAC", "ACOGUT ER", "PANLIPASE", "MENOCTYL"). Strip pack quantities like "15'S", "10'S", "TAB", "CAP".
    - "genericName": Active pharmacological ingredient if visible in parentheses or subtitle (e.g. "ESOMEPRAZOLE", "ACOTIAMIDE", "PANCREATIN", "OTILONIUM BROMIDE").
    - "strength": Exact dosage strength with unit (e.g. "40 mg", "300 mg ER", "150 mg").
@@ -869,47 +873,129 @@ export default {
         return await callAi(env, `Give safe, non-diagnostic guidance for these symptoms: ${symptoms}`);
       }
 
+function mergeExtractedResults(results: Array<{ medicines: any[]; patientName?: string; doctorName?: string; visitDate?: string }>) {
+  const mergedMeds: any[] = [];
+  const seenMap = new Map<string, any>();
+  let patientName = "";
+  let doctorName = "";
+  let visitDate = "";
+
+  for (const res of results) {
+    if (!patientName && res.patientName) patientName = res.patientName;
+    if (!doctorName && res.doctorName) doctorName = res.doctorName;
+    if (!visitDate && res.visitDate) visitDate = res.visitDate;
+
+    if (Array.isArray(res.medicines)) {
+      for (const med of res.medicines) {
+        const rawName = String(med.brandName || med.name || med.medicineName || "").trim().toLowerCase();
+        const strength = String(med.strength || "").trim().toLowerCase();
+        const key = `${rawName.replace(/[^a-z0-9]/g, "")}_${strength.replace(/[^a-z0-9]/g, "")}`;
+        if (!key || key === "_") continue;
+
+        if (seenMap.has(key)) {
+          const existing = seenMap.get(key);
+          if ((med.confidence || 0) > (existing.confidence || 0)) {
+            const idx = mergedMeds.indexOf(existing);
+            if (idx !== -1) mergedMeds[idx] = med;
+            seenMap.set(key, med);
+          }
+        } else {
+          seenMap.set(key, med);
+          mergedMeds.push(med);
+        }
+      }
+    }
+  }
+
+  return {
+    medicines: mergedMeds,
+    patientName,
+    doctorName,
+    visitDate,
+    disclaimer: "AI-assisted extraction — please verify all medicines, dosage, timing and duration against your prescription before saving.",
+    extractedCount: mergedMeds.length
+  };
+}
+
       if ((path === "/api/prescription/upload" || path === "/api/prescriptions/upload" || path === "/api/prescription/upload/") && request.method === "POST") {
-        let base64 = "";
-        let mimeType = "image/jpeg";
-        let textContent = "";
+        const itemsToProcess: Array<{ base64: string; mimeType: string; textContent: string }> = [];
 
         const contentType = request.headers.get("content-type") || "";
         if (contentType.includes("multipart/form-data")) {
           const formData = await request.formData();
-          const file = formData.get("file");
-          if (!file || typeof file === "string") {
+          const files: File[] = [];
+
+          const filesList = formData.getAll("files");
+          if (filesList && filesList.length > 0) {
+            for (const f of filesList) {
+              if (f && typeof f !== "string") files.push(f as File);
+            }
+          }
+          const singleFile = formData.get("file");
+          if (singleFile && typeof singleFile !== "string" && !files.includes(singleFile as File)) {
+            files.push(singleFile as File);
+          }
+
+          if (files.length === 0) {
             return json({ message: "No file uploaded" }, 400);
           }
-          const fileObj = file as File;
-          mimeType = fileObj.type || "image/jpeg";
-          const buffer = await fileObj.arrayBuffer();
-          if (mimeType.startsWith("text/")) {
-            textContent = new TextDecoder().decode(buffer);
-          } else {
-            base64 = bufferToBase64(buffer);
+
+          for (const fileObj of files) {
+            const mimeType = fileObj.type || "image/jpeg";
+            const buffer = await fileObj.arrayBuffer();
+            if (mimeType.startsWith("text/")) {
+              const textContent = new TextDecoder().decode(buffer);
+              itemsToProcess.push({ base64: "", mimeType, textContent });
+            } else {
+              const base64 = bufferToBase64(buffer);
+              itemsToProcess.push({ base64, mimeType, textContent: "" });
+            }
           }
         } else if (contentType.includes("application/json")) {
           const { body: b } = await requestBody(request);
-          base64 = String(b.image || b.base64 || "");
-          if (base64.includes(",")) {
-            const parts = base64.split(",");
-            const match = parts[0].match(/:(.*?);/);
-            if (match) mimeType = match[1];
-            base64 = parts[1];
+          if (Array.isArray(b.images) && b.images.length > 0) {
+            for (const img of b.images) {
+              let b64 = String(img.base64 || img.image || "");
+              let mime = String(img.mimeType || "image/jpeg");
+              if (b64.includes(",")) {
+                const parts = b64.split(",");
+                const match = parts[0].match(/:(.*?);/);
+                if (match) mime = match[1];
+                b64 = parts[1];
+              }
+              const txt = String(img.text || "");
+              if (b64 || txt) {
+                itemsToProcess.push({ base64: b64, mimeType: mime, textContent: txt });
+              }
+            }
+          } else {
+            let b64 = String(b.image || b.base64 || "");
+            let mime = String(b.mimeType || "image/jpeg");
+            if (b64.includes(",")) {
+              const parts = b64.split(",");
+              const match = parts[0].match(/:(.*?);/);
+              if (match) mime = match[1];
+              b64 = parts[1];
+            }
+            const txt = String(b.text || "");
+            if (b64 || txt) {
+              itemsToProcess.push({ base64: b64, mimeType: mime, textContent: txt });
+            }
           }
-          mimeType = String(b.mimeType || mimeType);
-          textContent = String(b.text || "");
         } else {
           return json({ message: "Unsupported content type" }, 400);
         }
 
-        if (!base64 && !textContent) {
+        if (itemsToProcess.length === 0) {
           return json({ message: "No image or text data provided for extraction" }, 400);
         }
 
-        const result = await parsePrescriptionWithAi(env, base64, mimeType, textContent);
-        return json(result);
+        const extractionResults = await Promise.all(
+          itemsToProcess.map(item => parsePrescriptionWithAi(env, item.base64, item.mimeType, item.textContent))
+        );
+
+        const mergedResult = mergeExtractedResults(extractionResults);
+        return json(mergedResult);
       }
 
       // ── Medications ─────────────────────────────────────────────────────

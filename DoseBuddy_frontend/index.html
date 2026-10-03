@@ -958,6 +958,7 @@
                         <div class="upload-dropzone" id="prescription-drop-zone">
                             <input type="file" id="prescription-file-input"
                                    accept="image/*,.pdf,.docx,.txt"
+                                   multiple
                                    style="display:none;">
 
                             <div class="upload-dropzone-icon">
@@ -965,36 +966,14 @@
                                     <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/>
                                 </svg>
                             </div>
-                            <p class="upload-dropzone-title">Drop your file here</p>
-                            <p class="upload-dropzone-sub">or click to browse from your device</p>
+                            <p class="upload-dropzone-title">Drop your prescription files here</p>
+                            <p class="upload-dropzone-sub">or click to browse from your device (multiple files supported)</p>
 
                             <button type="button" class="upload-browse-btn" id="prescription-browse-btn">
-                                Browse File
+                                Select Files
                             </button>
 
-                            <p id="prescription-file-name" class="upload-file-selected"></p>
-                            <div id="prescription-preview-box" class="upload-preview-box" style="display:none; margin-top: 10px; position: relative;">
-                                <button type="button" class="upload-preview-remove-btn" id="prx-remove-file-btn" aria-label="Remove uploaded file" title="Remove uploaded file">
-                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="14" height="14">
-                                        <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-                                    </svg>
-                                </button>
-                                <img id="prescription-preview-img" class="upload-preview-img" alt="Prescription preview" style="max-height: 140px; border-radius: 6px; border: 1px solid var(--border); object-fit: contain; margin: 0 auto; display: block;">
-                                <div class="upload-preview-tools" style="display: flex; justify-content: center; gap: 8px; margin-top: 6px;">
-                                    <button type="button" class="upload-tool-btn secondary-btn" id="prx-rotate-left-btn" style="padding: 4px 10px; font-size: 0.72rem; display: inline-flex; align-items: center; gap: 4px;">
-                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="13" height="13">
-                                            <path stroke-linecap="round" stroke-linejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" />
-                                        </svg>
-                                        Rotate Left
-                                    </button>
-                                    <button type="button" class="upload-tool-btn secondary-btn" id="prx-rotate-right-btn" style="padding: 4px 10px; font-size: 0.72rem; display: inline-flex; align-items: center; gap: 4px;">
-                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="13" height="13">
-                                            <path stroke-linecap="round" stroke-linejoin="round" d="M15 15l6-6m0 0l-6-6m6 6H9a6 6 0 000 12h3" />
-                                        </svg>
-                                        Rotate Right
-                                    </button>
-                                </div>
-                            </div>
+                            <div id="prescription-files-list" class="upload-files-list" style="display:none;"></div>
                         </div>
 
                         <div class="upload-formats">

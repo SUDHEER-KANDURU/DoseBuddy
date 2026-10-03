@@ -4844,12 +4844,7 @@ function setupPrescriptionUpload() {
     const fileInput     = document.getElementById("prescription-file-input");
     const browseBtn     = document.getElementById("prescription-browse-btn");
     const dropZone      = document.getElementById("prescription-drop-zone");
-    const fileNameEl    = document.getElementById("prescription-file-name");
-    const previewBox    = document.getElementById("prescription-preview-box");
-    const previewImg    = document.getElementById("prescription-preview-img");
-    const removeFileBtn = document.getElementById("prx-remove-file-btn");
-    const rotateLeftBtn = document.getElementById("prx-rotate-left-btn");
-    const rotateRightBtn= document.getElementById("prx-rotate-right-btn");
+    const filesListEl   = document.getElementById("prescription-files-list");
     const autofillBtn   = document.getElementById("prescription-autofill-btn");
     const errorEl       = document.getElementById("prescription-error");
     const infoEl        = document.getElementById("prescription-info");
@@ -4866,20 +4861,22 @@ function setupPrescriptionUpload() {
         return;
     }
 
-    let rawFile = null;
-    let currentRotation = 0;
-    let preprocessedBase64 = null;
+    // State: multiple uploaded files
+    let uploadedFiles = [];
     let currentExtractedMeds = [];
 
-    function clearUploadedPrescription() {
-        rawFile = null;
-        currentRotation = 0;
-        preprocessedBase64 = null;
+    function formatFileSize(bytes) {
+        if (!bytes || bytes <= 0) return "0 B";
+        if (bytes < 1024) return bytes + " B";
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+        return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+    }
+
+    function clearAllUploadedFiles() {
+        uploadedFiles = [];
         currentExtractedMeds = [];
         if (fileInput) fileInput.value = "";
-        if (previewBox) previewBox.style.display = "none";
-        if (previewImg) previewImg.src = "";
-        if (fileNameEl) fileNameEl.textContent = "";
+        renderFileList();
         if (errorEl) errorEl.textContent = "";
         if (infoEl) {
             infoEl.textContent = "";
@@ -4888,18 +4885,75 @@ function setupPrescriptionUpload() {
         if (reviewSection) reviewSection.style.display = "none";
     }
 
-    if (removeFileBtn) {
-        removeFileBtn.addEventListener("click", (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            clearUploadedPrescription();
+    function removeFileById(fileId) {
+        uploadedFiles = uploadedFiles.filter(f => f.id !== fileId);
+        renderFileList();
+        if (errorEl) errorEl.textContent = "";
+        if (uploadedFiles.length === 0) {
+            if (fileInput) fileInput.value = "";
+            if (infoEl) {
+                infoEl.textContent = "";
+                infoEl.style.color = "";
+            }
+        } else {
+            if (infoEl) {
+                infoEl.textContent = `${uploadedFiles.length} file(s) selected`;
+                infoEl.style.color = "var(--text-secondary)";
+            }
+        }
+    }
+
+    function renderFileList() {
+        if (!filesListEl) return;
+        if (uploadedFiles.length === 0) {
+            filesListEl.style.display = "none";
+            filesListEl.innerHTML = "";
+            return;
+        }
+
+        filesListEl.style.display = "grid";
+        filesListEl.innerHTML = uploadedFiles.map(f => {
+            const thumbHtml = f.isImage && f.thumbUrl
+                ? `<img src="${f.thumbUrl}" alt="Prescription thumbnail" class="upload-file-thumb" />`
+                : `<div class="upload-file-doc-icon">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="20" height="20">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"/>
+                    </svg>
+                   </div>`;
+
+            return `
+                <div class="upload-file-card" data-id="${f.id}">
+                    ${thumbHtml}
+                    <div class="upload-file-meta">
+                        <span class="upload-file-name" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</span>
+                        <span class="upload-file-size">${formatFileSize(f.size)}</span>
+                    </div>
+                    <button type="button" class="upload-file-remove-btn" data-id="${f.id}" title="Remove file" aria-label="Remove ${escapeHtml(f.name)}">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" width="14" height="14">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+                        </svg>
+                    </button>
+                </div>
+            `;
+        }).join("");
+
+        // Attach individual remove handlers
+        filesListEl.querySelectorAll(".upload-file-remove-btn").forEach(btn => {
+            btn.addEventListener("click", (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const id = btn.getAttribute("data-id");
+                removeFileById(id);
+            });
         });
     }
 
     browseBtn.addEventListener("click", () => fileInput.click());
 
     fileInput.addEventListener("change", () => {
-        if (fileInput.files && fileInput.files[0]) handleFileSelect(fileInput.files[0]);
+        if (fileInput.files && fileInput.files.length > 0) {
+            handleFilesSelect(Array.from(fileInput.files));
+        }
     });
 
     dropZone.addEventListener("dragover", (e) => {
@@ -4910,133 +4964,163 @@ function setupPrescriptionUpload() {
     dropZone.addEventListener("drop", (e) => {
         e.preventDefault();
         dropZone.classList.remove("drag-over");
-        const file = e.dataTransfer.files[0];
-        if (file) handleFileSelect(file);
+        if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            handleFilesSelect(Array.from(e.dataTransfer.files));
+        }
     });
 
-    async function handleFileSelect(file) {
-        rawFile = file;
-        currentRotation = 0;
-        fileNameEl.textContent = `Selected: ${file.name}`;
+    async function handleFilesSelect(files) {
+        if (!files || files.length === 0) return;
         errorEl.textContent = "";
         infoEl.textContent = "";
         infoEl.style.color = "";
         if (reviewSection) reviewSection.style.display = "none";
 
-        if (file.type.startsWith("image/")) {
-            await processAndPreviewImage();
-        } else {
-            if (previewBox) previewBox.style.display = "none";
-            preprocessedBase64 = null;
-        }
-    }
+        for (const file of files) {
+            // Check for duplicate by name and size
+            const alreadyExists = uploadedFiles.some(f => f.name === file.name && f.size === file.size);
+            if (alreadyExists) continue;
 
-    async function processAndPreviewImage() {
-        if (!rawFile) return;
-        try {
-            const res = await preprocessImageCanvas(rawFile, currentRotation);
-            preprocessedBase64 = res.base64;
-            if (previewBox && previewImg) {
-                previewImg.src = res.base64;
-                previewBox.style.display = "block";
+            const isImage = file.type.startsWith("image/");
+            const fileItem = {
+                id: `prx_file_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+                file: file,
+                name: file.name,
+                size: file.size,
+                type: file.type || "application/octet-stream",
+                isImage: isImage,
+                thumbUrl: null,
+                preprocessedBase64: null
+            };
+
+            if (isImage) {
+                try {
+                    const res = await preprocessImageAutoOrient(file);
+                    fileItem.preprocessedBase64 = res.base64;
+                    fileItem.thumbUrl = res.base64;
+                } catch (imgErr) {
+                    console.warn("[Prescription] Image preprocessing fallback:", imgErr);
+                    fileItem.thumbUrl = URL.createObjectURL(file);
+                }
             }
-        } catch (e) {
-            console.warn("[Prescription] Image preprocessing error:", e);
+
+            uploadedFiles.push(fileItem);
+        }
+
+        renderFileList();
+
+        if (uploadedFiles.length > 0) {
+            infoEl.textContent = `${uploadedFiles.length} file(s) attached and ready for AI extraction.`;
+            infoEl.style.color = "var(--text-secondary)";
         }
     }
 
-    if (rotateLeftBtn) {
-        rotateLeftBtn.addEventListener("click", async (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            currentRotation = (currentRotation - 90 + 360) % 360;
-            await processAndPreviewImage();
-        });
-    }
+    /**
+     * Automatic image orientation detection (EXIF) and contrast enhancement
+     * - Uses createImageBitmap with imageOrientation: 'from-image' for hardware-accurate EXIF parsing
+     * - Constrains max dimension to 2400px while maintaining strict aspect ratio
+     * - Dynamically enhances contrast for sharp OCR legibility
+     */
+    function preprocessImageAutoOrient(file) {
+        return new Promise(async (resolve) => {
+            try {
+                let imgSource = null;
+                let srcW = 0, srcH = 0;
 
-    if (rotateRightBtn) {
-        rotateRightBtn.addEventListener("click", async (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            currentRotation = (currentRotation + 90) % 360;
-            await processAndPreviewImage();
-        });
-    }
-
-    function preprocessImageCanvas(file, rotationDegrees) {
-        return new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                const img = new Image();
-                img.onload = () => {
-                    const rads = (rotationDegrees * Math.PI) / 180;
-                    const is90or270 = rotationDegrees === 90 || rotationDegrees === 270;
-                    
-                    let srcW = img.naturalWidth || img.width;
-                    let srcH = img.naturalHeight || img.height;
-
-                    const maxDim = 2400;
-                    if (srcW > maxDim || srcH > maxDim) {
-                        if (srcW > srcH) {
-                            srcH = Math.round((srcH * maxDim) / srcW);
-                            srcW = maxDim;
-                        } else {
-                            srcW = Math.round((srcW * maxDim) / srcH);
-                            srcH = maxDim;
-                        }
+                if (typeof window.createImageBitmap === "function") {
+                    try {
+                        imgSource = await window.createImageBitmap(file, { imageOrientation: "from-image" });
+                        srcW = imgSource.width;
+                        srcH = imgSource.height;
+                    } catch (bmErr) {
+                        imgSource = null;
                     }
+                }
 
-                    const canvas = document.createElement("canvas");
-                    canvas.width  = is90or270 ? srcH : srcW;
-                    canvas.height = is90or270 ? srcW : srcH;
-
-                    const ctx = canvas.getContext("2d", { willReadFrequently: true });
-                    if (!ctx) {
-                        resolve({ base64: e.target.result });
+                if (!imgSource) {
+                    const dataUrl = await new Promise((r) => {
+                        const reader = new FileReader();
+                        reader.onload = (e) => r(e.target.result);
+                        reader.onerror = () => r(null);
+                        reader.readAsDataURL(file);
+                    });
+                    if (!dataUrl) {
+                        resolve({ base64: null });
                         return;
                     }
+                    const img = new Image();
+                    await new Promise((r) => {
+                        img.onload = () => r(true);
+                        img.onerror = () => r(false);
+                        img.src = dataUrl;
+                    });
+                    imgSource = img;
+                    srcW = img.naturalWidth || img.width;
+                    srcH = img.naturalHeight || img.height;
+                }
 
-                    ctx.translate(canvas.width / 2, canvas.height / 2);
-                    ctx.rotate(rads);
-                    ctx.drawImage(img, -srcW / 2, -srcH / 2, srcW, srcH);
-
-                    // Adaptive contrast enhancement
-                    try {
-                        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                        const d = imgData.data;
-                        let minLum = 255, maxLum = 0;
-                        for (let i = 0; i < d.length; i += 32) {
-                            const lum = (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000;
-                            if (lum < minLum) minLum = lum;
-                            if (lum > maxLum) maxLum = lum;
-                        }
-                        if (maxLum - minLum > 35 && (minLum > 15 || maxLum < 240)) {
-                            const factor = 255 / (maxLum - minLum);
-                            for (let i = 0; i < d.length; i += 4) {
-                                d[i]     = Math.min(255, Math.max(0, (d[i] - minLum) * factor));
-                                d[i + 1] = Math.min(255, Math.max(0, (d[i + 1] - minLum) * factor));
-                                d[i + 2] = Math.min(255, Math.max(0, (d[i + 2] - minLum) * factor));
-                            }
-                            ctx.putImageData(imgData, 0, 0);
-                        }
-                    } catch (lumErr) {
-                        console.warn("[Prescription] Contrast filter skipped:", lumErr);
+                const maxDim = 2400;
+                let targetW = srcW;
+                let targetH = srcH;
+                if (srcW > maxDim || srcH > maxDim) {
+                    if (srcW > srcH) {
+                        targetH = Math.round((srcH * maxDim) / srcW);
+                        targetW = maxDim;
+                    } else {
+                        targetW = Math.round((srcW * maxDim) / srcH);
+                        targetH = maxDim;
                     }
+                }
 
-                    const optimizedDataUrl = canvas.toDataURL("image/jpeg", 0.94);
-                    resolve({ base64: optimizedDataUrl });
-                };
-                img.onerror = () => resolve({ base64: e.target.result });
-                img.src = e.target.result;
-            };
-            reader.onerror = () => resolve({ base64: null });
-            reader.readAsDataURL(file);
+                const canvas = document.createElement("canvas");
+                canvas.width = targetW;
+                canvas.height = targetH;
+                const ctx = canvas.getContext("2d", { willReadFrequently: true });
+                if (!ctx) {
+                    resolve({ base64: null });
+                    return;
+                }
+
+                ctx.drawImage(imgSource, 0, 0, targetW, targetH);
+
+                // Adaptive contrast enhancement for OCR readability
+                try {
+                    const imgData = ctx.getImageData(0, 0, targetW, targetH);
+                    const d = imgData.data;
+                    let minLum = 255, maxLum = 0;
+                    for (let i = 0; i < d.length; i += 32) {
+                        const lum = (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000;
+                        if (lum < minLum) minLum = lum;
+                        if (lum > maxLum) maxLum = lum;
+                    }
+                    if (maxLum - minLum > 35 && (minLum > 15 || maxLum < 240)) {
+                        const factor = 255 / (maxLum - minLum);
+                        for (let i = 0; i < d.length; i += 4) {
+                            d[i]     = Math.min(255, Math.max(0, (d[i] - minLum) * factor));
+                            d[i + 1] = Math.min(255, Math.max(0, (d[i + 1] - minLum) * factor));
+                            d[i + 2] = Math.min(255, Math.max(0, (d[i + 2] - minLum) * factor));
+                        }
+                        ctx.putImageData(imgData, 0, 0);
+                    }
+                } catch (contrastErr) {
+                    console.warn("[Prescription] Contrast filter skipped:", contrastErr);
+                }
+
+                const optimizedDataUrl = canvas.toDataURL("image/jpeg", 0.94);
+                resolve({ base64: optimizedDataUrl });
+            } catch (err) {
+                console.warn("[Prescription] Preprocessing failed:", err);
+                const reader = new FileReader();
+                reader.onload = (e) => resolve({ base64: e.target.result });
+                reader.onerror = () => resolve({ base64: null });
+                reader.readAsDataURL(file);
+            }
         });
     }
 
     if (cancelBtn) {
         cancelBtn.addEventListener("click", () => {
-            clearUploadedPrescription();
+            clearAllUploadedFiles();
         });
     }
 
@@ -5045,8 +5129,8 @@ function setupPrescriptionUpload() {
         infoEl.textContent  = "";
         infoEl.style.color  = "";
 
-        if (!rawFile) {
-            errorEl.textContent = "Please select a prescription file first.";
+        if (uploadedFiles.length === 0) {
+            errorEl.textContent = "Please select or drop at least one prescription file first.";
             return;
         }
         if (!currentUser) {
@@ -5058,28 +5142,52 @@ function setupPrescriptionUpload() {
             return;
         }
 
-        autofillBtn.textContent = "Extracting with AI...";
-        autofillBtn.disabled    = true;
+        const originalBtnText = autofillBtn.innerHTML;
+        autofillBtn.innerHTML = `
+            <svg class="btn-spinner" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" width="16" height="16" style="animation: spin 1s linear infinite;">
+                <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" style="opacity:0.25;"></circle>
+                <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" style="opacity:0.75;"></path>
+            </svg>
+            Extracting with AI...
+        `;
+        autofillBtn.disabled = true;
         autofillBtn.classList.add("btn-loading");
 
         try {
             let uploadRes;
-            if (preprocessedBase64 && preprocessedBase64.startsWith("data:")) {
-                // Send preprocessed contrast-enhanced & rotated base64
+            const allImagesWithBase64 = uploadedFiles.every(f => f.isImage && f.preprocessedBase64);
+
+            if (allImagesWithBase64) {
+                // Multi-image batch JSON request with auto-oriented and contrast-enhanced base64 payloads
+                const imagesPayload = uploadedFiles.map(f => ({
+                    image: f.preprocessedBase64,
+                    mimeType: "image/jpeg",
+                    fileName: f.name
+                }));
+
                 uploadRes = await authFetch(`${API_BASE}/prescription/upload`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
-                        image: preprocessedBase64,
-                        mimeType: "image/jpeg"
+                        images: imagesPayload,
+                        userId: currentUser.id
                     })
                 });
             } else {
+                // Multi-file FormData request supporting PDF, DOCX, TXT, images
                 const formData = new FormData();
-                formData.append("file", rawFile);
+                formData.append("userId", currentUser.id);
+                uploadedFiles.forEach(f => {
+                    formData.append("files", f.file);
+                });
+                // Also append single 'file' fallback for backward compatibility
+                if (uploadedFiles[0]) {
+                    formData.append("file", uploadedFiles[0].file);
+                }
+
                 uploadRes = await authFetch(`${API_BASE}/prescription/upload`, {
                     method: "POST",
-                    body:   formData
+                    body: formData
                 });
             }
 
@@ -5090,7 +5198,7 @@ function setupPrescriptionUpload() {
             }
 
             const responseData = await uploadRes.json();
-            const medicines    = responseData.medicines || (Array.isArray(responseData) ? responseData : []);
+            const medicines = responseData.medicines || (Array.isArray(responseData) ? responseData : []);
 
             if (!Array.isArray(medicines) || medicines.length === 0) {
                 infoEl.style.color = "#b45309";
@@ -5135,7 +5243,7 @@ function setupPrescriptionUpload() {
             renderPrescriptionReview(responseData);
 
             infoEl.style.color = "#15803d";
-            infoEl.textContent = `${currentExtractedMeds.length} medicine(s) detected. Please review and verify below before saving.`;
+            infoEl.textContent = `${currentExtractedMeds.length} medicine(s) detected from ${uploadedFiles.length} file(s). Please review and verify below before saving.`;
             showToast(`Detected ${currentExtractedMeds.length} medicines from prescription. Review below.`, "info");
 
         } catch (err) {
@@ -5144,6 +5252,7 @@ function setupPrescriptionUpload() {
         } finally {
             autofillBtn.disabled = false;
             autofillBtn.classList.remove("btn-loading");
+            autofillBtn.innerHTML = originalBtnText;
         }
     });
 

@@ -90,32 +90,46 @@ public class GeminiOcrService {
         if (!isAvailable()) return "[]";
 
         String textPrompt = """
-                You are an expert prescription parser for Indian hospital prescriptions.
-                Carefully read this prescription image and extract EVERY medicine listed.
-
-                Indian prescriptions commonly appear in these formats:
-                  1. ESOMAC 40MG TAB 15's  |  Oral, 1 Tablet(s), Morning & Night, Before meal, from 21-Aug-2026 (FRI) For 2 Month(s)
-                  2. ACOGUT 300 ER TAB 10'S  |  Oral, 1 Tablet(s), Morning, Before Breakfast, from date
-                  3. PANLIPASE CAP  |  Oral, 1 Capsule(s), Morning, Afternoon & Night, After meal
-                  4. MENOCTYL 40MG TAB (OTILONIUM BROMIDE)  |  Oral, 1 Capsule(s), Morning & Night, Before meal
-                  OR a table with columns: Medicine | Morning | Afternoon | Evening | Night | Instructions
-
-                Rules:
-                - Extract the CLEAN medicine name without quantity suffixes like "15's", "10'S", "TAB", "CAP"
-                - Keep the dosage strength in the name if present (e.g. "ESOMAC 40MG", "PANLIPASE 300MG")
-                - Remove prefixes: TAB., CAP., SYR., INJ., TAB, CAP, ORAL, Oral
-                - Map timing keywords: Morning=08:00, Afternoon=14:00, Evening=18:00, Night=21:00, Breakfast=08:00
-                - dosage = quantity taken each time (e.g. "1 tablet", "1 capsule", "0.5 tablet")
-                - instructions = food timing (e.g. "Before meal", "After meal", "Before Breakfast", "As directed")
-                - If a column has "–" or "-" or "0", that time slot is NOT taken — skip it
-                - If a column has "1" or any number, that time IS taken — include that time
-
-                Return ONLY a valid JSON array with NO markdown, NO explanation, NO code fences.
-                Each element must have EXACTLY these keys:
-                  "medicineName": string (clean name + strength, e.g. "ESOMAC 40MG"),
-                  "dosage": string (e.g. "1 tablet", "1 capsule"),
-                  "instructions": string (e.g. "Before meal", "After meal", "As directed"),
-                  "times": array of HH:mm strings (e.g. ["08:00","21:00"])
+                You are an expert clinical pharmacologist and prescription parsing assistant.
+                
+                ORIENTATION DETECTION:
+                The prescription image may be rotated 0°, 90°, 180°, 270°, or slightly tilted.
+                First mentally determine the text orientation, read the document accurately, and extract every prescribed medication.
+                
+                EXTRACTION RULES:
+                1. Extract every legitimate medication listed on the prescription.
+                2. Do not hallucinate or invent medications not present in the document.
+                3. Separate the brand/trade name and generic ingredient if identifiable.
+                4. Extract dosage, strength, form, food instructions, duration in days, and daily intake schedule.
+                5. Schedule mapping:
+                   - Morning = 08:00
+                   - Afternoon = 13:00 / 14:00
+                   - Evening = 18:00
+                   - Night / Bedtime = 21:00
+                
+                Return ONLY a valid JSON array of objects (NO markdown code blocks, NO backticks, NO surrounding explanation).
+                Each object MUST adhere to this structure:
+                {
+                  "medicineName": string,
+                  "brandName": string,
+                  "genericName": string,
+                  "strength": string,
+                  "dosage": string,
+                  "form": string,
+                  "foodInstruction": string,
+                  "duration": string,
+                  "durationDays": number,
+                  "morning": boolean,
+                  "afternoon": boolean,
+                  "evening": boolean,
+                  "night": boolean,
+                  "times": ["08:00"],
+                  "confidence": number,
+                  "nameConfidence": number,
+                  "scheduleConfidence": number,
+                  "needsVerification": boolean,
+                  "sourceText": string
+                }
                 """;
 
         String jsonBody = buildVisionBody(textPrompt, mimeType, base64Image);

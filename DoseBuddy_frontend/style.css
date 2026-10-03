@@ -6512,32 +6512,102 @@ body.dark-mode .status-obese     { background: rgba(239, 68, 68, 0.1); color: #f
 /* ═══════════════════════════════════════════════════════════════════════════
    PRESCRIPTION OCR REVIEW INTERFACE & UPLOAD PREVIEW
 ═══════════════════════════════════════════════════════════════════════════ */
-.upload-preview-box {
-    position: relative;
+.upload-files-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+    margin-top: 14px;
+    text-align: left;
 }
 
-.upload-preview-remove-btn {
-    position: absolute;
-    top: 6px;
-    right: 6px;
-    width: 24px;
-    height: 24px;
+.upload-file-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md, 8px);
+    transition: border-color var(--transition), background var(--transition);
+}
+
+.upload-file-card:hover {
+    border-color: var(--primary);
+}
+
+.upload-file-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    flex: 1;
+}
+
+.upload-file-thumb {
+    width: 38px;
+    height: 38px;
+    border-radius: 6px;
+    object-fit: cover;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.upload-file-doc-icon {
+    width: 38px;
+    height: 38px;
+    border-radius: 6px;
+    background: var(--primary-light);
+    color: var(--primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.upload-file-meta {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex: 1;
+}
+
+.upload-file-name {
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.upload-file-size {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+}
+
+.upload-file-remove-btn {
+    width: 26px;
+    height: 26px;
     border-radius: 50%;
-    background: rgba(15, 23, 42, 0.85);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    color: #ffffff;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    z-index: 10;
+    flex-shrink: 0;
     padding: 0;
-    transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
-.upload-preview-remove-btn:hover {
-    background: rgba(15, 23, 42, 0.98);
-    border-color: rgba(255, 255, 255, 0.4);
-    transform: scale(1.05);
+
+.upload-file-remove-btn:hover {
+    background: var(--danger-light);
+    color: var(--danger);
+    border-color: var(--danger);
 }
 
 .prescription-review-card {
