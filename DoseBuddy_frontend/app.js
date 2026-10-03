@@ -5280,87 +5280,142 @@ function setupPrescriptionUpload() {
     }
 
     /**
-     * Automatic image orientation detection (EXIF) and contrast enhancement
-     * - Uses createImageBitmap with imageOrientation: 'from-image' for hardware-accurate EXIF parsing
-     * - Constrains max dimension to 2400px while maintaining strict aspect ratio
-     * - Dynamically enhances contrast for sharp OCR legibility
+     * Reads EXIF orientation from a JPEG/HEIC file.
+     * Returns 1–8 per EXIF spec, or 1 (no rotation) on failure.
+     */
+    function readExifOrientation(file) {
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const buf = e.target.result;
+                    const view = new DataView(buf);
+                    // Must start with JPEG SOI marker
+                    if (view.getUint16(0) !== 0xFFD8) { resolve(1); return; }
+                    let offset = 2;
+                    while (offset < view.byteLength - 2) {
+                        const marker = view.getUint16(offset);
+                        offset += 2;
+                        if (marker === 0xFFE1) { // APP1 (EXIF)
+                            // Check for "Exif\0\0"
+                            if (view.getUint32(offset + 2) !== 0x45786966 || view.getUint16(offset + 6) !== 0x0000) {
+                                resolve(1); return;
+                            }
+                            const tiffStart = offset + 8;
+                            const littleEndian = view.getUint16(tiffStart) === 0x4949;
+                            const ifdOffset = view.getUint32(tiffStart + 4, littleEndian);
+                            const ifdEntries = view.getUint16(tiffStart + ifdOffset, littleEndian);
+                            for (let i = 0; i < ifdEntries; i++) {
+                                const entryOffset = tiffStart + ifdOffset + 2 + i * 12;
+                                if (view.getUint16(entryOffset, littleEndian) === 0x0112) {
+                                    resolve(view.getUint16(entryOffset + 8, littleEndian));
+                                    return;
+                                }
+                            }
+                            resolve(1); return;
+                        } else if ((marker & 0xFF00) !== 0xFF00) {
+                            resolve(1); return;
+                        } else {
+                            offset += view.getUint16(offset);
+                        }
+                    }
+                    resolve(1);
+                } catch (ex) {
+                    resolve(1);
+                }
+            };
+            reader.onerror = () => resolve(1);
+            // Only read first 128KB — EXIF is always at the start
+            reader.readAsArrayBuffer(file.slice(0, 131072));
+        });
+    }
+
+    /**
+     * Automatic image orientation detection via EXIF + canvas rotation.
+     * createImageBitmap with imageOrientation:"from-image" only applies
+     * EXIF rotation visually in some browsers — it does NOT rotate the raw
+     * pixel data drawn to canvas. We must read EXIF manually and apply the
+     * correct canvas transform so Gemini receives an upright image.
      */
     function preprocessImageAutoOrient(file) {
         return new Promise(async (resolve) => {
             try {
-                let imgSource = null;
-                let srcW = 0, srcH = 0;
+                // Step 1: Read EXIF orientation
+                const orientation = await readExifOrientation(file);
 
-                if (typeof window.createImageBitmap === "function") {
-                    try {
-                        imgSource = await window.createImageBitmap(file, { imageOrientation: "from-image" });
-                        srcW = imgSource.width;
-                        srcH = imgSource.height;
-                    } catch (bmErr) {
-                        imgSource = null;
-                    }
-                }
+                // Step 2: Decode image to bitmap (no orientation correction here)
+                const dataUrl = await new Promise((r) => {
+                    const reader = new FileReader();
+                    reader.onload = (e) => r(e.target.result);
+                    reader.onerror = () => r(null);
+                    reader.readAsDataURL(file);
+                });
+                if (!dataUrl) { resolve({ base64: null }); return; }
 
-                if (!imgSource) {
-                    const dataUrl = await new Promise((r) => {
-                        const reader = new FileReader();
-                        reader.onload = (e) => r(e.target.result);
-                        reader.onerror = () => r(null);
-                        reader.readAsDataURL(file);
-                    });
-                    if (!dataUrl) {
-                        resolve({ base64: null });
-                        return;
-                    }
-                    const img = new Image();
-                    await new Promise((r) => {
-                        img.onload = () => r(true);
-                        img.onerror = () => r(false);
-                        img.src = dataUrl;
-                    });
-                    imgSource = img;
-                    srcW = img.naturalWidth || img.width;
-                    srcH = img.naturalHeight || img.height;
-                }
+                const img = new Image();
+                await new Promise((r) => {
+                    img.onload = () => r(true);
+                    img.onerror = () => r(false);
+                    img.src = dataUrl;
+                });
 
+                const srcW = img.naturalWidth || img.width;
+                const srcH = img.naturalHeight || img.height;
+                if (!srcW || !srcH) { resolve({ base64: null }); return; }
+
+                // Step 3: Determine output dimensions after rotation
+                // EXIF orientations 5-8 swap width/height (90° or 270° rotation)
+                const swapped = orientation >= 5;
                 const maxDim = 2400;
-                let targetW = srcW;
-                let targetH = srcH;
+                let drawW = srcW, drawH = srcH;
                 if (srcW > maxDim || srcH > maxDim) {
-                    if (srcW > srcH) {
-                        targetH = Math.round((srcH * maxDim) / srcW);
-                        targetW = maxDim;
-                    } else {
-                        targetW = Math.round((srcW * maxDim) / srcH);
-                        targetH = maxDim;
-                    }
+                    if (srcW > srcH) { drawH = Math.round(srcH * maxDim / srcW); drawW = maxDim; }
+                    else             { drawW = Math.round(srcW * maxDim / srcH); drawH = maxDim; }
                 }
+                const canvasW = swapped ? drawH : drawW;
+                const canvasH = swapped ? drawW : drawH;
 
                 const canvas = document.createElement("canvas");
-                canvas.width = targetW;
-                canvas.height = targetH;
+                canvas.width  = canvasW;
+                canvas.height = canvasH;
                 const ctx = canvas.getContext("2d", { willReadFrequently: true });
-                if (!ctx) {
-                    resolve({ base64: null });
-                    return;
+                if (!ctx) { resolve({ base64: null }); return; }
+
+                // Step 4: Apply EXIF rotation transform before drawing
+                ctx.save();
+                // Transform matrix per EXIF orientation spec
+                switch (orientation) {
+                    case 2: ctx.transform(-1,  0,  0,  1, canvasW,      0); break;
+                    case 3: ctx.transform(-1,  0,  0, -1, canvasW, canvasH); break;
+                    case 4: ctx.transform( 1,  0,  0, -1,       0, canvasH); break;
+                    case 5: ctx.transform( 0,  1,  1,  0,       0,       0); break;
+                    case 6: ctx.transform( 0,  1, -1,  0, canvasH,       0); break;
+                    case 7: ctx.transform( 0, -1, -1,  0, canvasH, canvasW); break;
+                    case 8: ctx.transform( 0, -1,  1,  0,       0, canvasW); break;
+                    default: break; // orientation 1 — no transform needed
                 }
+                ctx.drawImage(img, 0, 0, drawW, drawH);
+                ctx.restore();
 
-                ctx.drawImage(imgSource, 0, 0, targetW, targetH);
-
-                // Adaptive contrast enhancement for OCR readability
+                // Step 5: Adaptive contrast enhancement for OCR readability
+                // Only apply if the image has low contrast (e.g. faded/dim scans)
                 try {
-                    const imgData = ctx.getImageData(0, 0, targetW, targetH);
+                    const imgData = ctx.getImageData(0, 0, canvasW, canvasH);
                     const d = imgData.data;
                     let minLum = 255, maxLum = 0;
+                    // Sample every 8th pixel for speed
                     for (let i = 0; i < d.length; i += 32) {
                         const lum = (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000;
                         if (lum < minLum) minLum = lum;
                         if (lum > maxLum) maxLum = lum;
                     }
-                    if (maxLum - minLum > 35 && (minLum > 15 || maxLum < 240)) {
-                        const factor = 255 / (maxLum - minLum);
+                    const spread = maxLum - minLum;
+                    // Only stretch contrast if image is noticeably low-contrast
+                    // (spread < 180) — avoid degrading already-clear prescriptions
+                    if (spread > 35 && spread < 180 && (minLum > 20 || maxLum < 230)) {
+                        const factor = 255 / spread;
                         for (let i = 0; i < d.length; i += 4) {
-                            d[i]     = Math.min(255, Math.max(0, (d[i] - minLum) * factor));
+                            d[i]     = Math.min(255, Math.max(0, (d[i]     - minLum) * factor));
                             d[i + 1] = Math.min(255, Math.max(0, (d[i + 1] - minLum) * factor));
                             d[i + 2] = Math.min(255, Math.max(0, (d[i + 2] - minLum) * factor));
                         }
@@ -5370,10 +5425,13 @@ function setupPrescriptionUpload() {
                     console.warn("[Prescription] Contrast filter skipped:", contrastErr);
                 }
 
-                const optimizedDataUrl = canvas.toDataURL("image/jpeg", 0.94);
+                // Step 6: Export at high quality for vision model
+                const optimizedDataUrl = canvas.toDataURL("image/jpeg", 0.95);
                 resolve({ base64: optimizedDataUrl });
+
             } catch (err) {
-                console.warn("[Prescription] Preprocessing failed:", err);
+                console.warn("[Prescription] Preprocessing failed, sending raw:", err);
+                // Last-resort fallback: send raw file bytes
                 const reader = new FileReader();
                 reader.onload = (e) => resolve({ base64: e.target.result });
                 reader.onerror = () => resolve({ base64: null });
