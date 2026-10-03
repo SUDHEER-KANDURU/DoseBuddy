@@ -5795,14 +5795,11 @@ async function renderVitalsView() {
 async function loadVitalsLatest() {
     if (!currentUser) return;
     try {
-        const res = await authFetch(`${API_BASE}/vitals/latest/${currentUser.id}`);
-        // FIX Issue 9: 404 means "no records yet" — this is expected for new
-        // users and should be handled silently, not logged as a console error.
-        // The backend returns 404 with body {"message":"No vitals records found"}
-        // when the user has no vitals history. Clear the cards and return quietly.
-        if (res.status === 404) { clearVitalsSummaryCards(); return; }
-        if (!res.ok) { clearVitalsSummaryCards(); return; }
-        const data = await res.json();
+        const data = await fetchJsonCached(`${API_BASE}/vitals/latest/${currentUser.id}`, 15000);
+        if (!data) {
+            clearVitalsSummaryCards();
+            return;
+        }
         renderVitalsSummaryCards(data);
         checkVitalsAlerts(data);
     } catch (e) {
@@ -5813,11 +5810,10 @@ async function loadVitalsLatest() {
 async function loadVitalsHistory() {
     if (!currentUser) return;
     try {
-        const res = await authFetch(`${API_BASE}/vitals/history/${currentUser.id}`);
-        if (!res.ok) { renderVitalsTable([]); return; }
-        const data = await res.json();
-        renderVitalsTable(data);
-        renderVitalsInsights(data);
+        const data = await fetchJsonCached(`${API_BASE}/vitals/history/${currentUser.id}`, 15000);
+        const records = Array.isArray(data) ? data : [];
+        renderVitalsTable(records);
+        renderVitalsInsights(records);
     } catch (e) {
         renderVitalsTable([]);
     }
@@ -5826,10 +5822,9 @@ async function loadVitalsHistory() {
 async function loadVitalsTrend(period) {
     if (!currentUser) return;
     try {
-        const res = await authFetch(`${API_BASE}/vitals/trend/${currentUser.id}?period=${period}`);
-        if (!res.ok) { renderVitalsCharts([]); return; }
-        const data = await res.json();
-        renderVitalsCharts(data);
+        const data = await fetchJsonCached(`${API_BASE}/vitals/trend/${currentUser.id}?period=${period}`, 15000);
+        const records = Array.isArray(data) ? data : [];
+        renderVitalsCharts(records);
     } catch (e) {
         renderVitalsCharts([]);
     }
@@ -5905,6 +5900,7 @@ async function submitVitals() {
             document.getElementById("vf-general-err").textContent = err.message || "Failed to save vitals.";
             return;
         }
+        invalidateDataCache("/vitals/", "/activities/");
         showToast("Vitals saved successfully!", "success");
         document.getElementById("vitals-form").reset();
         await renderVitalsView();

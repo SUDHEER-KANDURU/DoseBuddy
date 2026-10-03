@@ -692,11 +692,12 @@ export default {
 
         const isWeek = path.includes("/summary/week/");
         const days = isWeek ? 7 : Math.min(3650, Math.max(1, parseInt(url.searchParams.get("days") || "7", 10)));
+        const safeDaysSub = Math.max(0, days - 1);
 
         const [logCounts] = await query<Json[]>(
           env,
-          "SELECT DATE_FORMAT(date,'%Y-%m-%d') AS day_str, SUM(status='TAKEN') AS taken, SUM(status='MISSED') AS missed FROM intake_logs WHERE marker_user_id=? AND date>=DATE_SUB(CURDATE(), INTERVAL ? DAY) GROUP BY day_str",
-          [target.id, days - 1]
+          `SELECT DATE_FORMAT(date,'%Y-%m-%d') AS day_str, SUM(status='TAKEN') AS taken, SUM(status='MISSED') AS missed FROM intake_logs WHERE marker_user_id=? AND date>=DATE_SUB(CURDATE(), INTERVAL ${safeDaysSub} DAY) GROUP BY day_str`,
+          [target.id]
         );
 
         const countMap = new Map<string, { taken: number; missed: number }>();
@@ -723,9 +724,10 @@ export default {
         if (!target) return json({ message: "User not found" }, 400);
         if (!accessible(actor, target)) return json({ message: "Access denied" }, 403);
 
-        const days = parseInt(url.searchParams.get("days") || "0", 10);
-        const filter = days > 0 ? "AND date>=DATE_SUB(CURDATE(), INTERVAL ? DAY)" : "";
-        const params = days > 0 ? [target.id, days - 1] : [target.id];
+        const days = Math.min(3650, Math.max(0, parseInt(url.searchParams.get("days") || "0", 10)));
+        const safeDaysSub = Math.max(0, days - 1);
+        const filter = days > 0 ? `AND date>=DATE_SUB(CURDATE(), INTERVAL ${safeDaysSub} DAY)` : "";
+        const params = [target.id];
 
         const [counts] = await query<Json[]>(
           env,
@@ -909,8 +911,8 @@ export default {
         const days = period === "month" ? 30 : 7;
         const [rows] = await query<Json[]>(
           env,
-          "SELECT * FROM vital_records WHERE user_id=? AND recorded_at>=DATE_SUB(NOW(), INTERVAL ? DAY) ORDER BY recorded_at ASC",
-          [target.id, days]
+          `SELECT * FROM vital_records WHERE user_id=? AND recorded_at>=DATE_SUB(NOW(), INTERVAL ${days} DAY) ORDER BY recorded_at ASC`,
+          [target.id]
         );
         return json(rows.map(buildVitalResponse));
       }
