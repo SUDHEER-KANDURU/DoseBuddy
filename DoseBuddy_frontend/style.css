@@ -6341,3 +6341,238 @@ body.dark-mode .status-normal    { background: rgba(16,185,129,0.2); color: #6ee
 body.dark-mode .status-underweight { background: rgba(234,179,8,0.2); color: #fcd34d; }
 body.dark-mode .status-overweight { background: rgba(234,88,12,0.2); color: #fb923c; }
 body.dark-mode .status-obese     { background: rgba(220,38,38,0.2); color: #f87171; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PRESCRIPTION OCR REVIEW INTERFACE
+═══════════════════════════════════════════════════════════════════════════ */
+.prescription-review-card {
+    border: 1.5px solid var(--primary, #00A19B) !important;
+    background: var(--surface, #ffffff);
+    border-radius: var(--radius-lg, 14px);
+    overflow: hidden;
+    animation: fadeIn 0.3s ease;
+}
+
+.prx-safety-disclaimer {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px 16px;
+    background: rgba(245, 158, 11, 0.12);
+    border-left: 4px solid #f59e0b;
+    border-radius: 6px;
+    color: #b45309;
+    font-size: 0.8125rem;
+    line-height: 1.45;
+    margin-bottom: var(--space-4, 16px);
+}
+body.dark-mode .prx-safety-disclaimer {
+    background: rgba(245, 158, 11, 0.15);
+    color: #fbbf24;
+}
+
+.prx-meta-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 10px 14px;
+    background: var(--bg, #f8fafc);
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: var(--radius-md, 8px);
+    font-size: 0.78rem;
+    color: var(--text-secondary, #475569);
+    margin-bottom: var(--space-4, 16px);
+}
+body.dark-mode .prx-meta-bar {
+    background: rgba(255, 255, 255, 0.03);
+    border-color: var(--border, #334155);
+    color: var(--text-muted, #94a3b8);
+}
+
+.prx-meds-container {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    margin-bottom: var(--space-5, 20px);
+}
+
+.prx-med-item {
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: var(--radius-md, 10px);
+    padding: 14px;
+    background: var(--surface, #ffffff);
+    box-shadow: var(--shadow-sm, 0 1px 2px rgba(0,0,0,0.05));
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.prx-med-item.needs-verify {
+    border-left: 4px solid #f59e0b;
+    background: rgba(245, 158, 11, 0.03);
+}
+.prx-med-item.verified {
+    border-left: 4px solid #10b981;
+}
+body.dark-mode .prx-med-item {
+    background: var(--surface, #1e293b);
+    border-color: var(--border, #334155);
+}
+body.dark-mode .prx-med-item.needs-verify {
+    background: rgba(245, 158, 11, 0.08);
+}
+
+.prx-med-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+}
+
+.prx-med-title-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    min-width: 220px;
+}
+
+.prx-badge-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 9px;
+    border-radius: 20px;
+    font-size: 0.72rem;
+    font-weight: 600;
+}
+.prx-badge-verified {
+    background: #d1fae5;
+    color: #065f46;
+}
+.prx-badge-warning {
+    background: #fef3c7;
+    color: #92400e;
+}
+body.dark-mode .prx-badge-verified {
+    background: rgba(16, 185, 129, 0.2);
+    color: #6ee7b7;
+}
+body.dark-mode .prx-badge-warning {
+    background: rgba(245, 158, 11, 0.2);
+    color: #fcd34d;
+}
+
+.prx-form-grid {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+@media (max-width: 768px) {
+    .prx-form-grid { grid-template-columns: 1fr; }
+}
+
+.prx-form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.prx-form-group label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--text-muted, #64748b);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.prx-form-group input, .prx-form-group select {
+    padding: 7px 10px;
+    font-size: 0.82rem;
+    border: 1px solid var(--border, #cbd5e1);
+    border-radius: 6px;
+    background: var(--bg, #f8fafc);
+    color: var(--text-primary, #0f172a);
+}
+body.dark-mode .prx-form-group input, body.dark-mode .prx-form-group select {
+    background: rgba(0,0,0,0.2);
+    border-color: var(--border, #334155);
+    color: var(--text-primary, #f1f5f9);
+}
+
+.prx-timing-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+    flex-wrap: wrap;
+}
+.prx-timing-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--text-muted, #64748b);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-right: 4px;
+}
+.prx-time-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    border: 1px solid var(--border, #cbd5e1);
+    border-radius: 20px;
+    background: var(--surface, #ffffff);
+    color: var(--text-secondary, #475569);
+    cursor: pointer;
+    user-select: none;
+    transition: all 0.15s ease;
+}
+.prx-time-chip input[type="checkbox"] {
+    cursor: pointer;
+    accent-color: var(--primary, #00A19B);
+}
+.prx-time-chip.active {
+    background: var(--primary-light, #e0f2fe);
+    border-color: var(--primary, #00A19B);
+    color: var(--primary, #00A19B);
+    font-weight: 600;
+}
+body.dark-mode .prx-time-chip {
+    background: rgba(255,255,255,0.04);
+    border-color: var(--border, #334155);
+    color: var(--text-muted, #94a3b8);
+}
+body.dark-mode .prx-time-chip.active {
+    background: var(--accent-light, rgba(0,161,155,0.2));
+    border-color: var(--primary, #00A19B);
+    color: var(--primary, #38bdf8);
+}
+
+.prx-review-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 12px;
+    padding-top: var(--space-4, 16px);
+    border-top: 1px solid var(--border, #e2e8f0);
+    flex-wrap: wrap;
+}
+@media (max-width: 640px) {
+    .prx-review-actions { flex-direction: column-reverse; width: 100%; }
+    .prx-review-actions button { width: 100%; justify-content: center; }
+}
+
+.prx-del-btn {
+    padding: 4px 8px;
+    border: none;
+    background: transparent;
+    color: var(--text-muted, #94a3b8);
+    cursor: pointer;
+    border-radius: 4px;
+    transition: color 0.15s ease, background 0.15s ease;
+}
+.prx-del-btn:hover {
+    color: var(--danger, #ef4444);
+    background: rgba(239, 68, 68, 0.1);
+}

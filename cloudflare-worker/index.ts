@@ -322,16 +322,304 @@ function buildVitalResponse(r: Json) {
   };
 }
 
-async function callAi(env: Env, prompt: string) {
-  if (!env.GROQ_API_KEY) return json({ message: "AI service is not configured" }, 503);
-  const r = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: { authorization: `Bearer ${env.GROQ_API_KEY}`, "content-type": "application/json" },
-    body: JSON.stringify({ model: env.GROQ_MODEL || "openai/gpt-oss-20b", messages: [{ role: "user", content: prompt }] })
+function bufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  const chunkSize = 8192;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode.apply(null, chunk as unknown as number[]);
+  }
+  return btoa(binary);
+}
+
+const PRESCRIPTION_PROMPT = `You are a highly precise medical prescription OCR and extraction engine specializing in real-world hospital and clinic prescriptions (including Indian prescriptions such as Apollo Hospitals, Fortis, Max, AIIMS, and handwritten/printed clinic Rx).
+
+CRITICAL MEDICAL SAFETY & EXTRACTION INSTRUCTIONS:
+1. ZERO HALLUCINATION POLICY: Extract ONLY medications and details that are visibly present in the image. NEVER guess, infer, or replace a name with a similar-sounding drug.
+2. If any field (name, strength, dosage, schedule, duration) is partially unclear, smudge-covered, ambiguous, or missing:
+   - Provide your best reading or leave blank/null.
+   - Assign a realistic confidence score (e.g., 0.3 to 0.6).
+   - Set "needs_confirmation": true.
+3. TABLE / SCHEDULE EXTRACTION:
+   - Prescriptions often use a table structure: [Medicine & Details] | [Morning] | [Afternoon] | [Evening] | [Night] | [Instructions].
+   - Carefully align each row with its specific timing columns.
+   - In columns: "1", "0.5", "2", "✓", or a tick mark = taken in that slot (record the number).
+   - In columns: "-", "–", "0", or empty = NOT taken (0).
+   - Cross-reference column numbers with inline text instructions (e.g. "(Morning & Night)", "(Morning, Afternoon & Night)", "(Morning)", "Before Breakfast", "Before meal", "After meal").
+4. FIELDS FOR EACH MEDICINE:
+   - "name": Clean brand or generic medicine name (e.g. "Esomac", "Acogut ER", "Panlipase", "Menoctyl"). Strip packaging suffixes like "15'S", "10'S", "TAB", "CAP" from the name.
+   - "strength": Dosage strength with units if present (e.g. "40 mg", "300 mg ER", "150 mg").
+   - "dosage": Amount per intake and form (e.g. "1 Tablet", "1 Capsule", "5 ml", "0.5 Tablet").
+   - "form": "Tablet", "Capsule", "Syrup", "Injection", "Drops", "Ointment", "Other".
+   - "morning": number (0, 1, 2, etc.)
+   - "afternoon": number (0, 1, 2, etc.)
+   - "evening": number (0, 1, 2, etc.)
+   - "night": number (0, 1, 2, etc.)
+   - "food_instruction": e.g. "Before meal", "After meal", "Before Breakfast", "With food", "Empty stomach", "As directed".
+   - "duration_value": number or null (e.g. 2, 60, 5, 14).
+   - "duration_unit": "days", "weeks", "months", or "".
+   - "duration_days": total estimated days (e.g. "2 Month(s)" -> 60, "5 Days" -> 5, "2 Weeks" -> 14) or null.
+   - "times": Array of 24-hr times matching the schedule:
+     * Morning: "08:00"
+     * Afternoon: "13:00"
+     * Evening: "18:00"
+     * Night: "21:00"
+   - "confidence": Float 0.0 to 1.0 (overall confidence for this medicine item).
+   - "name_confidence": Float 0.0 to 1.0.
+   - "strength_confidence": Float 0.0 to 1.0.
+   - "schedule_confidence": Float 0.0 to 1.0.
+   - "duration_confidence": Float 0.0 to 1.0.
+   - "needs_confirmation": boolean (true if any confidence is below 0.85 or text is ambiguous).
+   - "source_text": Verbatim text line/row from the prescription for this medicine.
+
+Return ONLY a valid JSON object with NO surrounding markdown, NO code fences, NO introductory text.
+The JSON must follow this exact schema:
+{
+  "medicines": [
+    {
+      "name": "string",
+      "strength": "string",
+      "dosage": "string",
+      "form": "string",
+      "morning": 0,
+      "afternoon": 0,
+      "evening": 0,
+      "night": 0,
+      "food_instruction": "string",
+      "duration_value": null,
+      "duration_unit": "string",
+      "duration_days": null,
+      "times": ["08:00"],
+      "confidence": 0.95,
+      "name_confidence": 0.95,
+      "strength_confidence": 0.95,
+      "schedule_confidence": 0.95,
+      "duration_confidence": 0.95,
+      "needs_confirmation": false,
+      "source_text": "string"
+    }
+  ],
+  "patient_name": "string or empty",
+  "doctor_name": "string or empty",
+  "visit_date": "string or empty"
+}`;
+
+function normalizePrescriptionResult(rawJson: string) {
+  let parsed: any = null;
+  try {
+    parsed = JSON.parse(rawJson);
+  } catch (e) {
+    console.error("Failed to parse AI JSON response:", rawJson);
+  }
+
+  let list: any[] = [];
+  if (parsed) {
+    if (Array.isArray(parsed)) {
+      list = parsed;
+    } else if (Array.isArray(parsed.medicines)) {
+      list = parsed.medicines;
+    } else if (Array.isArray(parsed.medications)) {
+      list = parsed.medications;
+    }
+  }
+
+  const normalized = list.map((m: any) => {
+    const rawName = String(m.name || m.medicineName || m.drug || "").trim();
+    const cleanName = rawName.replace(/\b\d+['’]?[sS]\b/g, "").replace(/\s+/g, " ").trim();
+    const strength = String(m.strength || "").trim();
+    const form = String(m.form || "Tablet").trim();
+    const dosage = String(m.dosage || (form ? `1 ${form}` : "1 Tablet")).trim();
+    
+    const morning = Number(m.morning || 0);
+    const afternoon = Number(m.afternoon || 0);
+    const evening = Number(m.evening || 0);
+    const night = Number(m.night || 0);
+
+    const times: string[] = [];
+    if (Array.isArray(m.times) && m.times.length > 0) {
+      m.times.forEach((t: any) => {
+        const normT = String(t).trim();
+        if (/^\d{2}:\d{2}$/.test(normT)) times.push(normT);
+        else if (/^\d:\d{2}$/.test(normT)) times.push("0" + normT);
+      });
+    }
+    if (times.length === 0) {
+      if (morning > 0) times.push("08:00");
+      if (afternoon > 0) times.push("13:00");
+      if (evening > 0) times.push("18:00");
+      if (night > 0) times.push("21:00");
+    }
+    if (times.length === 0) times.push("08:00");
+
+    const foodInstruction = String(m.food_instruction || m.instructions || "").trim();
+
+    let durationDays = m.duration_days ? Number(m.duration_days) : null;
+    let durationVal = m.duration_value !== undefined && m.duration_value !== null ? Number(m.duration_value) : null;
+    const durationUnit = String(m.duration_unit || "").toLowerCase().trim();
+
+    if (!durationDays && durationVal) {
+      if (durationUnit.includes("month")) durationDays = durationVal * 30;
+      else if (durationUnit.includes("week")) durationDays = durationVal * 7;
+      else if (durationUnit.includes("day")) durationDays = durationVal;
+    }
+
+    const nameConf = typeof m.name_confidence === "number" ? m.name_confidence : (typeof m.confidence === "number" ? m.confidence : 0.9);
+    const strengthConf = typeof m.strength_confidence === "number" ? m.strength_confidence : nameConf;
+    const schedConf = typeof m.schedule_confidence === "number" ? m.schedule_confidence : nameConf;
+    const durConf = typeof m.duration_confidence === "number" ? m.duration_confidence : nameConf;
+    const overallConf = typeof m.confidence === "number" ? m.confidence : Math.min(nameConf, strengthConf, schedConf, durConf);
+
+    const needsConfirm = Boolean(m.needs_confirmation || overallConf < 0.85 || nameConf < 0.85 || !cleanName);
+
+    return {
+      name: cleanName || "Unknown Medicine",
+      medicineName: cleanName ? (strength && !cleanName.toLowerCase().includes(strength.toLowerCase()) ? `${cleanName} ${strength}` : cleanName) : "Unknown Medicine",
+      strength: strength,
+      dosage: dosage,
+      form: form,
+      morning: morning,
+      afternoon: afternoon,
+      evening: evening,
+      night: night,
+      food_instruction: foodInstruction,
+      instructions: foodInstruction,
+      duration_value: durationVal,
+      duration_unit: durationUnit,
+      duration_days: durationDays || 30,
+      times: times,
+      confidence: Math.round(overallConf * 100) / 100,
+      name_confidence: Math.round(nameConf * 100) / 100,
+      strength_confidence: Math.round(strengthConf * 100) / 100,
+      schedule_confidence: Math.round(schedConf * 100) / 100,
+      duration_confidence: Math.round(durConf * 100) / 100,
+      needs_confirmation: needsConfirm,
+      source_text: String(m.source_text || "").trim()
+    };
   });
-  if (!r.ok) return json({ message: "AI service is temporarily unavailable" }, 502);
-  const data = await r.json<Json>();
-  return plain(String(data.choices?.[0]?.message?.content ?? ""));
+
+  return {
+    medicines: normalized,
+    patient_name: parsed?.patient_name || "",
+    doctor_name: parsed?.doctor_name || "",
+    visit_date: parsed?.visit_date || "",
+    disclaimer: "AI-assisted extraction — please verify all medicines, dosage, timing and duration against your prescription before saving.",
+    extractedCount: normalized.length
+  };
+}
+
+async function parsePrescriptionWithAi(env: Env, base64: string, mimeType: string, textContent?: string) {
+  let rawJson = "";
+
+  // 1. Try Gemini Vision if API key is available
+  if (env.GEMINI_API_KEY && base64) {
+    const models = [env.GEMINI_MODEL || "gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.0-flash"];
+    for (const model of models) {
+      try {
+        const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${env.GEMINI_API_KEY}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{
+              parts: [
+                { text: PRESCRIPTION_PROMPT },
+                { inlineData: { mimeType: mimeType || "image/jpeg", data: base64 } }
+              ]
+            }],
+            generationConfig: {
+              temperature: 0.1,
+              responseMimeType: "application/json"
+            }
+          })
+        });
+        if (resp.ok) {
+          const data = await resp.json<any>();
+          const candidate = data.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (candidate && candidate.trim()) {
+            rawJson = candidate.trim();
+            break;
+          }
+        } else {
+          console.warn(`Gemini model ${model} returned status ${resp.status}`);
+        }
+      } catch (err) {
+        console.error(`Gemini model ${model} error:`, err);
+      }
+    }
+  }
+
+  // 2. Fallback to Groq Vision if Gemini did not produce a result and Groq is available
+  if (!rawJson && env.GROQ_API_KEY && base64) {
+    const visionModels = ["llama-3.2-90b-vision-preview", "llama-3.2-11b-vision-preview"];
+    for (const vModel of visionModels) {
+      try {
+        const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${env.GROQ_API_KEY}`,
+            "content-type": "application/json"
+          },
+          body: JSON.stringify({
+            model: vModel,
+            messages: [{
+              role: "user",
+              content: [
+                { type: "text", text: PRESCRIPTION_PROMPT },
+                { type: "image_url", image_url: { url: `data:${mimeType || "image/jpeg"};base64,${base64}` } }
+              ]
+            }],
+            temperature: 0.1,
+            response_format: { type: "json_object" }
+          })
+        });
+        if (resp.ok) {
+          const data = await resp.json<any>();
+          const content = data.choices?.[0]?.message?.content;
+          if (content && content.trim()) {
+            rawJson = content.trim();
+            break;
+          }
+        }
+      } catch (err) {
+        console.error(`Groq vision model ${vModel} error:`, err);
+      }
+    }
+  }
+
+  // 3. Fallback to Groq Text if text was provided and no vision result
+  if (!rawJson && env.GROQ_API_KEY && textContent) {
+    try {
+      const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${env.GROQ_API_KEY}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          model: env.GROQ_MODEL || "openai/gpt-oss-20b",
+          messages: [
+            { role: "system", content: PRESCRIPTION_PROMPT },
+            { role: "user", content: `Prescription text:\n${textContent}` }
+          ],
+          temperature: 0.1,
+          response_format: { type: "json_object" }
+        })
+      });
+      if (resp.ok) {
+        const data = await resp.json<any>();
+        rawJson = data.choices?.[0]?.message?.content?.trim() || "";
+      }
+    } catch (err) {
+      console.error("Groq text extraction error:", err);
+    }
+  }
+
+  // Clean markdown fences if any
+  if (rawJson) {
+    rawJson = rawJson.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+  }
+
+  return normalizePrescriptionResult(rawJson);
 }
 
 export default {
@@ -446,6 +734,49 @@ export default {
       if (path === "/api/medicine/symptom-check" && request.method === "POST") {
         const { body: b } = await requestBody(request);
         return callAi(env, `Give safe, non-diagnostic guidance for these symptoms: ${String(b.symptoms ?? "")}`);
+      }
+
+      if (path === "/api/prescription/upload" && request.method === "POST") {
+        let base64 = "";
+        let mimeType = "image/jpeg";
+        let textContent = "";
+
+        const contentType = request.headers.get("content-type") || "";
+        if (contentType.includes("multipart/form-data")) {
+          const formData = await request.formData();
+          const file = formData.get("file");
+          if (!file || typeof file === "string") {
+            return json({ message: "No file uploaded" }, 400);
+          }
+          const fileObj = file as File;
+          mimeType = fileObj.type || "image/jpeg";
+          const buffer = await fileObj.arrayBuffer();
+          if (mimeType.startsWith("text/")) {
+            textContent = new TextDecoder().decode(buffer);
+          } else {
+            base64 = bufferToBase64(buffer);
+          }
+        } else if (contentType.includes("application/json")) {
+          const { body: b } = await requestBody(request);
+          base64 = String(b.image || b.base64 || "");
+          if (base64.includes(",")) {
+            const parts = base64.split(",");
+            const match = parts[0].match(/:(.*?);/);
+            if (match) mimeType = match[1];
+            base64 = parts[1];
+          }
+          mimeType = String(b.mimeType || mimeType);
+          textContent = String(b.text || "");
+        } else {
+          return json({ message: "Unsupported content type" }, 400);
+        }
+
+        if (!base64 && !textContent) {
+          return json({ message: "No image or text data provided for extraction" }, 400);
+        }
+
+        const result = await parsePrescriptionWithAi(env, base64, mimeType, textContent);
+        return json(result);
       }
 
       // ── Medications ─────────────────────────────────────────────────────

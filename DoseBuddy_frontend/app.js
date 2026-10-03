@@ -4759,12 +4759,20 @@ function setupPrescriptionUpload() {
     const errorEl     = document.getElementById("prescription-error");
     const infoEl      = document.getElementById("prescription-info");
 
+    const reviewSection = document.getElementById("prescription-review-section");
+    const countEl       = document.getElementById("prx-detected-count");
+    const metaBar       = document.getElementById("prx-patient-meta");
+    const medsListEl    = document.getElementById("prx-meds-list");
+    const saveAllBtn    = document.getElementById("prx-save-all-btn");
+    const cancelBtn     = document.getElementById("prx-cancel-review-btn");
+
     if (!fileInput || !browseBtn || !dropZone || !autofillBtn) {
         console.warn("[Prescription] Setup skipped — elements not found in DOM.");
         return;
     }
 
     let selectedFile = null;
+    let currentExtractedMeds = [];
 
     browseBtn.addEventListener("click", () => fileInput.click());
 
@@ -4790,6 +4798,19 @@ function setupPrescriptionUpload() {
         errorEl.textContent = "";
         infoEl.textContent = "";
         infoEl.style.color = "";
+        if (reviewSection) reviewSection.style.display = "none";
+    }
+
+    if (cancelBtn) {
+        cancelBtn.addEventListener("click", () => {
+            currentExtractedMeds = [];
+            if (reviewSection) reviewSection.style.display = "none";
+            selectedFile = null;
+            if (fileInput) fileInput.value = "";
+            fileNameEl.textContent = "";
+            infoEl.textContent = "";
+            errorEl.textContent = "";
+        });
     }
 
     autofillBtn.addEventListener("click", async () => {
@@ -4810,7 +4831,7 @@ function setupPrescriptionUpload() {
             return;
         }
 
-        autofillBtn.textContent = "Processing...";
+        autofillBtn.textContent = "Extracting with AI...";
         autofillBtn.disabled    = true;
         autofillBtn.classList.add("btn-loading");
 
@@ -4830,23 +4851,239 @@ function setupPrescriptionUpload() {
             }
 
             const responseData = await uploadRes.json();
+            const medicines    = responseData.medicines || (Array.isArray(responseData) ? responseData : []);
 
-            const medicines    = responseData.medicines   || responseData; 
-            const parseQuality = responseData.parseQuality || "";
-
-            if (!Array.isArray(medicines)) {
-                errorEl.textContent = "Unexpected response from server. Please try again.";
-                return;
-            }
-
-            if (medicines.length === 0) {
+            if (!Array.isArray(medicines) || medicines.length === 0) {
                 infoEl.style.color = "#b45309";
-                infoEl.textContent = "No medicines could be detected. Try a clearer image or check the file format.";
+                infoEl.textContent = "No medicines could be detected with certainty. Please ensure the prescription is clear and try again, or enter medicines manually.";
                 return;
             }
 
+            currentExtractedMeds = medicines.map((m, idx) => ({
+                id: `prx_item_${Date.now()}_${idx}`,
+                name: m.name || m.medicineName || "",
+                strength: m.strength || "",
+                dosage: m.dosage || "1 Tablet",
+                form: m.form || "Tablet",
+                instructions: m.food_instruction || m.instructions || "Before meal",
+                durationDays: m.duration_days || (m.duration_value ? m.duration_value * (m.duration_unit === "months" ? 30 : 7) : 30),
+                morning: Boolean(m.morning || (m.times && m.times.includes("08:00"))),
+                afternoon: Boolean(m.afternoon || (m.times && (m.times.includes("13:00") || m.times.includes("14:00")))),
+                evening: Boolean(m.evening || (m.times && m.times.includes("18:00"))),
+                night: Boolean(m.night || (m.times && (m.times.includes("20:00") || m.times.includes("21:00")))),
+                times: Array.isArray(m.times) ? m.times : ["08:00"],
+                confidence: typeof m.confidence === "number" ? m.confidence : 0.9,
+                needsConfirmation: Boolean(m.needs_confirmation || (m.confidence && m.confidence < 0.85) || !m.name),
+                sourceText: m.source_text || ""
+            }));
+
+            currentExtractedMeds.forEach(m => {
+                if (!m.morning && !m.afternoon && !m.evening && !m.night) {
+                    m.morning = true;
+                }
+            });
 
             fillMedicineForm(medicines[0]);
+
+            renderPrescriptionReview(responseData);
+
+            infoEl.style.color = "#15803d";
+            infoEl.textContent = `✨ ${currentExtractedMeds.length} medicine(s) detected. Please review and verify below before saving.`;
+            showToast(`Detected ${currentExtractedMeds.length} medicines from prescription. Review below.`, "info");
+
+        } catch (err) {
+            console.error("[Prescription] Extraction error:", err);
+            errorEl.textContent = "Error: " + err.message;
+        } finally {
+            autofillBtn.textContent = "Auto Fill from Prescription";
+            autofillBtn.disabled    = false;
+            autofillBtn.classList.remove("btn-loading");
+        }
+    });
+
+    function renderPrescriptionReview(data) {
+        if (!reviewSection || !medsListEl) return;
+        reviewSection.style.display = "block";
+        if (countEl) countEl.textContent = currentExtractedMeds.length;
+
+        if (metaBar) {
+            const metaParts = [];
+            if (data.patient_name) metaParts.push(`<strong>Patient:</strong> ${escapeHtml(data.patient_name)}`);
+            if (data.doctor_name)  metaParts.push(`<strong>Doctor:</strong> ${escapeHtml(data.doctor_name)}`);
+            if (data.visit_date)   metaParts.push(`<strong>Date:</strong> ${escapeHtml(data.visit_date)}`);
+            if (metaParts.length > 0) {
+                metaBar.innerHTML = metaParts.join(" &nbsp;|&nbsp; ");
+                metaBar.style.display = "flex";
+            } else {
+                metaBar.style.display = "none";
+            }
+        }
+
+        medsListEl.innerHTML = "";
+
+        currentExtractedMeds.forEach((item, index) => {
+            const itemEl = document.createElement("div");
+            itemEl.className = `prx-med-item ${item.needsConfirmation ? "needs-verify" : "verified"}`;
+            itemEl.id = item.id;
+
+            const isVerified = !item.needsConfirmation && item.confidence >= 0.85;
+            const badgeHtml = isVerified
+                ? `<span class="prx-badge-status prx-badge-verified">✓ Verified (${Math.round(item.confidence * 100)}%)</span>`
+                : `<span class="prx-badge-status prx-badge-warning">⚠️ Please verify</span>`;
+
+            itemEl.innerHTML = `
+                <div class="prx-med-header">
+                    <div class="prx-med-title-row">
+                        <strong>#${index + 1}</strong>
+                        ${badgeHtml}
+                        ${item.sourceText ? `<small style="color:var(--text-muted); font-size:0.7rem; margin-left:auto;" title="${escapeHtml(item.sourceText)}">${escapeHtml(item.sourceText.substring(0, 40))}...</small>` : ""}
+                    </div>
+                    <div style="display:flex; gap:6px;">
+                        <button type="button" class="prx-del-btn" title="Remove this medicine" data-action="delete" data-id="${item.id}">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="prx-form-grid">
+                    <div class="prx-form-group">
+                        <label>Medicine Name *</label>
+                        <input type="text" class="prx-input-name" data-id="${item.id}" value="${escapeHtml(item.name)}" placeholder="e.g. Esomac">
+                    </div>
+                    <div class="prx-form-group">
+                        <label>Dosage / Strength</label>
+                        <input type="text" class="prx-input-dosage" data-id="${item.id}" value="${escapeHtml(item.dosage || item.strength)}" placeholder="e.g. 40 mg">
+                    </div>
+                    <div class="prx-form-group">
+                        <label>Food Instructions</label>
+                        <input type="text" class="prx-input-instructions" data-id="${item.id}" value="${escapeHtml(item.instructions)}" placeholder="e.g. Before meal">
+                    </div>
+                </div>
+
+                <div class="prx-form-grid" style="grid-template-columns: 1fr 1fr; margin-bottom: 6px;">
+                    <div class="prx-form-group">
+                        <label>Duration (Days)</label>
+                        <input type="number" min="1" max="365" class="prx-input-duration" data-id="${item.id}" value="${item.durationDays || 30}">
+                    </div>
+                    <div class="prx-form-group" style="justify-content: flex-end;">
+                        <button type="button" class="secondary-btn prx-fill-single-btn" data-id="${item.id}" style="padding: 6px 12px; font-size: 0.78rem; align-self: flex-start;">
+                            Fill in Form ↗
+                        </button>
+                    </div>
+                </div>
+
+                <div class="prx-timing-row">
+                    <span class="prx-timing-label">Schedule:</span>
+                    <label class="prx-time-chip ${item.morning ? 'active' : ''}">
+                        <input type="checkbox" class="prx-cb-time" data-id="${item.id}" data-slot="morning" ${item.morning ? 'checked' : ''}>
+                        🌅 Morning (08:00)
+                    </label>
+                    <label class="prx-time-chip ${item.afternoon ? 'active' : ''}">
+                        <input type="checkbox" class="prx-cb-time" data-id="${item.id}" data-slot="afternoon" ${item.afternoon ? 'checked' : ''}>
+                        ☀️ Afternoon (13:00)
+                    </label>
+                    <label class="prx-time-chip ${item.evening ? 'active' : ''}">
+                        <input type="checkbox" class="prx-cb-time" data-id="${item.id}" data-slot="evening" ${item.evening ? 'checked' : ''}>
+                        🌆 Evening (18:00)
+                    </label>
+                    <label class="prx-time-chip ${item.night ? 'active' : ''}">
+                        <input type="checkbox" class="prx-cb-time" data-id="${item.id}" data-slot="night" ${item.night ? 'checked' : ''}>
+                        🌙 Night (21:00)
+                    </label>
+                </div>
+            `;
+
+            medsListEl.appendChild(itemEl);
+        });
+
+        medsListEl.querySelectorAll(".prx-input-name").forEach(inp => {
+            inp.addEventListener("input", (e) => {
+                const item = currentExtractedMeds.find(m => m.id === e.target.dataset.id);
+                if (item) item.name = e.target.value.trim();
+            });
+        });
+
+        medsListEl.querySelectorAll(".prx-input-dosage").forEach(inp => {
+            inp.addEventListener("input", (e) => {
+                const item = currentExtractedMeds.find(m => m.id === e.target.dataset.id);
+                if (item) item.dosage = e.target.value.trim();
+            });
+        });
+
+        medsListEl.querySelectorAll(".prx-input-instructions").forEach(inp => {
+            inp.addEventListener("input", (e) => {
+                const item = currentExtractedMeds.find(m => m.id === e.target.dataset.id);
+                if (item) item.instructions = e.target.value.trim();
+            });
+        });
+
+        medsListEl.querySelectorAll(".prx-input-duration").forEach(inp => {
+            inp.addEventListener("input", (e) => {
+                const item = currentExtractedMeds.find(m => m.id === e.target.dataset.id);
+                if (item) item.durationDays = parseInt(e.target.value, 10) || 30;
+            });
+        });
+
+        medsListEl.querySelectorAll(".prx-cb-time").forEach(cb => {
+            cb.addEventListener("change", (e) => {
+                const item = currentExtractedMeds.find(m => m.id === e.target.dataset.id);
+                if (!item) return;
+                const slot = e.target.dataset.slot;
+                item[slot] = e.target.checked;
+                e.target.closest(".prx-time-chip").classList.toggle("active", e.target.checked);
+            });
+        });
+
+        medsListEl.querySelectorAll(".prx-del-btn").forEach(btn => {
+            btn.addEventListener("click", () => {
+                const id = btn.dataset.id;
+                currentExtractedMeds = currentExtractedMeds.filter(m => m.id !== id);
+                renderPrescriptionReview(data);
+                if (currentExtractedMeds.length === 0 && reviewSection) {
+                    reviewSection.style.display = "none";
+                }
+            });
+        });
+
+        medsListEl.querySelectorAll(".prx-fill-single-btn").forEach(btn => {
+            btn.addEventListener("click", () => {
+                const item = currentExtractedMeds.find(m => m.id === btn.dataset.id);
+                if (item) {
+                    fillMedicineForm({
+                        medicineName: item.name,
+                        dosage: item.dosage,
+                        instructions: item.instructions,
+                        duration_days: item.durationDays,
+                        times: getTimesFromSchedule(item)
+                    });
+                    showToast(`Filled form with ${item.name}`, "info");
+                    const formCard = document.querySelector(".addmed-form-card");
+                    if (formCard) formCard.scrollIntoView({ behavior: "smooth", block: "start" });
+                }
+            });
+        });
+    }
+
+    function getTimesFromSchedule(item) {
+        const times = [];
+        if (item.morning)   times.push("08:00");
+        if (item.afternoon) times.push("13:00");
+        if (item.evening)   times.push("18:00");
+        if (item.night)     times.push("21:00");
+        return times.length > 0 ? times : ["08:00"];
+    }
+
+    if (saveAllBtn) {
+        saveAllBtn.addEventListener("click", async () => {
+            if (!currentExtractedMeds || currentExtractedMeds.length === 0) {
+                showToast("No medicines to save.", "warning");
+                return;
+            }
+
+            saveAllBtn.textContent = "Saving medicines...";
+            saveAllBtn.disabled = true;
 
             const _nowPrx = new Date();
             const todayStr = [
@@ -4854,41 +5091,37 @@ function setupPrescriptionUpload() {
                 String(_nowPrx.getMonth() + 1).padStart(2, "0"),
                 String(_nowPrx.getDate()).padStart(2, "0")
             ].join("-");
-            const endDate  = new Date();
-            endDate.setDate(endDate.getDate() + 30);
-            const endDateStr = [
-                endDate.getFullYear(),
-                String(endDate.getMonth() + 1).padStart(2, "0"),
-                String(endDate.getDate()).padStart(2, "0")
-            ].join("-");
 
             let savedCount = 0;
             let failCount  = 0;
 
-            for (const med of medicines) {
-                const name   = (med.medicineName || "").trim();
-                const dosage = (med.dosage || "").trim();
-
+            for (const item of currentExtractedMeds) {
+                const name = (item.name || "").trim();
                 if (!name) {
-                    console.warn("[Prescription] Skipping entry with no medicineName:", med);
                     failCount++;
                     continue;
                 }
 
-                const times = Array.isArray(med.times) && med.times.length > 0
-                    ? med.times.slice(0, 4).map(normalizeTime).filter(t => /^\d{2}:\d{2}$/.test(t))
-                    : ["08:00"];
+                const days = item.durationDays || 30;
+                const endDate = new Date();
+                endDate.setDate(endDate.getDate() + days);
+                const endDateStr = [
+                    endDate.getFullYear(),
+                    String(endDate.getMonth() + 1).padStart(2, "0"),
+                    String(endDate.getDate()).padStart(2, "0")
+                ].join("-");
+
+                const times = getTimesFromSchedule(item);
 
                 const payload = {
                     userId:       currentUser.id,
                     name,
-                    dosage:       dosage || "As prescribed",
-                    instructions: (med.instructions || "").trim(),
+                    dosage:       item.dosage || "As prescribed",
+                    instructions: item.instructions || "",
                     startDate:    todayStr,
                     endDate:      endDateStr,
                     times
                 };
-
 
                 try {
                     const saveRes = await authFetch(`${API_BASE}/medications/add`, {
@@ -4900,52 +5133,66 @@ function setupPrescriptionUpload() {
                     if (saveRes.ok) {
                         savedCount++;
                     } else {
-                        const saveErr = await saveRes.text().catch(() => "");
-                        console.error("[Prescription] Save failed for", name, ":", saveErr);
                         failCount++;
                     }
-                } catch (saveEx) {
-                    console.error("[Prescription] Network error saving", name, ":", saveEx);
+                } catch (e) {
+                    console.error("[Prescription] Save error:", e);
                     failCount++;
                 }
             }
 
-            if (savedCount > 0) {
-                infoEl.style.color = "#15803d";
-                infoEl.textContent = savedCount === 1
-                    ? "1 medicine saved from prescription."
-                    : `${savedCount} medicines saved from prescription.`;
-                if (failCount > 0) infoEl.textContent += ` (${failCount} could not be saved.)`;
-                showToast(infoEl.textContent, "success");
-            } else {
-                infoEl.style.color = "#b91c1c";
-                infoEl.textContent = "Medicines were detected but could not be saved. Please try again.";
-            }
+            saveAllBtn.textContent = "Add Verified Medicines to DoseBuddy";
+            saveAllBtn.disabled = false;
 
             if (savedCount > 0) {
+                showToast(`✓ Successfully added ${savedCount} medicine(s) to your DoseBuddy schedule!`, "success");
+                if (reviewSection) reviewSection.style.display = "none";
+                currentExtractedMeds = [];
+                selectedFile = null;
+                if (fileInput) fileInput.value = "";
+                fileNameEl.textContent = "";
+                infoEl.textContent = "";
+
                 invalidateDataCache("/medications/", "/logs/summary/", "/logs/adherence/", "/streaks/");
                 try { await renderDashboard();     } catch(e) { console.warn("Dashboard refresh failed"); }
                 try { await refreshActivityFeed(); } catch(e) { console.warn("Activity refresh failed"); }
+            } else {
+                showToast("Could not save medicines. Please check required fields.", "error");
             }
-
-        } catch (err) {
-            console.error("[Prescription] Unexpected error:", err);
-            errorEl.textContent = "Error: " + err.message;
-        } finally {
-            autofillBtn.textContent = "Auto Fill from Prescription";
-            autofillBtn.disabled    = false;
-            autofillBtn.classList.remove("btn-loading");
-        }
-    });
+        });
+    }
 
     function fillMedicineForm(result) {
+        if (!result) return;
         const nameEl  = document.getElementById("med-name");
         const doseEl  = document.getElementById("med-dosage");
         const instrEl = document.getElementById("med-instructions");
+        const startEl = document.getElementById("med-start-date");
+        const endEl   = document.getElementById("med-end-date");
 
-        if (nameEl)  nameEl.value  = result.medicineName  || "";
-        if (doseEl)  doseEl.value  = result.dosage        || "";
-        if (instrEl) instrEl.value = result.instructions  || "";
+        if (nameEl)  nameEl.value  = result.medicineName || result.name || "";
+        if (doseEl)  doseEl.value  = result.dosage || result.strength || "";
+        if (instrEl) instrEl.value = result.food_instruction || result.instructions || "";
+
+        const _now = new Date();
+        const todayStr = [
+            _now.getFullYear(),
+            String(_now.getMonth() + 1).padStart(2, "0"),
+            String(_now.getDate()).padStart(2, "0")
+        ].join("-");
+
+        if (startEl && !startEl.value) startEl.value = todayStr;
+
+        if (endEl) {
+            const days = result.duration_days || 30;
+            const endD = new Date();
+            endD.setDate(endD.getDate() + days);
+            endEl.value = [
+                endD.getFullYear(),
+                String(endD.getMonth() + 1).padStart(2, "0"),
+                String(endD.getDate()).padStart(2, "0")
+            ].join("-");
+        }
 
         const timeIds = ["time-1", "time-2", "time-3"];
         timeIds.forEach((id, i) => {
