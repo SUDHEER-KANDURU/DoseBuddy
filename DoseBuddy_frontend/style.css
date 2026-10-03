@@ -1,4 +1,4 @@
-﻿:root {
+:root {
 
   --primary:        #00A19B;
   --primary-hover:  #008f89;
@@ -2596,8 +2596,11 @@ body.dark-mode .sidebar-theme-knob {
   display: none;
   position: fixed; inset: 0;
   z-index: 700;
-  align-items: center; justify-content: center;
+  align-items: flex-start; /* safe fallback for centering when scrolling is needed */
+  justify-content: center;
   padding: var(--space-4);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .modal.modal-open {
@@ -2618,16 +2621,19 @@ body.dark-mode .sidebar-theme-knob {
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-lg);
   width: 100%; max-width: min(580px, 95vw);
-  max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 32px);
+  margin: auto; /* auto margin centers it vertically in flex-start container safely */
+  max-height: calc(100vh - 32px); /* fallback */
+  max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 32px);
   display: flex; flex-direction: column;
   overflow: hidden;
+  min-height: 0;
 }
 
 .modal-content {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 32px);
+  max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 32px);
 }
 
 .modal-box-sm { max-width: min(480px, 95vw); }
@@ -2967,7 +2973,7 @@ body.dark-mode .toggle-switch.active { background: var(--primary); }
 @media (max-width: 768px) {
   .profile-dropdown { right: 8px; width: calc(100vw - 16px); max-width: 320px; }
   .modal-form-grid  { grid-template-columns: 1fr; }
-  .modal-box        { max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 32px); }
+  .modal-box        { max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 32px); }
   .modal-footer     { flex-direction: column-reverse; gap: var(--space-2); }
   .modal-btn-primary,
   .modal-btn-secondary,
@@ -3867,10 +3873,12 @@ body.dark-mode .brand-logo-circle {
   backdrop-filter: blur(4px);
   z-index: 1000;
   display: flex;
-  align-items: center;
+  align-items: flex-start; /* fallback for tall modals */
   justify-content: center;
   padding: var(--space-4);
   animation: fadeIn 0.2s ease;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 @keyframes fadeIn {
@@ -3879,13 +3887,14 @@ body.dark-mode .brand-logo-circle {
 }
 
 .legal-modal {
+  margin: auto; /* safe centering */
   background: var(--surface);
   border-radius: var(--radius-xl);
   box-shadow: 0 20px 60px rgba(0,0,0,0.2);
   border: 1px solid var(--border);
   width: 100%;
   max-width: 560px;
-  max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 32px);
+  max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 32px);
   display: flex;
   flex-direction: column;
   animation: slideUp 0.25s ease;
@@ -4080,7 +4089,7 @@ body.dark-mode .secondary-btn:hover {
   .step-nav-row { flex-direction: column; }
   .step-nav-row .primary-btn,
   .step-nav-row .secondary-btn { width: 100%; }
-  .legal-modal { max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 32px); border-radius: var(--radius-lg); }
+  .legal-modal { max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 32px); border-radius: var(--radius-lg); }
   .signup-steps { gap: 0; }
   .step-label { display: none; }
   

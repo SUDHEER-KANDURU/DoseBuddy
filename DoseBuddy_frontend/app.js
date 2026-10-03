@@ -5682,6 +5682,12 @@ function showOnboardingStep(step) {
     if (data.target) {
         const el = document.querySelector(data.target);
         if (el) {
+            // Scroll element into view if outside the visible viewport
+            const initialRect = el.getBoundingClientRect();
+            if (initialRect.top < 0 || initialRect.bottom > window.innerHeight || initialRect.left < 0 || initialRect.right > window.innerWidth) {
+                el.scrollIntoView({ block: "center", inline: "nearest" });
+            }
+
             const r = el.getBoundingClientRect();
             const pad = 6;
             spotlight.style.cssText = `
@@ -5707,6 +5713,8 @@ function showOnboardingStep(step) {
 function positionTooltip(tooltip, data) {
     tooltip.style.top    = "50%";
     tooltip.style.left   = "50%";
+    tooltip.style.bottom = "auto";
+    tooltip.style.right  = "auto";
     tooltip.style.transform = "translate(-50%, -50%)";
 
     if (!data.target) return;
@@ -5714,20 +5722,63 @@ function positionTooltip(tooltip, data) {
     const el = document.querySelector(data.target);
     if (!el) return;
 
-    const r   = el.getBoundingClientRect();
-    const tw  = 280;
-    const th  = 160;
+    const r = el.getBoundingClientRect();
     const gap = 14;
+    const padding = 16;
+    
+    // Dynamically measure tooltip size instead of hardcoding
+    const tw = tooltip.offsetWidth || 280;
+    const th = tooltip.offsetHeight || 160;
+    
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
 
-    if (data.pos === "right") {
-        tooltip.style.top       = `${Math.min(r.top, window.innerHeight - th - 20)}px`;
-        tooltip.style.left      = `${r.right + gap}px`;
-        tooltip.style.transform = "none";
-    } else if (data.pos === "bottom") {
-        tooltip.style.top       = `${r.bottom + gap}px`;
-        tooltip.style.left      = `${Math.max(8, r.left + r.width / 2 - tw / 2)}px`;
-        tooltip.style.transform = "none";
+    let preferredPos = data.pos || "bottom";
+    
+    const spaceTop = r.top;
+    const spaceBottom = vh - r.bottom;
+    const spaceLeft = r.left;
+    const spaceRight = vw - r.right;
+
+    // Smart positioning logic if preferred side doesn't have enough space
+    if (preferredPos === "right" && spaceRight < tw + gap + padding) {
+        if (spaceLeft >= tw + gap + padding) preferredPos = "left";
+        else if (spaceBottom >= th + gap + padding) preferredPos = "bottom";
+        else if (spaceTop >= th + gap + padding) preferredPos = "top";
+        else preferredPos = spaceLeft > spaceRight ? "left" : "right";
+    } else if (preferredPos === "bottom" && spaceBottom < th + gap + padding) {
+        if (spaceTop >= th + gap + padding) preferredPos = "top";
+        else if (spaceRight >= tw + gap + padding) preferredPos = "right";
+        else if (spaceLeft >= tw + gap + padding) preferredPos = "left";
+        else preferredPos = spaceTop > spaceBottom ? "top" : "bottom";
     }
+
+    let top, left;
+
+    if (preferredPos === "right") {
+        top = Math.min(r.top, vh - th - padding);
+        top = Math.max(padding, top);
+        left = r.right + gap;
+    } else if (preferredPos === "left") {
+        top = Math.min(r.top, vh - th - padding);
+        top = Math.max(padding, top);
+        left = r.left - tw - gap;
+    } else if (preferredPos === "top") {
+        top = r.top - th - gap;
+        left = r.left + r.width / 2 - tw / 2;
+    } else {
+        // bottom fallback
+        top = r.bottom + gap;
+        left = r.left + r.width / 2 - tw / 2;
+    }
+
+    // Final boundary clamp to guarantee tooltip is visible within viewport
+    top = Math.max(padding, Math.min(top, vh - th - padding));
+    left = Math.max(padding, Math.min(left, vw - tw - padding));
+
+    tooltip.style.top = `${top}px`;
+    tooltip.style.left = `${left}px`;
+    tooltip.style.transform = "none";
 }
 
 function finishOnboarding() {
