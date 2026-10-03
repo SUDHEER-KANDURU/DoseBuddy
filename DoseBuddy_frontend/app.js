@@ -755,7 +755,7 @@ function setupSignupSteps() {
                 role: document.getElementById("su-role").value || "PATIENT",
                 patientEmail: document.getElementById("su-patient-email")?.value.trim().toLowerCase() || null,
                 phone,
-                dob: document.getElementById("su-dob")?.value || "",
+                dob: normalizeDateInput(document.getElementById("su-dob")?.value),
                 gender: document.getElementById("su-gender")?.value || "",
                 emergencyContact,
                 acceptedTerms: document.getElementById("su-terms")?.checked || false
@@ -5678,6 +5678,30 @@ function updateProfileDropdown() {
         role === "CAREGIVER" ? "Caregiver" : role;
 }
 
+function normalizeDateInput(val) {
+    if (!val) return "";
+    if (typeof val === "string") {
+        const trimmed = val.trim();
+        const match = trimmed.match(/^(\d{4}-\d{2}-\d{2})/);
+        if (match) return match[1];
+        const d = new Date(trimmed);
+        if (!isNaN(d.getTime())) {
+            const year = d.getUTCFullYear();
+            const month = String(d.getUTCMonth() + 1).padStart(2, "0");
+            const day = String(d.getUTCDate()).padStart(2, "0");
+            return `${year}-${month}-${day}`;
+        }
+        return "";
+    }
+    if (val instanceof Date && !isNaN(val.getTime())) {
+        const year = val.getFullYear();
+        const month = String(val.getMonth() + 1).padStart(2, "0");
+        const day = String(val.getDate()).padStart(2, "0");
+        return `${year}-${month}-${day}`;
+    }
+    return "";
+}
+
 async function openProfileSettingsModal() {
     if (!currentUser || !currentUser.id) {
         showToast("Please log in first.", "error");
@@ -5703,7 +5727,7 @@ async function openProfileSettingsModal() {
             "ps-name":      profile.name            || "",
             "ps-email":     profile.email           || "",
             "ps-phone":     profile.phone           || "",
-            "ps-dob":       profile.dob             || "",
+            "ps-dob":       normalizeDateInput(profile.dob),
             "ps-emergency": profile.emergencyContact || ""
         };
         Object.entries(textFields).forEach(([id, val]) => {
@@ -5792,7 +5816,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const updateData = {
             name,
             phone:            document.getElementById("ps-phone")?.value.trim()     || "",
-            dob:              document.getElementById("ps-dob")?.value               || "",
+            dob:              normalizeDateInput(document.getElementById("ps-dob")?.value),
             gender:           document.getElementById("ps-gender")?.value            || "",
             emergencyContact: document.getElementById("ps-emergency")?.value.trim()  || ""
         };

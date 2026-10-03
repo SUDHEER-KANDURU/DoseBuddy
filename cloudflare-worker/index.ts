@@ -156,6 +156,7 @@ function logSignupFailure(phase: string, error: unknown) {
 
 async function loginBody(env: Env, user: User) {
   const base = { userId: user.id, sub: user.email };
+  const dobStr = user.dob ? (typeof user.dob === "string" ? user.dob.slice(0, 10) : new Date(user.dob).toISOString().slice(0, 10)) : null;
   return {
     id: user.id,
     name: user.name,
@@ -163,7 +164,7 @@ async function loginBody(env: Env, user: User) {
     role: user.role,
     patientEmail: user.patient_email,
     phone: user.phone,
-    dob: user.dob,
+    dob: dobStr,
     gender: user.gender,
     emergencyContact: user.emergency_contact,
     acceptedTerms: Boolean(user.accepted_terms),
@@ -645,6 +646,88 @@ async function parsePrescriptionWithAi(env: Env, base64: string, mimeType: strin
   return normalizePrescriptionResult(rawJson);
 }
 
+async function callAi(env: Env, prompt: string): Promise<Response> {
+  // 1. Try Gemini models if GEMINI_API_KEY is configured
+  if (env.GEMINI_API_KEY) {
+    const models = [
+      env.GEMINI_MODEL || "gemini-2.5-flash",
+      "gemini-1.5-flash",
+      "gemini-2.0-flash"
+    ];
+    for (const model of models) {
+      try {
+        const resp = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${env.GEMINI_API_KEY}`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: prompt }] }],
+              generationConfig: { temperature: 0.2 }
+            })
+          }
+        );
+        if (resp.ok) {
+          const data = await resp.json<any>();
+          const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (text && text.trim()) {
+            return plain(text.trim());
+          }
+        }
+      } catch (err) {
+        console.error(`Gemini model ${model} error:`, err);
+      }
+    }
+  }
+
+  // 2. Try Groq models if GROQ_API_KEY is configured
+  if (env.GROQ_API_KEY) {
+    const models = [
+      env.GROQ_MODEL || "llama-3.3-70b-versatile",
+      "llama-3.1-8b-instant",
+      "openai/gpt-oss-20b"
+    ];
+    for (const model of models) {
+      try {
+        const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${env.GROQ_API_KEY}`,
+            "content-type": "application/json"
+          },
+          body: JSON.stringify({
+            model,
+            messages: [{ role: "user", content: prompt }],
+            temperature: 0.2
+          })
+        });
+        if (resp.ok) {
+          const data = await resp.json<any>();
+          const text = data.choices?.[0]?.message?.content;
+          if (text && text.trim()) {
+            return plain(text.trim());
+          }
+        }
+      } catch (err) {
+        console.error(`Groq model ${model} error:`, err);
+      }
+    }
+  }
+
+  // 3. Graceful controlled fallback if AI provider is unreachable or unconfigured
+  if (prompt.includes("health insights") || prompt.includes("Patient data") || prompt.includes("JSON array")) {
+    const fallbackArray = [
+      { title: "Medication Adherence", message: "Keep taking your scheduled doses consistently for optimal health outcomes.", type: "info", icon: "💊" },
+      { title: "Stay Consistent", message: "Maintaining a daily routine helps establish strong adherence habits.", type: "success", icon: "⭐" },
+      { title: "Health Tracking", message: "Regularly logging your vitals and BMI provides valuable long-term health trends.", type: "info", icon: "📊" },
+      { title: "Consult Healthcare Provider", message: "Always discuss medication adjustments with your physician or pharmacist.", type: "warning", icon: "🩺" }
+    ];
+    return plain(JSON.stringify(fallbackArray));
+  }
+
+  return plain("AI health assistant is temporarily unavailable. Please consult your physician or pharmacist.");
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
@@ -751,15 +834,42 @@ export default {
       }
 
       if (path === "/api/medicine/ai-info" && request.method === "GET") {
-        return callAi(env, `Provide concise medication information and safety guidance for: ${url.searchParams.get("name") || ""}`);
+        const nameParam = url.searchParams.get("name") || "";
+        const userIdParam = url.searchParams.get("userId");
+        if (userIdParam && !nameParam.includes("insights") && !nameParam.includes("You are")) {
+          try {
+            await query(env, "INSERT INTO activities (user_id,type,message,created_at) VALUES (?,'AI_MEDICINE_INFO',?,NOW())", [
+              Number(userIdParam),
+              `Searched medicine information: ${nameParam.slice(0, 100)}`
+            ]);
+          } catch {
+            // Non-fatal
+          }
+        }
+        const prompt = nameParam.length > 50 || nameParam.includes("insights") || nameParam.includes("You are")
+          ? nameParam
+          : `Provide concise medication information, uses, common side effects, and safety guidance for: ${nameParam}`;
+        return await callAi(env, prompt);
       }
 
       if (path === "/api/medicine/symptom-check" && request.method === "POST") {
         const { body: b } = await requestBody(request);
-        return callAi(env, `Give safe, non-diagnostic guidance for these symptoms: ${String(b.symptoms ?? "")}`);
+        const symptoms = String(b.symptoms ?? "");
+        const userId = b.userId;
+        if (userId) {
+          try {
+            await query(env, "INSERT INTO activities (user_id,type,message,created_at) VALUES (?,'SYMPTOM_CHECK',?,NOW())", [
+              Number(userId),
+              `Performed symptom check: ${symptoms.slice(0, 50)}...`
+            ]);
+          } catch {
+            // Non-fatal
+          }
+        }
+        return await callAi(env, `Give safe, non-diagnostic guidance for these symptoms: ${symptoms}`);
       }
 
-      if (path === "/api/prescription/upload" && request.method === "POST") {
+      if ((path === "/api/prescription/upload" || path === "/api/prescriptions/upload" || path === "/api/prescription/upload/") && request.method === "POST") {
         let base64 = "";
         let mimeType = "image/jpeg";
         let textContent = "";
@@ -1343,17 +1453,20 @@ export default {
         if (!accessible(actor, target)) return plain("Access denied", 403);
         if (request.method === "GET") {
           const { password_hash, ...safe } = target;
-          return json({ ...safe, patientEmail: target.patient_email, emergencyContact: target.emergency_contact, acceptedTerms: Boolean(target.accepted_terms) });
+          const dobStr = safe.dob ? (typeof safe.dob === "string" ? safe.dob.slice(0, 10) : new Date(safe.dob).toISOString().slice(0, 10)) : null;
+          return json({ ...safe, dob: dobStr, patientEmail: target.patient_email, emergencyContact: target.emergency_contact, acceptedTerms: Boolean(target.accepted_terms) });
         }
         if (request.method === "PUT") {
           const { body: b } = await requestBody(request);
+          const dobVal = b.dob ? String(b.dob).slice(0, 10) : null;
           await query(
             env,
             "UPDATE users SET name=?,phone=?,dob=?,gender=?,emergency_contact=?,updated_at=NOW() WHERE id=?",
-            [b.name ?? target.name, b.phone ?? null, b.dob ?? null, b.gender ?? null, b.emergencyContact ?? null, target.id]
+            [b.name ?? target.name, b.phone ?? null, dobVal, b.gender ?? null, b.emergencyContact ?? null, target.id]
           );
           const { password_hash, ...safe } = (await getUser(env, target.id))!;
-          return json(safe);
+          const dobStr = safe.dob ? (typeof safe.dob === "string" ? safe.dob.slice(0, 10) : new Date(safe.dob).toISOString().slice(0, 10)) : null;
+          return json({ ...safe, dob: dobStr, patientEmail: safe.patient_email, emergencyContact: safe.emergency_contact, acceptedTerms: Boolean(safe.accepted_terms) });
         }
       }
 
