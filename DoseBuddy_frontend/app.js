@@ -5046,6 +5046,11 @@ function setupPrescriptionUpload() {
         reviewSection.style.display = "block";
         if (countEl) countEl.textContent = currentExtractedMeds.length;
 
+        const auditEl = document.getElementById("prx-audit-content");
+        if (auditEl) {
+            auditEl.textContent = JSON.stringify(data, null, 2);
+        }
+
         if (metaBar) {
             const metaParts = [];
             const patient = data.patientName || data.patient_name;
