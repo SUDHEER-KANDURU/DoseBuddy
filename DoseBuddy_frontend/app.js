@@ -4771,6 +4771,7 @@ function setupPrescriptionUpload() {
     const fileNameEl    = document.getElementById("prescription-file-name");
     const previewBox    = document.getElementById("prescription-preview-box");
     const previewImg    = document.getElementById("prescription-preview-img");
+    const removeFileBtn = document.getElementById("prx-remove-file-btn");
     const rotateLeftBtn = document.getElementById("prx-rotate-left-btn");
     const rotateRightBtn= document.getElementById("prx-rotate-right-btn");
     const autofillBtn   = document.getElementById("prescription-autofill-btn");
@@ -4793,6 +4794,31 @@ function setupPrescriptionUpload() {
     let currentRotation = 0;
     let preprocessedBase64 = null;
     let currentExtractedMeds = [];
+
+    function clearUploadedPrescription() {
+        rawFile = null;
+        currentRotation = 0;
+        preprocessedBase64 = null;
+        currentExtractedMeds = [];
+        if (fileInput) fileInput.value = "";
+        if (previewBox) previewBox.style.display = "none";
+        if (previewImg) previewImg.src = "";
+        if (fileNameEl) fileNameEl.textContent = "";
+        if (errorEl) errorEl.textContent = "";
+        if (infoEl) {
+            infoEl.textContent = "";
+            infoEl.style.color = "";
+        }
+        if (reviewSection) reviewSection.style.display = "none";
+    }
+
+    if (removeFileBtn) {
+        removeFileBtn.addEventListener("click", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            clearUploadedPrescription();
+        });
+    }
 
     browseBtn.addEventListener("click", () => fileInput.click());
 
@@ -4934,15 +4960,7 @@ function setupPrescriptionUpload() {
 
     if (cancelBtn) {
         cancelBtn.addEventListener("click", () => {
-            currentExtractedMeds = [];
-            if (reviewSection) reviewSection.style.display = "none";
-            rawFile = null;
-            preprocessedBase64 = null;
-            if (fileInput) fileInput.value = "";
-            if (previewBox) previewBox.style.display = "none";
-            fileNameEl.textContent = "";
-            infoEl.textContent = "";
-            errorEl.textContent = "";
+            clearUploadedPrescription();
         });
     }
 
