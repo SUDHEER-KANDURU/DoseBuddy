@@ -809,7 +809,7 @@ export default {
         if (!accessible(actor, target)) return json({ message: "Access denied" }, 403);
 
         const [rows] = await query<Json[]>(env, "SELECT * FROM bmi_records WHERE user_id=? ORDER BY created_at DESC LIMIT 1", [target.id]);
-        if (!rows[0]) return json({ message: "No BMI records found" }, 404);
+        if (!rows[0]) return json(null, 200);
         return json(buildBmiResponse(rows[0]));
       }
 
@@ -876,7 +876,7 @@ export default {
         if (!accessible(actor, target)) return json({ message: "Access denied" }, 403);
 
         const [rows] = await query<Json[]>(env, "SELECT * FROM vital_records WHERE user_id=? ORDER BY recorded_at DESC LIMIT 1", [target.id]);
-        if (!rows[0]) return json({ message: "No vitals records found" }, 404);
+        if (!rows[0]) return json(null, 200);
         return json(buildVitalResponse(rows[0]));
       }
 
@@ -1016,7 +1016,7 @@ export default {
       return json({ message: "Not found" }, 404);
     } catch (e) {
       console.error("DoseBuddy Worker error", e instanceof Error ? e.message : "unknown");
-      return json({ message: "Internal server error" }, 500);
+      return json({ message: "Internal server error", error: e instanceof Error ? e.message : String(e) }, 500);
     }
   }
 };

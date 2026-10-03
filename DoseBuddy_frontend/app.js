@@ -91,7 +91,8 @@ async function authFetch(url, options = {}) {
         ...(token ? { "Authorization": `Bearer ${token}` } : {})
     };
 
-    let response = await fetch(url, { ...options, headers });
+    const fetchOptions = { cache: "no-store", ...options, headers };
+    let response = await fetch(url, fetchOptions);
 
     if (response.status === 401) {
         const newToken = await refreshAccessToken();
@@ -100,7 +101,7 @@ async function authFetch(url, options = {}) {
             throw new Error("Session expired. Please log in again.");
         }
         const retryHeaders = { ...headers, "Authorization": `Bearer ${newToken}` };
-        response = await fetch(url, { ...options, headers: retryHeaders });
+        response = await fetch(url, { cache: "no-store", ...options, headers: retryHeaders });
     }
 
     return response;
