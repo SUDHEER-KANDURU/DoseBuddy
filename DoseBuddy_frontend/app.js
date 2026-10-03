@@ -1726,11 +1726,6 @@ async function renderDashboard() {
 
     // dateElem is already set by updateGreeting(); do not overwrite it here.
 
-    tbody.innerHTML = "";
-    noMedsMsg.style.display = "none";
-    // On mobile (≤767px) the table is reflowed as cards using display:block
-    scheduleTable.style.display = window.innerWidth <= 767 ? "block" : "table";
-
     try {
         const [logsRes, medsRes] = await Promise.allSettled([
             fetchJsonCached(`${API_BASE}/logs/today/${currentUser.id}`, 10000),
@@ -1750,6 +1745,7 @@ async function renderDashboard() {
         }
 
         if (meds.length === 0) {
+            tbody.innerHTML = "";
             document.getElementById("totalDoses").textContent = 0;
             document.getElementById("takenDoses").textContent = 0;
             document.getElementById("pendingDoses").textContent = 0;
@@ -1770,6 +1766,11 @@ async function renderDashboard() {
             return;
         }
 
+        tbody.innerHTML = "";
+        noMedsMsg.style.display = "none";
+        // On mobile (≤767px) the table is reflowed as cards using display:block
+        scheduleTable.style.display = window.innerWidth <= 767 ? "block" : "table";
+
         const nowMinutes = today.getHours() * 60 + today.getMinutes();
         let totalDoses = 0;
         let takenDoses = 0;
@@ -1780,6 +1781,8 @@ async function renderDashboard() {
             med.times.forEach((timeObj) => {
                 totalDoses++;
                 const tr = document.createElement("tr");
+                tr.dataset.medId = med.id;
+                tr.className = `schedule-row med-row-${med.id}`;
                 const rawTime = timeObj.timeOfDay || "";
                 const displayTime = rawTime.substring(0, 5);
                 const doseStatus = getDoseStatus(
@@ -1848,28 +1851,29 @@ async function renderDashboard() {
                     });
                 }
 
-                    let deleteBtn = null;
+                let deleteBtn = null;
 
-                    if (timeObj === med.times[0]) {
-                        deleteBtn = document.createElement("button");
-                        deleteBtn.textContent = "Delete";
-                        deleteBtn.className = "action-btn action-btn-delete";
+                if (timeObj === med.times[0]) {
+                    deleteBtn = document.createElement("button");
+                    deleteBtn.textContent = "Delete";
+                    deleteBtn.className = "action-btn action-btn-delete";
+                    deleteBtn.dataset.medId = med.id;
 
-                        if (currentUser.role && currentUser.role.toUpperCase() === "PATIENT") {
-                            deleteBtn.addEventListener("click", async () => {
-                                await deleteMedication(med.id);
-                            });
-                        } else {
-                            deleteBtn.disabled = true;
-                        }
+                    if (currentUser.role && currentUser.role.toUpperCase() === "PATIENT") {
+                        deleteBtn.addEventListener("click", async () => {
+                            await deleteMedication(med.id);
+                        });
+                    } else {
+                        deleteBtn.disabled = true;
                     }
-                    const actionWrapper = document.createElement("div");
-                    actionWrapper.className = "action-cell";
-                    actionWrapper.appendChild(btn);
-                    if (deleteBtn) {
-                        actionWrapper.appendChild(deleteBtn);
-                    }
-                    actionCell.appendChild(actionWrapper);
+                }
+                const actionWrapper = document.createElement("div");
+                actionWrapper.className = "action-cell";
+                actionWrapper.appendChild(btn);
+                if (deleteBtn) {
+                    actionWrapper.appendChild(deleteBtn);
+                }
+                actionCell.appendChild(actionWrapper);
 
                 tr.appendChild(timeCell);
                 tr.appendChild(nameCell);
@@ -1979,20 +1983,73 @@ function updateMissedDoseNotifications(meds, todayStr) {
 async function deleteMedication(medId) {
     if (!confirm("Delete this medicine and all its doses?")) return;
 
+    // 1. Target rows and delete buttons for this specific medicine
+    const medRows = document.querySelectorAll(`[data-med-id="${medId}"]`);
+    const delBtns = document.querySelectorAll(`button.action-btn-delete[data-med-id="${medId}"]`);
+
+    // 2. Mark ONLY this medicine as deleting without hiding the rest of the list
+    delBtns.forEach(btn => {
+        btn.disabled = true;
+        btn.textContent = "Deleting...";
+    });
+    medRows.forEach(row => {
+        if (row.tagName === "TR") {
+            row.style.opacity = "0.5";
+            row.style.pointerEvents = "none";
+            row.style.transition = "opacity 0.2s ease";
+        }
+    });
+
     try {
         const res = await authFetch(`${API_BASE}/medications/${medId}`, {
             method: "DELETE",
         });
         if (!res.ok) {
-            console.error("Failed to delete medicine.");
+            const errData = await res.json().catch(() => ({}));
+            showToast(errData.message || "Failed to delete medicine.", "error");
+            // Restore UI state for this medicine
+            delBtns.forEach(btn => {
+                btn.disabled = false;
+                btn.textContent = "Delete";
+            });
+            medRows.forEach(row => {
+                if (row.tagName === "TR") {
+                    row.style.opacity = "";
+                    row.style.pointerEvents = "";
+                }
+            });
             return;
         }
 
+        // 3. Optimistically remove the deleted medicine from the rendered table immediately
+        medRows.forEach(row => {
+            if (row.tagName === "TR") row.remove();
+        });
+
+        // 4. Update memory cache optimistically
+        if (Array.isArray(medsCache)) {
+            medsCache = medsCache.filter(m => m.id !== medId);
+        }
+
         invalidateDataCache("/medications/", "/logs/", "/streaks/");
-        try { await renderDashboard(); } catch(e) { console.warn("Dashboard refresh failed"); }
-        try { await refreshActivityFeed(); } catch(e) { console.warn("Activity refresh failed"); }
+
+        // 5. Background re-fetch without ever clearing the remaining medicines table
+        try { await renderDashboard(); } catch(e) { console.warn("Dashboard refresh failed", e); }
+        try { await refreshActivityFeed(); } catch(e) { console.warn("Activity refresh failed", e); }
+        showToast("Medicine deleted successfully.", "success");
     } catch (err) {
-        console.error(err);
+        console.error("Delete medication error:", err);
+        showToast("Failed to delete medicine.", "error");
+        delBtns.forEach(btn => {
+            btn.disabled = false;
+            btn.textContent = "Delete";
+        });
+        medRows.forEach(row => {
+            if (row.tagName === "TR") {
+                row.style.opacity = "";
+                row.style.pointerEvents = "";
+            }
+        });
     }
 }
 
