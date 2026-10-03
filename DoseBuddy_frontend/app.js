@@ -5023,8 +5023,7 @@ function setupPrescriptionUpload() {
                 }
             });
 
-            fillMedicineForm(medicines[0]);
-
+            // Render interactive review cards without polluting the manual Add Medicine form
             renderPrescriptionReview(responseData);
 
             infoEl.style.color = "#15803d";
@@ -5332,7 +5331,10 @@ function setupPrescriptionUpload() {
             saveAllBtn.disabled = false;
 
             if (savedCount > 0) {
-                showToast(`✓ Successfully added ${savedCount} medicine(s) to your DoseBuddy schedule!`, "success");
+                // Clean manual Add Medicine form so it remains empty after batch save
+                resetMedicineForm();
+
+                showToast(`✓ Successfully added ${savedCount} medicine(s) from prescription to your DoseBuddy schedule!`, "success");
                 if (reviewSection) reviewSection.style.display = "none";
                 currentExtractedMeds = [];
                 rawFile = null;
@@ -5348,6 +5350,43 @@ function setupPrescriptionUpload() {
             } else {
                 showToast("Could not save medicines. Please check required fields.", "error");
             }
+        });
+    }
+
+    if (cancelBtn) {
+        cancelBtn.addEventListener("click", () => {
+            if (reviewSection) reviewSection.style.display = "none";
+            currentExtractedMeds = [];
+            rawFile = null;
+            preprocessedBase64 = null;
+            if (fileInput) fileInput.value = "";
+            if (previewBox) previewBox.style.display = "none";
+            fileNameEl.textContent = "";
+            infoEl.textContent = "";
+            errorEl.textContent = "";
+        });
+    }
+
+    function resetMedicineForm() {
+        const medForm = document.getElementById("medicine-form");
+        if (medForm) medForm.reset();
+        const startInput = document.getElementById("med-start-date");
+        const endInput   = document.getElementById("med-end-date");
+        const successText = document.getElementById("med-success");
+        const errorText   = document.getElementById("med-error");
+        const _now = new Date();
+        const todayStr = [
+            _now.getFullYear(),
+            String(_now.getMonth() + 1).padStart(2, "0"),
+            String(_now.getDate()).padStart(2, "0")
+        ].join("-");
+        if (startInput) { startInput.value = todayStr; startInput.min = todayStr; }
+        if (endInput)   { endInput.value   = todayStr; endInput.min   = todayStr; }
+        if (successText) successText.textContent = "";
+        if (errorText)   errorText.textContent   = "";
+        ["time-1", "time-2", "time-3"].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.value = "";
         });
     }
 
