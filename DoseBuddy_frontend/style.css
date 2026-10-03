@@ -3448,6 +3448,7 @@ body.dark-mode .brand-logo-circle {
   position: relative;
   display: flex;
   align-items: center;
+  width: 100%;
 }
 
 .input-icon {
@@ -3462,7 +3463,9 @@ body.dark-mode .brand-logo-circle {
 
 .input-icon-wrap input {
   width: 100%;
-  padding: 10px 13px 10px 36px;
+  height: 42px;
+  line-height: 1.5;
+  padding: 10px 38px 10px 36px;
   border: 1.5px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--bg);
@@ -3510,6 +3513,29 @@ body.dark-mode .brand-logo-circle {
   line-height: 1.5;
 }
 
+.input-icon-wrap .pw-toggle-btn {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  z-index: 2;
+  transition: color var(--transition);
+}
+
+.input-icon-wrap .pw-toggle-btn:hover {
+  color: var(--primary);
+}
+
 .phone-input-wrap {
   display: flex;
   gap: var(--space-2);
@@ -3526,9 +3552,10 @@ body.dark-mode .brand-logo-circle {
   background: var(--bg);
   color: var(--text-primary);
   font-size: 0.8rem;
+  font-weight: 500;
   outline: none;
   cursor: pointer;
-  transition: border-color var(--transition), background var(--transition);
+  transition: border-color var(--transition), background var(--transition), box-shadow var(--transition);
   min-width: 90px;
   height: 42px;
   box-sizing: border-box;
@@ -3537,6 +3564,7 @@ body.dark-mode .brand-logo-circle {
 .phone-code-select:focus {
   border-color: var(--primary);
   box-shadow: 0 0 0 3px rgba(0,161,155,0.1);
+  background: var(--surface);
 }
 
 .phone-input-wrap input[type="tel"] {
@@ -3567,6 +3595,7 @@ body.dark-mode .brand-logo-circle {
   grid-template-columns: 1fr 1fr;
   gap: var(--space-3);
   width: 100%;
+  align-items: start;
 }
 
 .form-row-2col .form-group {
@@ -4420,49 +4449,114 @@ body.dark-mode .profile-avatar-role {
   color: var(--text-muted);
 }
 
-body.dark-mode #auth-view {
-  background: var(--bg);
+/* ===================================================
+   THEME ISOLATION: AUTH VIEWS & LOGOUT MODAL ALWAYS LIGHT
+   =================================================== */
+#auth-view {
+  --primary:        #00A19B !important;
+  --primary-hover:  #008f89 !important;
+  --primary-light:  #e6f7f7 !important;
+  --primary-muted:  #b3e5e3 !important;
+  --bg:             #E4DDD3 !important;
+  --surface:        #f5f1ec !important;
+  --border:         #cfc8be !important;
+  --border-light:   #e8e3dc !important;
+  --text-primary:   #1a1714 !important;
+  --text-secondary: #4a4540 !important;
+  --text-muted:     #8c8278 !important;
+  background: #E4DDD3 !important;
+  color: #1a1714 !important;
 }
 
-body.dark-mode .auth-card {
-  background: var(--surface);
-  border-color: var(--border);
+#auth-view .auth-card {
+  background: linear-gradient(160deg, #f5f1ec 80%, rgba(0,161,155,0.04) 100%) !important;
+  border: 1px solid #cfc8be !important;
+  color: #1a1714 !important;
 }
 
-body.dark-mode #auth-title,
-body.dark-mode .auth-brand-name {
-  color: var(--text-primary);
+#auth-view .auth-brand-name,
+#auth-view #auth-title,
+#auth-view h2,
+#auth-view h3,
+#auth-view label {
+  color: #1a1714 !important;
 }
 
-body.dark-mode .auth-tagline,
-body.dark-mode .auth-subtitle {
-  color: var(--text-muted);
+#auth-view .auth-tagline,
+#auth-view .auth-subtitle,
+#auth-view p,
+#auth-view .step-section-label {
+  color: #8c8278 !important;
 }
 
-body.dark-mode .auth-disclaimer {
-  background: rgba(251,191,36,0.08);
-  color: #fbbf24;
-  border-color: rgba(251,191,36,0.2);
+#auth-view .input-icon-wrap input,
+#auth-view .phone-input-wrap input[type="tel"],
+#auth-view .phone-code-select {
+  background: #E4DDD3 !important;
+  border-color: #cfc8be !important;
+  color: #1a1714 !important;
 }
 
-body.dark-mode .signup-step.active .step-circle {
-  background: var(--accent);
-  color: #000;
-  box-shadow: 0 0 0 4px var(--accent-muted);
+#auth-view .input-icon-wrap input:focus,
+#auth-view .phone-input-wrap input[type="tel"]:focus,
+#auth-view .phone-code-select:focus {
+  border-color: #00A19B !important;
+  box-shadow: 0 0 0 3px rgba(0,161,155,0.1) !important;
+  background: #f5f1ec !important;
 }
 
-body.dark-mode .signup-step.active .step-label {
-  color: var(--accent);
+#auth-view .primary-btn,
+#auth-view .auth-submit-btn,
+#auth-view .step-next-btn {
+  background: #00A19B !important;
+  color: #ffffff !important;
 }
 
-body.dark-mode .signup-step.completed .step-circle {
-  background: var(--success);
-  color: #000;
+#auth-view .primary-btn:hover,
+#auth-view .auth-submit-btn:hover,
+#auth-view .step-next-btn:hover {
+  background: #008f89 !important;
 }
 
-body.dark-mode .signup-header-icon {
-  background: var(--accent-light);
-  color: var(--accent);
+#auth-view .secondary-btn,
+#auth-view .step-back-btn {
+  background: #E4DDD3 !important;
+  color: #4a4540 !important;
+  border: 1px solid #cfc8be !important;
+}
+
+#modal-logout .modal-box {
+  background: #f5f1ec !important;
+  border-color: #cfc8be !important;
+  color: #1a1714 !important;
+}
+
+#modal-logout .modal-title {
+  color: #1a1714 !important;
+}
+
+#modal-logout .modal-subtitle {
+  color: #8c8278 !important;
+}
+
+#modal-logout .logout-warning-card {
+  background: #fee2e2 !important;
+  border-color: rgba(239,68,68,0.25) !important;
+}
+
+#modal-logout .logout-warning-card p {
+  color: #b91c1c !important;
+}
+
+#modal-logout .modal-btn-secondary {
+  background: #E4DDD3 !important;
+  color: #4a4540 !important;
+  border: 1px solid #cfc8be !important;
+}
+
+#modal-logout .modal-btn-danger {
+  background: #dc2626 !important;
+  color: #ffffff !important;
 }
 
 body.dark-mode .bmi-result-card {

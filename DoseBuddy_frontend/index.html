@@ -221,12 +221,24 @@
                         <div class="input-icon-wrap">
                             <svg class="input-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
                             <input type="password" id="su-password" placeholder="At least 8 characters" autocomplete="new-password">
+                            <button type="button" class="pw-toggle-btn" data-target="su-password" aria-label="Toggle password visibility">
+                                <svg class="pw-eye" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                            </button>
                         </div>
                         <div class="pw-strength-bar" id="su-pw-strength" style="display:none;">
                             <div class="pw-strength-fill" id="su-pw-fill"></div>
                         </div>
                         <span class="pw-strength-label" id="su-pw-label"></span>
                         <span class="field-error" id="su-pw-error"></span>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="su-confirm-password">Confirm Password <span class="req-star">*</span></label>
+                        <div class="input-icon-wrap">
+                            <svg class="input-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+                            <input type="password" id="su-confirm-password" placeholder="Re-enter password" autocomplete="new-password">
+                        </div>
+                        <span class="field-error" id="su-confirm-error"></span>
                     </div>
 
                     <button type="button" class="primary-btn full-width step-next-btn" id="step1-next-btn">
@@ -247,7 +259,7 @@
                             <div class="phone-input-wrap">
                                 <select id="su-phone-code" class="phone-code-select" aria-label="Country code">
                                     <option value="+1">US +1</option>
-                                    <option value="+44">UK +44</option>
+                                    <option value="+44">GB +44</option>
                                     <option value="+91" selected>IN +91</option>
                                     <option value="+61">AU +61</option>
                                     <option value="+81">JP +81</option>
@@ -304,7 +316,7 @@
                         <div class="phone-input-wrap">
                             <select id="su-emergency-code" class="phone-code-select" aria-label="Emergency contact country code">
                                 <option value="+1">US +1</option>
-                                <option value="+44">UK +44</option>
+                                <option value="+44">GB +44</option>
                                 <option value="+91" selected>IN +91</option>
                                 <option value="+61">AU +61</option>
                                 <option value="+81">JP +81</option>
