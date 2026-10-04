@@ -661,8 +661,7 @@ async function parsePrescriptionWithAi(env: Env, base64: string, mimeType: strin
               ]
             }],
             generationConfig: {
-              temperature: 0.0,
-              responseMimeType: "application/json"
+              temperature: 0.0
             }
           })
         });
@@ -674,7 +673,8 @@ async function parsePrescriptionWithAi(env: Env, base64: string, mimeType: strin
             console.log(`[Prescription] Gemini ${model} returned ${candidate.length} chars`);
             break;
           } else {
-            console.warn(`[Prescription] Gemini ${model} returned empty candidate`);
+            const finishReason = data.candidates?.[0]?.finishReason || "unknown";
+            console.warn(`[Prescription] Gemini ${model} empty candidate. finishReason=${finishReason}`);
           }
         } else {
           const errBody = await resp.text().catch(() => "");
@@ -795,8 +795,7 @@ async function parsePrescriptionBatchWithAi(
           body: JSON.stringify({
             contents: [{ parts }],
             generationConfig: {
-              temperature: 0.0,
-              responseMimeType: "application/json"
+              temperature: 0.0
             }
           })
         });

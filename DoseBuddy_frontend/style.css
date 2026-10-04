@@ -7393,9 +7393,29 @@ body.dark-mode .ai-response-body .ai-ul li::before {
 }
 
 body.dark-mode .ai-table th {
-  background: var(--primary);
+  background: #0d7a75;
+  color: #ffffff;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+
+body.dark-mode .ai-table {
+  border-color: var(--border);
+}
+
+body.dark-mode .ai-table td {
+  color: var(--text-secondary);
+  border-bottom-color: var(--border);
+}
+
+body.dark-mode .ai-table tr:last-child td {
+  border-bottom: none;
 }
 
 body.dark-mode .ai-table tr:nth-child(even) td {
-  background: rgba(255,255,255,0.035);
+  background: rgba(255,255,255,0.04);
+}
+
+body.dark-mode .ai-table-wrap {
+  border-color: var(--border);
+  background: var(--surface);
 }
