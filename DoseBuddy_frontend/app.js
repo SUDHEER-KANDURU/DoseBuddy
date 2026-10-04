@@ -5111,12 +5111,12 @@ function setupPrescriptionUpload() {
     const errorEl       = document.getElementById("prescription-error");
     const infoEl        = document.getElementById("prescription-info");
 
-    const reviewSection = document.getElementById("prescription-review-section");
-    const countEl       = document.getElementById("prx-detected-count");
-    const metaBar       = document.getElementById("prx-patient-meta");
-    const medsListEl    = document.getElementById("prx-meds-list");
-    const saveAllBtn    = document.getElementById("prx-save-all-btn");
-    const cancelBtn     = document.getElementById("prx-cancel-review-btn");
+    const reviewSection = null; // removed — now uses modal
+    const countEl       = null; // removed — now uses #prx-modal-count
+    const metaBar       = null; // removed — now uses #prx-modal-meta
+    const medsListEl    = null; // removed — now uses #prx-modal-body
+    const saveAllBtn    = null; // removed — now uses #prx-modal-add-btn
+    const cancelBtn     = null; // removed — now uses #prx-modal-cancel-btn
 
     if (!fileInput || !browseBtn || !dropZone || !autofillBtn) {
         console.warn("[Prescription] Setup skipped — elements not found in DOM.");
@@ -5144,7 +5144,8 @@ function setupPrescriptionUpload() {
             infoEl.textContent = "";
             infoEl.style.color = "";
         }
-        if (reviewSection) reviewSection.style.display = "none";
+        // Close modal if open (defined later in this scope — safe optional call)
+        if (typeof closePrescriptionModal === "function") closePrescriptionModal();
     }
 
     function removeFileById(fileId) {
@@ -5238,7 +5239,7 @@ function setupPrescriptionUpload() {
         errorEl.textContent = "";
         infoEl.textContent = "";
         infoEl.style.color = "";
-        if (reviewSection) reviewSection.style.display = "none";
+        if (typeof closePrescriptionModal === "function") closePrescriptionModal();
 
         for (const file of files) {
             // Check for duplicate by name and size
@@ -5573,12 +5574,11 @@ function setupPrescriptionUpload() {
                 }
             });
 
-            // Render interactive review cards without polluting the manual Add Medicine form
-            renderPrescriptionReview(responseData);
+            // Open prescription review modal
+            openPrescriptionModal(responseData);
 
-            infoEl.style.color = "#15803d";
-            infoEl.textContent = `${currentExtractedMeds.length} medicine(s) detected from ${uploadedFiles.length} file(s). Please review and verify below before saving.`;
-            showToast(`Detected ${currentExtractedMeds.length} medicines from prescription. Review below.`, "info");
+            infoEl.style.color = "var(--success)";
+            infoEl.textContent = `${currentExtractedMeds.length} medicine(s) detected. Review in popup.`;
 
         } catch (err) {
             console.error("[Prescription] Extraction error:", err);
@@ -5595,231 +5595,16 @@ function setupPrescriptionUpload() {
         }
     });
 
-    function renderPrescriptionReview(data) {
-        if (!reviewSection || !medsListEl) return;
-        reviewSection.style.display = "block";
-        if (countEl) countEl.textContent = currentExtractedMeds.length;
+    // ─── PRESCRIPTION REVIEW MODAL ────────────────────────────────────────────
 
-        const auditEl = document.getElementById("prx-audit-content");
-        if (auditEl) {
-            auditEl.textContent = JSON.stringify(data, null, 2);
-        }
-
-        if (metaBar) {
-            const metaParts = [];
-            const patient = data.patientName || data.patient_name;
-            const doctor  = data.doctorName  || data.doctor_name;
-            const date    = data.visitDate   || data.visit_date;
-
-            if (patient) metaParts.push(`<strong>Patient:</strong> ${escapeHtml(patient)}`);
-            if (doctor)  metaParts.push(`<strong>Doctor:</strong> ${escapeHtml(doctor)}`);
-            if (date)    metaParts.push(`<strong>Visit Date:</strong> ${escapeHtml(date)}`);
-            if (metaParts.length > 0) {
-                metaBar.innerHTML = metaParts.join(" &nbsp;|&nbsp; ");
-                metaBar.style.display = "flex";
-            } else {
-                metaBar.style.display = "none";
-            }
-        }
-
-        medsListEl.innerHTML = "";
-
-        currentExtractedMeds.forEach((item, index) => {
-            const itemEl = document.createElement("div");
-            itemEl.className = `prx-med-item ${item.needsVerification ? "needs-verify" : "verified"}`;
-            itemEl.id = item.id;
-
-            const nameStatusHtml = item.nameConfidence >= 0.85
-                ? `<span class="prx-badge-status prx-badge-verified"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" width="12" height="12"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>Name (${Math.round(item.nameConfidence * 100)}%)</span>`
-                : `<span class="prx-badge-status prx-badge-warning"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="12" height="12"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>Verify Name</span>`;
-
-            const schedStatusHtml = item.scheduleConfidence >= 0.85
-                ? `<span class="prx-badge-status prx-badge-verified"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" width="12" height="12"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>Schedule</span>`
-                : `<span class="prx-badge-status prx-badge-warning"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="12" height="12"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>Verify Schedule</span>`;
-
-            const overallBadge = (!item.needsVerification && item.confidence >= 0.85)
-                ? `<span class="prx-badge-status prx-badge-verified" style="font-weight:700;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" width="12" height="12"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>Verified (${Math.round(item.confidence * 100)}%)</span>`
-                : `<span class="prx-badge-status prx-badge-warning" style="font-weight:700;"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="12" height="12"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>Please verify</span>`;
-
-            itemEl.innerHTML = `
-                <div class="prx-med-header">
-                    <div class="prx-med-title-row">
-                        <strong>#${index + 1}</strong>
-                        ${overallBadge}
-                        ${nameStatusHtml}
-                        ${schedStatusHtml}
-                    </div>
-                    <div style="display:flex; gap:6px;">
-                        <button type="button" class="prx-del-btn" title="Remove this medicine" data-action="delete" data-id="${item.id}">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
-                            </svg>
-                        </button>
-                    </div>
-                </div>
-
-                ${item.sourceText ? `<div style="background:rgba(0,0,0,0.03); padding:4px 8px; border-radius:4px; font-size:0.72rem; color:var(--text-muted); margin-bottom:8px; font-family:monospace;">Rx text: ${escapeHtml(item.sourceText)}</div>` : ""}
-
-                <div class="prx-form-grid">
-                    <div class="prx-form-group">
-                        <label>Brand / Medicine Name *</label>
-                        <input type="text" class="prx-input-brand" data-id="${item.id}" value="${escapeHtml(item.brandName || item.name)}" placeholder="e.g. Esomac">
-                    </div>
-                    <div class="prx-form-group">
-                        <label>Generic Ingredient</label>
-                        <input type="text" class="prx-input-generic" data-id="${item.id}" value="${escapeHtml(item.genericName)}" placeholder="e.g. Esomeprazole">
-                    </div>
-                    <div class="prx-form-group">
-                        <label>Strength & Form</label>
-                        <input type="text" class="prx-input-strength" data-id="${item.id}" value="${escapeHtml(item.strength || item.dosage)}" placeholder="e.g. 40 mg Tablet">
-                    </div>
-                </div>
-
-                <div class="prx-form-grid">
-                    <div class="prx-form-group">
-                        <label>Food Instruction</label>
-                        <select class="prx-select-food" data-id="${item.id}">
-                            <option value="Before meal" ${item.foodInstruction === 'Before meal' ? 'selected' : ''}>Before meal</option>
-                            <option value="After meal" ${item.foodInstruction === 'After meal' ? 'selected' : ''}>After meal</option>
-                            <option value="Before Breakfast" ${item.foodInstruction === 'Before Breakfast' ? 'selected' : ''}>Before Breakfast</option>
-                            <option value="With food" ${item.foodInstruction === 'With food' ? 'selected' : ''}>With food</option>
-                            <option value="Empty stomach" ${item.foodInstruction === 'Empty stomach' ? 'selected' : ''}>Empty stomach</option>
-                            <option value="As directed" ${item.foodInstruction === 'As directed' ? 'selected' : ''}>As directed</option>
-                        </select>
-                    </div>
-                    <div class="prx-form-group">
-                        <label>Duration (Days)</label>
-                        <input type="number" min="1" max="365" class="prx-input-duration" data-id="${item.id}" value="${item.durationDays || 30}">
-                    </div>
-                    <div class="prx-form-group" style="justify-content: flex-end;">
-                        <button type="button" class="secondary-btn prx-fill-single-btn" data-id="${item.id}" style="padding: 6px 12px; font-size: 0.78rem; align-self: flex-start; display: inline-flex; align-items: center; gap: 4px;">
-                            Fill in Form
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="13" height="13">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 19.5l15-15m0 0H8.25m11.25 0v11.25" />
-                            </svg>
-                        </button>
-                    </div>
-                </div>
-
-                <div class="prx-timing-row">
-                    <span class="prx-timing-label">Daily Intake:</span>
-                    <label class="prx-time-chip ${item.morning ? 'active' : ''}">
-                        <input type="checkbox" class="prx-cb-time" data-id="${item.id}" data-slot="morning" ${item.morning ? 'checked' : ''}>
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="13" height="13" class="prx-slot-icon">
-                            <circle cx="12" cy="12" r="4"/>
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>
-                        </svg>
-                        Morning (08:00)
-                    </label>
-                    <label class="prx-time-chip ${item.afternoon ? 'active' : ''}">
-                        <input type="checkbox" class="prx-cb-time" data-id="${item.id}" data-slot="afternoon" ${item.afternoon ? 'checked' : ''}>
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="13" height="13" class="prx-slot-icon">
-                            <circle cx="12" cy="12" r="5"/>
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M5.64 18.36l-1.42 1.42M18.36 5.64l-1.42 1.42"/>
-                        </svg>
-                        Afternoon (13:00)
-                    </label>
-                    <label class="prx-time-chip ${item.evening ? 'active' : ''}">
-                        <input type="checkbox" class="prx-cb-time" data-id="${item.id}" data-slot="evening" ${item.evening ? 'checked' : ''}>
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="13" height="13" class="prx-slot-icon">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v5m0 0l-2.5-2.5M12 8l2.5-2.5M3 18h18M5 14a7 7 0 0114 0"/>
-                        </svg>
-                        Evening (18:00)
-                    </label>
-                    <label class="prx-time-chip ${item.night ? 'active' : ''}">
-                        <input type="checkbox" class="prx-cb-time" data-id="${item.id}" data-slot="night" ${item.night ? 'checked' : ''}>
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="13" height="13" class="prx-slot-icon">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z"/>
-                        </svg>
-                        Night (21:00)
-                    </label>
-                </div>
-            `;
-
-            medsListEl.appendChild(itemEl);
-        });
-
-        // Event listeners
-        medsListEl.querySelectorAll(".prx-input-brand").forEach(inp => {
-            inp.addEventListener("input", (e) => {
-                const item = currentExtractedMeds.find(m => m.id === e.target.dataset.id);
-                if (item) {
-                    item.brandName = e.target.value.trim();
-                    item.name = item.brandName;
-                }
-            });
-        });
-
-        medsListEl.querySelectorAll(".prx-input-generic").forEach(inp => {
-            inp.addEventListener("input", (e) => {
-                const item = currentExtractedMeds.find(m => m.id === e.target.dataset.id);
-                if (item) item.genericName = e.target.value.trim();
-            });
-        });
-
-        medsListEl.querySelectorAll(".prx-input-strength").forEach(inp => {
-            inp.addEventListener("input", (e) => {
-                const item = currentExtractedMeds.find(m => m.id === e.target.dataset.id);
-                if (item) {
-                    item.strength = e.target.value.trim();
-                    item.dosage = item.strength;
-                }
-            });
-        });
-
-        medsListEl.querySelectorAll(".prx-select-food").forEach(sel => {
-            sel.addEventListener("change", (e) => {
-                const item = currentExtractedMeds.find(m => m.id === e.target.dataset.id);
-                if (item) item.foodInstruction = e.target.value;
-            });
-        });
-
-        medsListEl.querySelectorAll(".prx-input-duration").forEach(inp => {
-            inp.addEventListener("input", (e) => {
-                const item = currentExtractedMeds.find(m => m.id === e.target.dataset.id);
-                if (item) item.durationDays = parseInt(e.target.value, 10) || 30;
-            });
-        });
-
-        medsListEl.querySelectorAll(".prx-cb-time").forEach(cb => {
-            cb.addEventListener("change", (e) => {
-                const item = currentExtractedMeds.find(m => m.id === e.target.dataset.id);
-                if (!item) return;
-                const slot = e.target.dataset.slot;
-                item[slot] = e.target.checked;
-                e.target.closest(".prx-time-chip").classList.toggle("active", e.target.checked);
-            });
-        });
-
-        medsListEl.querySelectorAll(".prx-del-btn").forEach(btn => {
-            btn.addEventListener("click", () => {
-                const id = btn.dataset.id;
-                currentExtractedMeds = currentExtractedMeds.filter(m => m.id !== id);
-                renderPrescriptionReview(data);
-                if (currentExtractedMeds.length === 0 && reviewSection) {
-                    reviewSection.style.display = "none";
-                }
-            });
-        });
-
-        medsListEl.querySelectorAll(".prx-fill-single-btn").forEach(btn => {
-            btn.addEventListener("click", () => {
-                const item = currentExtractedMeds.find(m => m.id === btn.dataset.id);
-                if (item) {
-                    fillMedicineForm({
-                        medicineName: item.brandName || item.name,
-                        dosage: item.strength || item.dosage,
-                        instructions: item.foodInstruction,
-                        duration_days: item.durationDays,
-                        times: getTimesFromSchedule(item)
-                    });
-                    showToast(`Filled form with ${item.brandName || item.name}`, "info");
-                    const formCard = document.querySelector(".addmed-form-card");
-                    if (formCard) formCard.scrollIntoView({ behavior: "smooth", block: "start" });
-                }
-            });
-        });
-    }
+    const _prxModal        = document.getElementById("prx-modal-overlay");
+    const _prxModalBody    = document.getElementById("prx-modal-body");
+    const _prxModalCount   = document.getElementById("prx-modal-count");
+    const _prxModalMeta    = document.getElementById("prx-modal-meta");
+    const _prxModalAddBtn  = document.getElementById("prx-modal-add-btn");
+    const _prxModalAddLbl  = document.getElementById("prx-modal-add-label");
+    const _prxModalClose   = document.getElementById("prx-modal-close-btn");
+    const _prxModalCancel  = document.getElementById("prx-modal-cancel-btn");
 
     function getTimesFromSchedule(item) {
         const times = [];
@@ -5830,15 +5615,180 @@ function setupPrescriptionUpload() {
         return times.length > 0 ? times : ["08:00"];
     }
 
-    if (saveAllBtn) {
-        saveAllBtn.addEventListener("click", async () => {
-            if (!currentExtractedMeds || currentExtractedMeds.length === 0) {
-                showToast("No medicines to save.", "warning");
+    function closePrescriptionModal() {
+        if (_prxModal) {
+            _prxModal.classList.remove("prx-modal-open");
+            setTimeout(() => { _prxModal.style.display = "none"; }, 280);
+        }
+        document.body.style.overflow = "";
+    }
+
+    function updateModalAddBtn() {
+        const accepted = currentExtractedMeds.filter(m => !m._rejected);
+        if (_prxModalAddLbl) {
+            _prxModalAddLbl.textContent = accepted.length === 1
+                ? "Add 1 medicine to DoseBuddy"
+                : `Add ${accepted.length} medicines to DoseBuddy`;
+        }
+        if (_prxModalAddBtn) _prxModalAddBtn.disabled = accepted.length === 0;
+    }
+
+    function renderModalCard(item, index) {
+        const schedSlots = [
+            { key: "morning",   label: "Morning",   time: "08:00", icon: "☀️" },
+            { key: "afternoon", label: "Afternoon", time: "13:00", icon: "🌤️" },
+            { key: "evening",   label: "Evening",   time: "18:00", icon: "🌅" },
+            { key: "night",     label: "Night",     time: "21:00", icon: "🌙" }
+        ];
+        const activeSlots = schedSlots.filter(s => item[s.key]);
+        const schedHtml = activeSlots.length > 0
+            ? activeSlots.map(s => `<span class="prx-chip prx-chip-time">${s.icon} ${s.label}</span>`).join("")
+            : `<span class="prx-chip prx-chip-muted">No schedule set</span>`;
+
+        const foodIcon = item.foodInstruction?.toLowerCase().includes("after") ? "🍽️" : "⏱️";
+
+        return `
+        <div class="prx-med-card ${item._rejected ? "prx-med-card--rejected" : ""}" id="prxmc_${item.id}">
+            <div class="prx-med-card-top">
+                <div class="prx-med-card-num">${index + 1}</div>
+                <div class="prx-med-card-info">
+                    <div class="prx-med-card-name">${escapeHtml(item.brandName || item.name || "Unknown")}</div>
+                    ${item.genericName ? `<div class="prx-med-card-generic">${escapeHtml(item.genericName)}</div>` : ""}
+                </div>
+                <div class="prx-med-card-strength">${escapeHtml(item.strength || item.dosage || "")}</div>
+                <button type="button" class="prx-med-card-reject-btn" data-id="${item.id}" title="${item._rejected ? "Undo remove" : "Remove this medicine"}">
+                    ${item._rejected
+                        ? `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" width="15" height="15"><path stroke-linecap="round" stroke-linejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3"/></svg>`
+                        : `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" width="15" height="15"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>`
+                    }
+                </button>
+            </div>
+            ${item._rejected ? `<div class="prx-med-card-rejected-label">Removed — click ↩ to undo</div>` : `
+            <div class="prx-med-card-details">
+                <div class="prx-med-card-row">
+                    <span class="prx-chip-group">${schedHtml}</span>
+                </div>
+                <div class="prx-med-card-row prx-med-card-meta">
+                    <span class="prx-chip prx-chip-food">${foodIcon} ${escapeHtml(item.foodInstruction || "As directed")}</span>
+                    <span class="prx-chip prx-chip-duration">📅 ${item.durationDays || 30} days</span>
+                </div>
+            </div>
+            `}
+        </div>`;
+    }
+
+    function openPrescriptionModal(data) {
+        if (!_prxModal || !_prxModalBody) return;
+
+        // Reset rejection state
+        currentExtractedMeds.forEach(m => { m._rejected = false; });
+
+        // Populate meta bar
+        if (_prxModalMeta) {
+            const patient = data.patientName || data.patient_name || "";
+            const doctor  = data.doctorName  || data.doctor_name  || "";
+            const date    = data.visitDate   || data.visit_date   || "";
+            const parts   = [];
+            if (patient) parts.push(`<strong>Patient:</strong> ${escapeHtml(patient)}`);
+            if (doctor)  parts.push(`<strong>Doctor:</strong> ${escapeHtml(doctor)}`);
+            if (date)    parts.push(`<strong>Visit:</strong> ${escapeHtml(date)}`);
+            if (parts.length > 0) {
+                _prxModalMeta.innerHTML = parts.join("<span class='prx-meta-divider'>|</span>");
+                _prxModalMeta.style.display = "flex";
+            } else {
+                _prxModalMeta.style.display = "none";
+            }
+        }
+
+        // Render cards
+        _prxModalBody.innerHTML = currentExtractedMeds.map((m, i) => renderModalCard(m, i)).join("");
+
+        // Attach reject/undo button listeners
+        _prxModalBody.querySelectorAll(".prx-med-card-reject-btn").forEach(btn => {
+            btn.addEventListener("click", () => {
+                const item = currentExtractedMeds.find(m => m.id === btn.dataset.id);
+                if (!item) return;
+                item._rejected = !item._rejected;
+                const cardEl = document.getElementById(`prxmc_${item.id}`);
+                if (cardEl) {
+                    const idx = currentExtractedMeds.indexOf(item);
+                    cardEl.outerHTML = renderModalCard(item, idx);
+                    // Re-attach listener on replaced element
+                    const newCard = document.getElementById(`prxmc_${item.id}`);
+                    if (newCard) {
+                        newCard.querySelector(".prx-med-card-reject-btn")?.addEventListener("click", arguments.callee.bind(null));
+                    }
+                }
+                updateModalAddBtn();
+            });
+        });
+
+        // Count & add button
+        if (_prxModalCount) _prxModalCount.textContent = currentExtractedMeds.length;
+        updateModalAddBtn();
+
+        // Show modal
+        document.body.style.overflow = "hidden";
+        _prxModal.style.display = "flex";
+        requestAnimationFrame(() => _prxModal.classList.add("prx-modal-open"));
+
+        showToast(`${currentExtractedMeds.length} medicines detected from prescription`, "info");
+    }
+
+    // Re-attach reject buttons using event delegation (fixes the callee issue)
+    if (_prxModalBody) {
+        _prxModalBody.addEventListener("click", (e) => {
+            const btn = e.target.closest(".prx-med-card-reject-btn");
+            if (!btn) return;
+            const item = currentExtractedMeds.find(m => m.id === btn.dataset.id);
+            if (!item) return;
+            item._rejected = !item._rejected;
+            const idx = currentExtractedMeds.indexOf(item);
+            const cardEl = document.getElementById(`prxmc_${item.id}`);
+            if (cardEl) cardEl.outerHTML = renderModalCard(item, idx);
+            updateModalAddBtn();
+        });
+    }
+
+    // Close on overlay click
+    if (_prxModal) {
+        _prxModal.addEventListener("click", (e) => {
+            if (e.target === _prxModal) closePrescriptionModal();
+        });
+    }
+
+    // Close button
+    if (_prxModalClose) _prxModalClose.addEventListener("click", closePrescriptionModal);
+
+    // Cancel button
+    if (_prxModalCancel) {
+        _prxModalCancel.addEventListener("click", () => {
+            closePrescriptionModal();
+            currentExtractedMeds = [];
+            clearAllUploadedFiles();
+            infoEl.textContent  = "";
+            errorEl.textContent = "";
+        });
+    }
+
+    // ESC key closes modal
+    document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && _prxModal && _prxModal.style.display !== "none") {
+            closePrescriptionModal();
+        }
+    });
+
+    // Add button — save accepted medicines
+    if (_prxModalAddBtn) {
+        _prxModalAddBtn.addEventListener("click", async () => {
+            const toSave = currentExtractedMeds.filter(m => !m._rejected);
+            if (toSave.length === 0) {
+                showToast("No medicines selected to add.", "warning");
                 return;
             }
 
-            saveAllBtn.textContent = "Saving medicines...";
-            saveAllBtn.disabled = true;
+            _prxModalAddBtn.disabled = true;
+            if (_prxModalAddLbl) _prxModalAddLbl.textContent = "Saving...";
 
             const _nowPrx = new Date();
             const todayStr = [
@@ -5847,18 +5797,13 @@ function setupPrescriptionUpload() {
                 String(_nowPrx.getDate()).padStart(2, "0")
             ].join("-");
 
-            let savedCount = 0;
-            let failCount  = 0;
+            let savedCount = 0, failCount = 0;
 
-            for (const item of currentExtractedMeds) {
+            for (const item of toSave) {
                 const brand = (item.brandName || item.name || "").trim();
-                const gen = (item.genericName || "").trim();
+                const gen   = (item.genericName || "").trim();
                 const fullName = brand + (gen && !brand.toLowerCase().includes(gen.toLowerCase()) ? ` (${gen})` : "");
-
-                if (!fullName.trim()) {
-                    failCount++;
-                    continue;
-                }
+                if (!fullName.trim()) { failCount++; continue; }
 
                 const days = item.durationDays || 30;
                 const endDate = new Date();
@@ -5869,8 +5814,6 @@ function setupPrescriptionUpload() {
                     String(endDate.getDate()).padStart(2, "0")
                 ].join("-");
 
-                const times = getTimesFromSchedule(item);
-
                 const payload = {
                     userId:       currentUser.id,
                     name:         fullName,
@@ -5878,59 +5821,42 @@ function setupPrescriptionUpload() {
                     instructions: item.foodInstruction || "",
                     startDate:    todayStr,
                     endDate:      endDateStr,
-                    times
+                    times:        getTimesFromSchedule(item)
                 };
 
                 try {
-                    const saveRes = await authFetch(`${API_BASE}/medications/add`, {
+                    const res = await authFetch(`${API_BASE}/medications/add`, {
                         method:  "POST",
                         headers: { "Content-Type": "application/json" },
                         body:    JSON.stringify(payload)
                     });
-
-                    if (saveRes.ok) {
-                        savedCount++;
-                    } else {
-                        failCount++;
-                    }
+                    if (res.ok) savedCount++; else failCount++;
                 } catch (e) {
                     console.error("[Prescription] Save error:", e);
                     failCount++;
                 }
             }
 
-            saveAllBtn.textContent = "Add Verified Medicines to DoseBuddy";
-            saveAllBtn.disabled = false;
+            _prxModalAddBtn.disabled = false;
+            updateModalAddBtn();
 
             if (savedCount > 0) {
-                // Clean manual Add Medicine form so it remains empty after batch save
-                resetMedicineForm();
-
-                showToast(`Successfully added ${savedCount} medicine(s) from prescription to your DoseBuddy schedule!`, "success");
-                if (reviewSection) reviewSection.style.display = "none";
+                closePrescriptionModal();
                 currentExtractedMeds = [];
                 clearAllUploadedFiles();
-                infoEl.textContent = "";
+                infoEl.textContent  = "";
+                errorEl.textContent = "";
 
+                showToast(`✓ ${savedCount} medicine${savedCount > 1 ? "s" : ""} added to your DoseBuddy schedule!`, "success");
+                resetMedicineForm();
                 invalidateDataCache("/medications/", "/logs/summary/", "/logs/adherence/", "/streaks/");
                 try { await renderDashboard();     } catch(e) { console.warn("Dashboard refresh failed"); }
                 try { await refreshActivityFeed(); } catch(e) { console.warn("Activity refresh failed"); }
             } else {
-                showToast("Could not save medicines. Please check required fields.", "error");
+                showToast("Could not save medicines. Please try again.", "error");
             }
         });
     }
-
-    if (cancelBtn) {
-        cancelBtn.addEventListener("click", () => {
-            if (reviewSection) reviewSection.style.display = "none";
-            currentExtractedMeds = [];
-            clearAllUploadedFiles();
-            infoEl.textContent = "";
-            errorEl.textContent = "";
-        });
-    }
-
     function resetMedicineForm() {
         const medForm = document.getElementById("medicine-form");
         if (medForm) medForm.reset();

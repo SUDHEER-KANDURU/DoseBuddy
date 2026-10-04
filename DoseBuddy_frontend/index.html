@@ -992,50 +992,7 @@
                         <p id="prescription-info" class="upload-info-text"></p>
                     </div>
 
-                    <!-- Prescription Review Section (Shown after OCR/AI extraction) -->
-                    <div id="prescription-review-section" class="card prescription-review-card" style="display:none; margin-top: var(--space-4);">
-                        <div class="prescription-review-header">
-                            <div class="prescription-review-title-group">
-                                <h3 class="prx-heading">Prescription Detected</h3>
-                                <p class="prx-detected-sub"><span id="prx-detected-count">0</span> medicines detected</p>
-                                <p class="prx-subtitle">Review, edit, and verify extracted medicines before adding.</p>
-                            </div>
-                        </div>
-
-                        <div class="prx-safety-disclaimer">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="18" height="18" class="prx-alert-icon" style="flex-shrink:0;">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
-                            </svg>
-                            <div class="prx-safety-text">
-                                <strong>Medical Safety Notice</strong>
-                                <p>AI-assisted extraction — please verify all medicines, dosage, timing and duration against your prescription before saving.</p>
-                            </div>
-                        </div>
-
-                        <div id="prx-patient-meta" class="prx-meta-bar" style="display:none;"></div>
-
-                        <div id="prx-meds-list" class="prx-meds-container"></div>
-
-                        <details class="prx-audit-drawer" id="prx-audit-drawer" style="margin-top: 14px; margin-bottom: 14px; font-size: 0.75rem; color: var(--text-muted);">
-                            <summary style="cursor: pointer; user-select: none; font-weight: 600; padding: 4px 0; display: inline-flex; align-items: center; gap: 6px;">
-                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="14" height="14">
-                                    <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m5.231 13.481L15 18.75m0 0l-1.769-1.769M15 18.75l1.769 1.769M15 18.75l-1.769-1.769" />
-                                </svg>
-                                Raw Extraction & OCR Audit Details
-                            </summary>
-                            <div id="prx-audit-content" style="background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px; margin-top: 6px; max-height: 180px; overflow-y: auto; font-family: monospace; white-space: pre-wrap;"></div>
-                        </details>
-
-                        <div class="prx-review-actions">
-                            <button type="button" class="secondary-btn" id="prx-cancel-review-btn">Cancel & Re-upload</button>
-                            <button type="button" class="primary-btn" id="prx-save-all-btn">
-                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16">
-                                    <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                                </svg>
-                                Add Verified Medicines to DoseBuddy
-                            </button>
-                        </div>
-                    </div>
+                    <!-- Prescription Review Modal (injected via JS, no inline section needed) -->
                 </div>
 
                 <div class="addmed-form-col">
@@ -2287,5 +2244,61 @@
     };
 </script>
 <script src="app.js?v=2"></script>
+
+<!-- ═══════════════════════════════════════════════════════
+     PRESCRIPTION REVIEW MODAL
+════════════════════════════════════════════════════════════ -->
+<div id="prx-modal-overlay" class="prx-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="prx-modal-title" style="display:none;">
+    <div class="prx-modal-box">
+
+        <!-- Header -->
+        <div class="prx-modal-header">
+            <div class="prx-modal-title-group">
+                <div class="prx-modal-icon">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="22" height="22">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                    </svg>
+                </div>
+                <div>
+                    <h2 class="prx-modal-title" id="prx-modal-title">Prescription Analysed</h2>
+                    <p class="prx-modal-subtitle"><span id="prx-modal-count">0</span> medicines detected — review and add to your schedule</p>
+                </div>
+            </div>
+            <button type="button" class="prx-modal-close-btn" id="prx-modal-close-btn" aria-label="Close">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" width="18" height="18">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+            </button>
+        </div>
+
+        <!-- Patient meta bar -->
+        <div id="prx-modal-meta" class="prx-modal-meta" style="display:none;"></div>
+
+        <!-- Safety notice -->
+        <div class="prx-modal-notice">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="15" height="15" style="flex-shrink:0; color:#f59e0b;">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/>
+            </svg>
+            <span>AI-extracted — verify against your prescription before saving. Remove any incorrect medicines.</span>
+        </div>
+
+        <!-- Medicine cards grid -->
+        <div class="prx-modal-body" id="prx-modal-body">
+            <!-- populated by JS -->
+        </div>
+
+        <!-- Footer actions -->
+        <div class="prx-modal-footer">
+            <button type="button" class="prx-modal-cancel-btn" id="prx-modal-cancel-btn">Cancel</button>
+            <button type="button" class="prx-modal-add-btn" id="prx-modal-add-btn">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" width="16" height="16">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
+                </svg>
+                <span id="prx-modal-add-label">Add all to DoseBuddy</span>
+            </button>
+        </div>
+    </div>
+</div>
+
 </body>
 </html>
