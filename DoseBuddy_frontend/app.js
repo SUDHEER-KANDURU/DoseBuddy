@@ -3853,6 +3853,47 @@ function stopReminderAudio() {
     }
 }
 
+// ── Web Audio API: reliable alert tone (no autoplay quirks) ──────────────────
+// Once a single AudioContext is resumed inside a genuine user gesture, tones
+// played via OscillatorNode work from ANY context (including setTimeout) for
+// the rest of the session. This is the most reliable cross-browser way to
+// play a scheduled alert sound. We keep notify-sound.mp3 as a secondary path.
+let _audioCtx = null;
+function _getAudioCtx() {
+    if (!_audioCtx) {
+        try {
+            const AC = window.AudioContext || window.webkitAudioContext;
+            if (AC) _audioCtx = new AC();
+        } catch (e) { _audioCtx = null; }
+    }
+    return _audioCtx;
+}
+
+// Short two-note alert tone (A5 → E6). Used for both reminder and missed-dose.
+function _playAlertTone() {
+    const ctx = _getAudioCtx();
+    if (!ctx) return false;
+    if (ctx.state === "suspended") { ctx.resume().catch(() => {}); }
+    try {
+        const t = ctx.currentTime;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(880, t);          // A5
+        osc.frequency.setValueAtTime(1175, t + 0.18);  // D6
+        gain.gain.setValueAtTime(0.0001, t);
+        gain.gain.exponentialRampToValueAtTime(0.35, t + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.55);
+        osc.connect(gain).connect(ctx.destination);
+        osc.start(t);
+        osc.stop(t + 0.6);
+        return true;
+    } catch (e) {
+        console.warn("[DoseBuddy] alert tone failed:", e.message);
+        return false;
+    }
+}
+
 // ── Audio unlock ───────────────────────────────────────────────────────────
 // Browsers block unmuted audio.play() until the user has interacted with the
 // page AND the audio element has been primed. We prime the element on the
@@ -3861,10 +3902,18 @@ function stopReminderAudio() {
 // even if the gesture timing is imperfect. After priming, unmuted play() from
 // setTimeout (reminders/missed-dose alerts) works for the rest of the session.
 //
+// We ALSO resume a single Web Audio AudioContext here, inside the gesture —
+// that unlocks oscillator-based tones for setTimeout playback all session.
+//
 // NOTE: 'scroll' was previously in the listener list but is NOT a user
 // activation, so it caused "play() failed because the user didn't interact"
 // errors. Removed.
 function primeAudioElement() {
+    // Resume the Web Audio context inside the gesture (required for tones).
+    const ctx = _getAudioCtx();
+    if (ctx && ctx.state === "suspended") {
+        ctx.resume().catch(() => {});
+    }
     if (audioUnlocked) return Promise.resolve(true);
     const audio = document.getElementById("notify-sound");
     if (!audio) return Promise.resolve(false);
@@ -3920,14 +3969,21 @@ function _playNotifSound(label) {
         return false;
     }
 
-    // 2. Attempt playback directly. When this is called from a genuine user
-    //    gesture (e.g. the Test button) the browser always allows it. When
-    //    called from a setTimeout (reminder/missed-dose) it works because the
-    //    element was primed by the first gesture (primeAudioElement) and the
-    //    tab has sticky user activation. We do NOT hard-gate on audioUnlocked —
-    //    doing so silently broke the Test button on its first click (the
-    //    document-level unlock listener fires AFTER the button handler).
+    // 2. Attempt playback. PRIMARY path is the Web Audio API tone — once the
+    //    AudioContext was resumed inside the first gesture it plays reliably
+    //    from setTimeout (reminders/missed-dose) for the whole session, with
+    //    no HTMLAudioElement autoplay restrictions. The mp3 is a fallback only
+    //    when Web Audio is unavailable, to avoid double-sound overlap.
     console.log(`[DoseBuddy] ${label}: attempting playback`);
+    let played = _playAlertTone();
+    if (played) {
+        console.log(`[DoseBuddy] ${label}: playback started (tone)`);
+        audioUnlocked = true;
+        return true;
+    }
+
+    // Fallback: HTMLAudioElement mp3 (gesture contexts always work; setTimeout
+    // works if the element was primed + tab has sticky activation).
     try {
         stopReminderAudio();
         audio.currentTime = 0;
@@ -3936,17 +3992,14 @@ function _playNotifSound(label) {
         const playPromise = audio.play();
         if (playPromise !== undefined && typeof playPromise.then === "function") {
             playPromise.then(() => {
-                console.log(`[DoseBuddy] ${label}: playback started`);
-                audioUnlocked = true;   // confirmed primed for future setTimeout calls
+                console.log(`[DoseBuddy] ${label}: playback started (mp3)`);
+                audioUnlocked = true;
                 activeReminderAudio = audio;
             }).catch(err => {
                 console.warn(`[DoseBuddy] ${label}: playback blocked`, err.name, err.message);
-                // Element not primed / no sticky activation — the document
-                // unlock listener will re-prime on the next genuine gesture.
                 audioUnlocked = false;
             });
         } else {
-            // Old Safari — no promise returned, optimistically set
             activeReminderAudio = audio;
             audioUnlocked = true;
         }
@@ -4094,13 +4147,14 @@ function checkReminders() {
             const diff = nowMinutes - doseMinutes;
 
             // Safety-net: fire a notification if the setTimeout was missed
-            // (page refresh, clock drift, etc.) and we're within the exact
-            // firing minute.  firedReminderKeys prevents double-firing when
+            // (page refresh, clock drift, etc.) and we're still within the
+            // reminder window.  firedReminderKeys prevents double-firing when
             // the setTimeout already ran at the same minute.
-            // Use diff 0-2 to cover cases where the page loaded slightly after
-            // the scheduled minute (e.g. loaded 30s late → diff=1).
-            // firedReminderKeys guarantees the same key never fires twice.
-            if (diff >= 0 && diff <= 2) {
+            // Window 0-5 min covers cases where the page loaded slightly after
+            // the scheduled minute (e.g. loaded 30s late → diff=1) AND closes
+            // the previous dead zone (diff 3-5 used to fire neither reminder
+            // nor missed). firedReminderKeys guarantees the key never fires twice.
+            if (diff >= 0 && diff <= 5) {
                 triggerDoseNotification(med, todayStr, displayTime);
             }
 
