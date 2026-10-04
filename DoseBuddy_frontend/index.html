@@ -566,7 +566,7 @@
                     <svg class="bell-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 10-12 0v3.2c0 .5-.2 1-.6 1.4L4 17h5m6 0a3 3 0 11-6 0m6 0H9"/>
                     </svg>
-                    <span id="notification-count" class="notif-badge">0</span>
+                    <span id="notification-count" class="notif-badge" style="display:none;">0</span>
                 </button>
                 <div id="notification-panel" class="notif-panel">
                     <div class="notif-panel-header">
@@ -581,7 +581,7 @@
                     </div>
                     <div class="notif-items-list" id="notification-list">
                     </div>
-                    <div class="notif-empty" id="notif-empty-state" style="display:none;">
+                    <div class="notif-empty" id="notif-empty-state" style="display:flex;">
                         <div class="notif-empty-icon">
                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.75" stroke="currentColor" width="32" height="32"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"/></svg>
                         </div>
@@ -2170,6 +2170,32 @@
             <div class="modal-section-label">Channels</div>
             <div class="pref-list">
                 <div class="pref-row"><div class="pref-info"><p class="pref-title">Sound Alerts</p><p class="pref-desc">Play a sound when reminders trigger</p></div><button class="toggle-switch active" data-pref="sound-alerts" role="switch" aria-checked="true"><span class="toggle-knob"></span></button></div>
+            </div>
+            <div class="modal-section-label">Test</div>
+            <div class="pref-list">
+                <div class="pref-row">
+                    <div class="pref-info">
+                        <p class="pref-title">Test Notification</p>
+                        <p class="pref-desc">Send a test to verify your notification settings are working</p>
+                    </div>
+                    <button class="modal-btn-secondary" id="notif-test-btn" type="button" style="flex-shrink:0;">Send Test</button>
+                </div>
+                <p id="notif-test-result" style="font-size:0.8rem;margin:4px 2px 0;display:none;"></p>
+            </div>
+            <!-- Dev-only: simulate a missed-dose alert. Hidden in production unless
+                 localStorage flag "dosebuddy_dev" is set to "1". -->
+            <div id="notif-dev-section" style="display:none;">
+                <div class="modal-section-label">Dev Tools</div>
+                <div class="pref-list">
+                    <div class="pref-row">
+                        <div class="pref-info">
+                            <p class="pref-title">Test Missed Dose Alert</p>
+                            <p class="pref-desc">Simulate a PENDING→MISSED transition: creates a missed notification and plays the alert sound once.</p>
+                        </div>
+                        <button class="modal-btn-secondary" id="notif-test-missed-btn" type="button" style="flex-shrink:0;">Simulate Miss</button>
+                    </div>
+                    <p id="notif-missed-test-result" style="font-size:0.8rem;margin:4px 2px 0;display:none;"></p>
+                </div>
             </div>
         </div>
         <div class="modal-footer"><button class="modal-btn-secondary" data-modal="modal-notif">Cancel</button><button class="modal-btn-primary" id="notif-save-btn">Save Preferences</button></div>

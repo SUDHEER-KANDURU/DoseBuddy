@@ -1778,3 +1778,224 @@ img, canvas, svg, video { max-width: 100%; }
   .input-icon-wrap input { padding-left: 38px !important; }
   .pref-row { gap: var(--space-2); }
 }
+
+
+/* ═══════════════════════════════════════════════════════════════
+   MASTER FIX — PARTS 4, 5, 9, 10
+   Mobile responsiveness, auth light-theme guard, signup form,
+   logo alignment, modal body scroll lock
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── PART 4a: intl phone group — stack on narrow screens ────── */
+@media (max-width: 480px) {
+  /* Phone country picker + input: stack vertically on very small screens */
+  .intl-phone-group {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  /* Country picker pill: full width when stacked */
+  .intl-country-picker {
+    width: 100%;
+  }
+
+  .intl-picker-btn {
+    width: 100%;
+    justify-content: space-between;
+    border-radius: var(--radius-lg, 10px);
+  }
+
+  /* Phone input: full width below picker */
+  .intl-phone-input {
+    width: 100%;
+    border-radius: var(--radius-lg, 10px);
+  }
+
+  /* Dropdown: constrained to screen width */
+  .intl-dropdown-menu {
+    width: calc(100vw - 32px);
+    max-width: calc(100vw - 32px);
+    left: 0;
+  }
+}
+
+/* ── PART 4b: signup phone + DOB separate rows on narrow screens */
+/* Phone and DOB are already in separate form-group divs in the DOM.
+   Ensure the form-group stack doesn't get cramped on smallest screens. */
+@media (max-width: 400px) {
+  #signup-step-2 .form-group + .form-group {
+    margin-top: 8px;
+  }
+}
+
+/* ── PART 4c: password field spacing in signup ───────────────── */
+/* Ensure spacing between password and confirm-password fields */
+#su-password,
+#su-confirm-password {
+  /* inherits from existing styles */
+}
+
+/* Guaranteed gap between the two password form-groups */
+.form-group:has(#su-password) {
+  margin-bottom: 12px;
+}
+
+@media (max-width: 768px) {
+  .form-group:has(#su-password) {
+    margin-bottom: 14px;
+  }
+}
+
+/* ── PART 4d: modal body padding-bottom guard ────────────────── */
+/* On ≤ 768px the sticky modal footer is ~64px tall.
+   The existing padding-bottom: calc(12px + 96px) is generous but
+   needs a fallback for browsers that don't support it */
+@media (max-width: 768px) {
+  .modal-body {
+    padding-bottom: max(96px, calc(12px + env(safe-area-inset-bottom, 0px) + 80px));
+  }
+}
+
+/* ── PART 4e: profile modal phone + dob always full width on mobile */
+@media (max-width: 540px) {
+  /* Profile Settings form: force single column */
+  .modal-form-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Emergency contact and phone fields: never too cramped */
+  #ps-phone,
+  #ps-dob,
+  #ps-emergency {
+    width: 100%;
+    box-sizing: border-box;
+  }
+}
+
+/* ── PART 4f: no horizontal overflow anywhere ────────────────── */
+* {
+  min-width: 0; /* flex/grid children collapse gracefully */
+}
+
+@media (max-width: 768px) {
+  .card,
+  .page-header,
+  .addmed-form-card,
+  .upload-card {
+    max-width: 100%;
+    box-sizing: border-box;
+    overflow-x: hidden;
+  }
+}
+
+/* ── PART 9: Signup confirm-password field — no pw-toggle duplication */
+/* The confirm-password field does not have a pw-toggle-btn in HTML,
+   so no CSS fix needed. Ensure the field padding is consistent. */
+#su-confirm-password {
+  padding-right: 16px; /* no toggle button — standard padding */
+}
+
+/* ── PART 10: Logo vertical alignment in nav ─────────────────── */
+.nav-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.brand-logo-circle {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.brand-title {
+  line-height: 1;
+  display: flex;
+  align-items: center;
+}
+
+/* Auth screen logo consistent sizing */
+.auth-brand-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+}
+
+.auth-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+/* ── PART 5: Auth screens always light theme guard ───────────── */
+/* The JS showAuthView() already removes .dark-mode from body.
+   This CSS rule adds a hard fallback so auth screens NEVER render dark,
+   even if a JS error prevents the class removal. */
+#auth-view {
+  background: var(--bg-light, #f8f9fb) !important;
+  color: var(--text-primary-light, #1a1a2e) !important;
+}
+
+/* Force light colours on all auth-view children regardless of body dark-mode */
+body.dark-mode #auth-view {
+  background: #f8f9fb !important;
+}
+
+body.dark-mode #auth-view .auth-card,
+body.dark-mode #auth-view .auth-page {
+  background: #ffffff !important;
+  color: #1a1a2e !important;
+}
+
+body.dark-mode #auth-view .form-label,
+body.dark-mode #auth-view label,
+body.dark-mode #auth-view p,
+body.dark-mode #auth-view h1,
+body.dark-mode #auth-view h2,
+body.dark-mode #auth-view h3 {
+  color: #1a1a2e !important;
+}
+
+body.dark-mode #auth-view input,
+body.dark-mode #auth-view select {
+  background: #ffffff !important;
+  color: #1a1a2e !important;
+  border-color: #d1d5db !important;
+}
+
+/* ── PRX MODAL mobile ─────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .prx-modal-overlay {
+    padding: 0;
+    align-items: flex-end;
+  }
+
+  .prx-modal-box {
+    width: 100%;
+    max-width: 100%;
+    max-height: calc(92dvh - env(safe-area-inset-bottom, 0px));
+    border-radius: 16px 16px 0 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .prx-modal-body {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    min-height: 0;
+    padding-bottom: 80px; /* room above sticky footer */
+  }
+
+  .prx-modal-footer {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 0px));
+  }
+}

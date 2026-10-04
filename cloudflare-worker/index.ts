@@ -345,10 +345,11 @@ CRITICAL EXTRACTION & ORIENTATION RULES:
    - The document or image(s) may be in ANY orientation (0° upright, 90° clockwise, 180° inverted, 270° counter-clockwise, or photographed at an angle).
    - Determine reading orientation independently for each page/document.
    - Read all text in its true visual orientation. All uploaded pages/files belong to ONE SINGLE prescription.
+   - EXTRACT EVERY MEDICINE you can read — do not skip medicines because they seem common or redundant.
 
 2. TABLE & SCHEDULE DISSECTION (ROW-TO-COLUMN PRESERVATION):
    - In prescriptions with schedule tables containing columns such as [Medicine] | [Morning] | [Afternoon] | [Evening] | [Night] | [Instructions]:
-     * A dosage value ("1", "0.5", "2", "✓") in a column belongs ONLY to the medicine row on that exact same horizontal line.
+     * A dosage value ("1", "0.5", "2", "✓", "½") in a column belongs ONLY to the medicine row on that exact same horizontal line.
      * Never shift timing values between rows.
      * Columns with "-", "–", "0", or empty mean that slot is NOT taken (value = 0).
    - Standard slot times:
@@ -356,11 +357,24 @@ CRITICAL EXTRACTION & ORIENTATION RULES:
      * Afternoon = 13:00 / 14:00
      * Evening = 18:00
      * Night = 21:00
+   - When schedule is written as text (e.g. "1-0-1", "BD", "TDS", "OD", "QID"):
+     * OD / Once daily = Morning only (morning:1)
+     * BD / BID / Twice daily = Morning + Night (morning:1, night:1)
+     * TDS / TID / Three times daily = Morning + Afternoon + Night (morning:1, afternoon:1, night:1)
+     * QID / Four times daily = Morning + Afternoon + Evening + Night (morning:1, afternoon:1, evening:1, night:1)
+     * 1-0-1 = Morning + Night (morning:1, night:1)
+     * 1-1-1 = Morning + Afternoon + Night (morning:1, afternoon:1, night:1)
+     * 0-0-1 = Night only (night:1)
+     * 1-0-0 = Morning only (morning:1)
+     * Morning/Night = morning:1, night:1
 
 3. ZERO HALLUCINATION POLICY:
    - Extract ONLY medications and instructions physically visible in the document.
+   - If a medicine name is clearly printed/written, you MUST include it — do not skip readable medicines.
+   - If a medicine name is illegible or unreadable, set needsVerification: true and confidence: 0.4.
    - Strip packaging terms like "15'S", "10'S", "TAB", "CAP", "SYR", "INJ" from the clean brand name, but preserve the strength (e.g. "ESOMAC 40MG").
    - Extract generic name if present in parentheses (e.g. "ESOMEPRAZOLE 40MG").
+   - Never invent or guess medicine names — only extract what is physically visible.
 
 Return ONLY a valid JSON object matching this schema:
 {
@@ -1199,10 +1213,15 @@ export default {
           : (await query<User[]>(env, "SELECT * FROM users WHERE email=? LIMIT 1", [decodeURIComponent(medsEmail![1]).toLowerCase()]))[0][0];
         if (!target) return plain(medsId ? "User not found" : "Patient not found", 400);
         if (!accessible(actor, target)) return plain("Access denied", 403);
+        // Accept client-supplied local date to avoid UTC timezone mismatch for users outside UTC.
+        const clientDateParam = url.searchParams.get("date");
+        const medsDateStr = (clientDateParam && /^\d{4}-\d{2}-\d{2}$/.test(clientDateParam))
+          ? clientDateParam
+          : new Date().toISOString().split("T")[0];
         const [rows] = await query<Json[]>(
           env,
-          "SELECT m.*,JSON_ARRAYAGG(JSON_OBJECT('id',mt.id,'timeOfDay',TIME_FORMAT(mt.time_of_day,'%H:%i:%s'))) times FROM medications m LEFT JOIN medication_times mt ON mt.medication_id=m.id WHERE m.user_id=? AND m.start_date<=CURDATE() AND m.end_date>=CURDATE() GROUP BY m.id",
-          [target.id]
+          "SELECT m.*,JSON_ARRAYAGG(JSON_OBJECT('id',mt.id,'timeOfDay',TIME_FORMAT(mt.time_of_day,'%H:%i:%s'))) times FROM medications m LEFT JOIN medication_times mt ON mt.medication_id=m.id WHERE m.user_id=? AND m.start_date<=? AND m.end_date>=? GROUP BY m.id",
+          [target.id, medsDateStr, medsDateStr]
         );
         return json(
           rows.map(x => ({
@@ -1244,15 +1263,21 @@ export default {
         if (!target) return json({ message: "User not found" }, 400);
         if (!accessible(actor, target)) return json({ message: "Access denied" }, 403);
 
+        // Accept client-supplied local date to avoid UTC timezone mismatch for users outside UTC.
+        const clientDateParam = url.searchParams.get("date");
+        const todayStr = (clientDateParam && /^\d{4}-\d{2}-\d{2}$/.test(clientDateParam))
+          ? clientDateParam
+          : new Date().toISOString().split("T")[0];
+
         const [meds] = await query<Json[]>(
           env,
-          "SELECT m.id AS med_id, m.name AS med_name, m.dosage, mt.time_of_day FROM medications m JOIN medication_times mt ON mt.medication_id=m.id WHERE m.user_id=? AND m.start_date<=CURDATE() AND m.end_date>=CURDATE()",
-          [target.id]
+          "SELECT m.id AS med_id, m.name AS med_name, m.dosage, mt.time_of_day FROM medications m JOIN medication_times mt ON mt.medication_id=m.id WHERE m.user_id=? AND m.start_date<=? AND m.end_date>=?",
+          [target.id, todayStr, todayStr]
         );
         const [logs] = await query<Json[]>(
           env,
-          "SELECT id, medication_id, DATE_FORMAT(date,'%Y-%m-%d') AS date, TIME_FORMAT(time,'%H:%i') AS time, status FROM intake_logs WHERE marker_user_id=? AND date=CURDATE()",
-          [target.id]
+          "SELECT id, medication_id, DATE_FORMAT(date,'%Y-%m-%d') AS date, TIME_FORMAT(time,'%H:%i') AS time, status FROM intake_logs WHERE marker_user_id=? AND date=?",
+          [target.id, todayStr]
         );
 
         const logMap = new Map<string, Json>();
@@ -1260,11 +1285,13 @@ export default {
           logMap.set(`${l.medication_id}_${l.time}`, l);
         }
 
+        // isPast: date is now client-supplied (correct for user's timezone).
+        // For the time portion we use UTC hours/minutes from the server since we
+        // don't receive a timezone offset from the client. This is display-only.
         const now = new Date();
-        const currentHours = now.getHours();
-        const currentMins = now.getMinutes();
+        const currentHours = now.getUTCHours();
+        const currentMins = now.getUTCMinutes();
 
-        const todayStr = now.toISOString().split("T")[0];
         const doses = meds.map(m => {
           const rawTime = String(m.time_of_day || "00:00:00").substring(0, 5);
           const [hStr, mStr] = rawTime.split(":");

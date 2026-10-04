@@ -163,16 +163,23 @@ let _historyRenderId = 0;
 let _reportsRenderId = 0;
 let _profileFetchedAt = 0;
 // ─── Notification deduplication ──────────────────────────────────────────────
-// firedReminderKeys  – Set of "userId-medId-YYYY-MM-DD-HH:MM" strings.
-//   • Added when triggerDoseNotification fires.
+// firedReminderKeys   – Set of "userId-medId-YYYY-MM-DD-HH:MM" strings.
+//   • Added when triggerDoseNotification fires (medicine-reminder event).
 //   • Cleared only on logout or on a genuine calendar-day change.
 //   • NEVER cleared just because renderDashboard() ran again.
+//
+// firedMissedAlertKeys – Set of "missed-userId-medId-YYYY-MM-DD-HH:MM" strings.
+//   • Added when the PENDING→MISSED transition sound fires.
+//   • Guarantees the missed-dose alert sound plays exactly ONCE per dose per session.
+//   • Cleared on logout alongside firedReminderKeys.
 //
 // _lastScheduledDate – the calendar date string that was current the last time
 //   scheduleMedicineReminders() built its timeout list.  Starts as "" (empty
 //   string) so the first call does NOT trigger the new-day branch.
-const firedReminderKeys = new Set();
+const firedReminderKeys    = new Set();
+const firedMissedAlertKeys = new Set();
 let _lastScheduledDate = "";   // "" means "never scheduled yet"
+let _reminderIntervalId = null; // interval ID for checkReminders — cleared on logout
 let weeklyChart = null;
 
 const ACTIVITY_TYPES = {
@@ -482,7 +489,7 @@ document.addEventListener("DOMContentLoaded", () => {
         showAuthView();
         setThemeToggleVisible(false);
     }
-    setInterval(checkReminders, 30000);
+    _reminderIntervalId = setInterval(checkReminders, 30000);
 
     // ── Proactive token refresh ────────────────────────────────────────────
     // Every 60 seconds, check whether the access token is within 60 seconds
@@ -1369,9 +1376,18 @@ function completeLoginFromResponse(user) {
     currentUser = user;
     saveToLS(LS_CURRENT_USER_KEY, currentUser);
 
+    // Load this user's persisted in-app notifications and refresh the badge
+    loadNotifStore(currentUser.id);
+    refreshNotifBadge();
+
     showAppViews();
     switchView("dashboard-view");
     showToast(`Welcome${currentUser.name ? ", " + currentUser.name : ""}!`, "success", 3000);
+
+    // Restart the checkReminders safety-net interval if it was cleared on logout.
+    if (!_reminderIntervalId) {
+        _reminderIntervalId = setInterval(checkReminders, 30000);
+    }
 
     if ("Notification" in window && Notification.permission === "default") {
         setTimeout(() => showNotifPermissionBanner(), 2000);
@@ -1697,9 +1713,15 @@ function setupNav() {
         clearTokens(); // Clear JWT tokens
         // Clear all notification dedup state so the next login starts fresh
         firedReminderKeys.clear();
+        firedMissedAlertKeys.clear();
         _lastScheduledDate = "";
         clearScheduledTimeouts();
         clearMissTimeouts(); // Stop any pending 5-min miss-window timers
+        // Stop the checkReminders safety-net interval — it is restarted on next login
+        if (_reminderIntervalId) { clearInterval(_reminderIntervalId); _reminderIntervalId = null; }
+        // Clear in-app notification panel (memory only — localStorage remains for next login)
+        notifStore = [];
+        refreshNotifBadge();
         medsCache = [];
         medsCacheDate = null;
         showAuthView();
@@ -2004,8 +2026,8 @@ async function renderDashboard() {
 
     try {
         const [logsRes, medsRes] = await Promise.allSettled([
-            fetchJsonCached(`${API_BASE}/logs/today/${currentUser.id}`, 10000),
-            fetchJsonCached(medsUrl, 30000)
+            fetchJsonCached(`${API_BASE}/logs/today/${currentUser.id}?date=${encodeURIComponent(todayStr)}`, 10000),
+            fetchJsonCached(`${medsUrl}?date=${encodeURIComponent(todayStr)}`, 30000)
         ]);
         if (renderId !== _dashboardRenderId) return;
 
@@ -2243,7 +2265,8 @@ function updateMissedDoseNotifications(meds, todayStr) {
     });
 
     const existing = notifStore.filter(n => n.type !== "missed");
-    notifStore = [...newItems, ...existing].slice(0, 20);
+    notifStore = [...newItems, ...existing].slice(0, 50);
+    saveNotifStore(currentUser?.id);
 
     const unread = notifStore.filter(n => n.unread).length;
     countEl.textContent = unread;
@@ -2302,17 +2325,29 @@ async function deleteMedication(medId) {
             if (row.tagName === "TR") row.remove();
         });
 
-        // 4. Update memory cache optimistically
+        // 4. Update memory cache optimistically — prevents the deleted med from
+        //    re-appearing if scheduleMedicineReminders() or other code re-reads medsCache
         if (Array.isArray(medsCache)) {
             medsCache = medsCache.filter(m => m.id !== medId);
         }
 
+        // Cancel any scheduled reminder for the deleted medicine right away.
+        // Note: scheduledTimeouts stores raw IDs without medId metadata, so we
+        // cannot cancel selectively. The background renderDashboard() call below
+        // will rebuild scheduledTimeouts from the updated medsCache (which no longer
+        // contains the deleted med), effectively clearing its reminder.
+
         invalidateDataCache("/medications/", "/logs/", "/streaks/");
 
-        // 5. Background re-fetch without ever clearing the remaining medicines table
-        try { await renderDashboard(); } catch(e) { console.warn("Dashboard refresh failed", e); }
-        try { await refreshActivityFeed(); } catch(e) { console.warn("Activity refresh failed", e); }
         showToast("Medicine deleted successfully.", "success");
+
+        // 5. Background re-fetch: fire-and-forget so the table NEVER goes blank.
+        //    We do NOT await renderDashboard() here — the rows are already removed above.
+        //    A quiet background refresh keeps stats/charts in sync without any visible flash.
+        setTimeout(() => {
+            renderDashboard().catch(e => console.warn("[Delete] Background refresh failed", e));
+            refreshActivityFeed().catch(e => console.warn("[Delete] Activity refresh failed", e));
+        }, 400);
     } catch (err) {
         console.error("Delete medication error:", err);
         showToast("Failed to delete medicine.", "error");
@@ -2463,6 +2498,13 @@ async function markDoseTaken(userId, medId, dateStr, timeStr, medName = "") {
             console.error("Failed to save log");
         } else {
             invalidateDataCache("/logs/today/", "/logs/summary/", "/logs/adherence/", "/streaks/");
+            if (medName) {
+                addNotification(
+                    "adherence",
+                    `${medName} marked as taken`,
+                    `Dose at ${timeStr} recorded for ${dateStr}.`
+                );
+            }
         }
     } catch (err) {
         console.error(err);
@@ -2885,6 +2927,14 @@ async function renderAnalyticsDashboard(preloadedStats, preloadedStreak, preload
     if (!currentUser) return;
     const uid = currentUser.id;
 
+    // Compute local date string the same way renderDashboard() does — avoids UTC mismatch.
+    const _analyticsToday = new Date();
+    const _analyticsTodayStr = [
+        _analyticsToday.getFullYear(),
+        String(_analyticsToday.getMonth() + 1).padStart(2, "0"),
+        String(_analyticsToday.getDate()).padStart(2, "0")
+    ].join("-");
+
     // FIX Issue 3 & 4: When called from renderReports() → renderDashboard(),
     // medsCache is already populated with the definitive today's-medicines set.
     // Skipping the duplicate /medications/today fetch prevents:
@@ -2901,15 +2951,15 @@ async function renderAnalyticsDashboard(preloadedStats, preloadedStreak, preload
     // not for their own account.  Apply the same URL logic that renderDashboard()
     // uses so the Analytics medicine count and donut always match the dashboard.
     const _analyticsMedsUrl = (currentUser.role === "CAREGIVER" && currentUser.patientEmail)
-        ? `${API_BASE}/medications/today-by-email/${encodeURIComponent(currentUser.patientEmail)}`
-        : `${API_BASE}/medications/today/${uid}`;
+        ? `${API_BASE}/medications/today-by-email/${encodeURIComponent(currentUser.patientEmail)}?date=${encodeURIComponent(_analyticsTodayStr)}`
+        : `${API_BASE}/medications/today/${uid}?date=${encodeURIComponent(_analyticsTodayStr)}`;
 
     // When called from renderReports(), stats and streak are already available.
     // Skip those two fetches to avoid duplicate network requests and stat-card
     // overwrites.  For the remaining four endpoints fire them in parallel as before.
     const parallelFetches = [
         needMeds ? authFetch(_analyticsMedsUrl) : Promise.resolve(null),
-        needTodayLogs ? fetchJsonCached(`${API_BASE}/logs/today/${uid}`, 10000).catch(() => null) : Promise.resolve(null),
+        needTodayLogs ? fetchJsonCached(`${API_BASE}/logs/today/${uid}?date=${encodeURIComponent(_analyticsTodayStr)}`, 10000).catch(() => null) : Promise.resolve(null),
         fetchJsonCached(`${API_BASE}/bmi/recent/${uid}?limit=100`, 10000).catch(() => null),
         fetchJsonCached(`${API_BASE}/vitals/recent/${uid}?limit=100`, 10000).catch(() => null)
     ];
@@ -4004,9 +4054,10 @@ function checkReminders() {
             // (page refresh, clock drift, etc.) and we're within the exact
             // firing minute.  firedReminderKeys prevents double-firing when
             // the setTimeout already ran at the same minute.
-            // Use diff === 0 only — diff === 1 means we're already 1 full
-            // minute past and the setTimeout would have fired correctly.
-            if (diff === 0) {
+            // Use diff 0-2 to cover cases where the page loaded slightly after
+            // the scheduled minute (e.g. loaded 30s late → diff=1).
+            // firedReminderKeys guarantees the same key never fires twice.
+            if (diff >= 0 && diff <= 2) {
                 triggerDoseNotification(med, todayStr, displayTime);
             }
 
@@ -4051,6 +4102,28 @@ function checkReminders() {
                     });
                 } else {
                     existing.status = "MISSED";
+                }
+
+                // ── PENDING → MISSED transition: alert sound + notification ──
+                // Deterministic key prevents the sound replaying every 30-second poll.
+                const missedAlertKey = `missed-${entry.userId}-${entry.medicationId}-${entry.date}-${entry.time}`;
+                if (!firedMissedAlertKeys.has(missedAlertKey)) {
+                    firedMissedAlertKeys.add(missedAlertKey);
+
+                    // Find the medicine name from medsCache for a useful notification
+                    const missedMed = medsCache.find(m => String(m.id) === String(entry.medicationId));
+                    const missedName = missedMed ? missedMed.name : "Medicine";
+
+                    // In-app notification (distinct from the reminder notification)
+                    addNotification(
+                        "missed",
+                        `Missed dose: ${missedName}`,
+                        `Scheduled at ${entry.time} — not taken.`
+                    );
+
+                    // Audible missed-dose alert (plays once, same sound asset as reminder)
+                    playReminderSound();
+                    console.log(`[DoseBuddy] MISSED ALERT fired: ${missedAlertKey}`);
                 }
             });
             updateMissedDoseNotifications(medsCache, todayStr);
@@ -5635,17 +5708,18 @@ function setupPrescriptionUpload() {
 
     function renderModalCard(item, index) {
         const schedSlots = [
-            { key: "morning",   label: "Morning",   time: "08:00", icon: "☀️" },
-            { key: "afternoon", label: "Afternoon", time: "13:00", icon: "🌤️" },
-            { key: "evening",   label: "Evening",   time: "18:00", icon: "🌅" },
-            { key: "night",     label: "Night",     time: "21:00", icon: "🌙" }
+            { key: "morning",   label: "Morning",   time: "08:00" },
+            { key: "afternoon", label: "Afternoon", time: "13:00" },
+            { key: "evening",   label: "Evening",   time: "18:00" },
+            { key: "night",     label: "Night",     time: "21:00" }
         ];
         const activeSlots = schedSlots.filter(s => item[s.key]);
         const schedHtml = activeSlots.length > 0
-            ? activeSlots.map(s => `<span class="prx-chip prx-chip-time">${s.icon} ${s.label}</span>`).join("")
+            ? activeSlots.map(s => `<span class="prx-chip prx-chip-time">${s.label}</span>`).join("")
             : `<span class="prx-chip prx-chip-muted">No schedule set</span>`;
 
-        const foodIcon = item.foodInstruction?.toLowerCase().includes("after") ? "🍽️" : "⏱️";
+        const isAfterFood = item.foodInstruction?.toLowerCase().includes("after");
+        const foodLabel = isAfterFood ? "After meal" : (item.foodInstruction || "As directed");
 
         return `
         <div class="prx-med-card ${item._rejected ? "prx-med-card--rejected" : ""}" id="prxmc_${item.id}">
@@ -5663,14 +5737,14 @@ function setupPrescriptionUpload() {
                     }
                 </button>
             </div>
-            ${item._rejected ? `<div class="prx-med-card-rejected-label">Removed — click ↩ to undo</div>` : `
+            ${item._rejected ? `<div class="prx-med-card-rejected-label">Removed — click undo to restore</div>` : `
             <div class="prx-med-card-details">
                 <div class="prx-med-card-row">
                     <span class="prx-chip-group">${schedHtml}</span>
                 </div>
                 <div class="prx-med-card-row prx-med-card-meta">
-                    <span class="prx-chip prx-chip-food">${foodIcon} ${escapeHtml(item.foodInstruction || "As directed")}</span>
-                    <span class="prx-chip prx-chip-duration">📅 ${item.durationDays || 30} days</span>
+                    <span class="prx-chip prx-chip-food">${escapeHtml(foodLabel)}</span>
+                    <span class="prx-chip prx-chip-duration">${item.durationDays || 30} days</span>
                 </div>
             </div>
             `}
@@ -5848,6 +5922,12 @@ function setupPrescriptionUpload() {
                 errorEl.textContent = "";
 
                 showToast(`✓ ${savedCount} medicine${savedCount > 1 ? "s" : ""} added to your DoseBuddy schedule!`, "success");
+                // In-app notification for prescription extraction completing
+                addNotification(
+                    "ai",
+                    "Prescription processed",
+                    `${savedCount} medicine${savedCount > 1 ? "s" : ""} added to your schedule from prescription.`
+                );
                 resetMedicineForm();
                 invalidateDataCache("/medications/", "/logs/summary/", "/logs/adherence/", "/streaks/");
                 try { await renderDashboard();     } catch(e) { console.warn("Dashboard refresh failed"); }
@@ -5889,7 +5969,7 @@ function setupPrescriptionUpload() {
         const endEl   = document.getElementById("med-end-date");
 
         if (nameEl)  nameEl.value  = result.medicineName || result.name || result.brandName || "";
-        if (doseEl)  doseEl.value  = result.dosage || result.strength || "";
+        if (doseEl)  doseEl.value  = result.strength || result.dosage || "";
         if (instrEl) instrEl.value = result.foodInstruction || result.food_instruction || result.instructions || "";
 
         const _now = new Date();
@@ -5899,7 +5979,7 @@ function setupPrescriptionUpload() {
             String(_now.getDate()).padStart(2, "0")
         ].join("-");
 
-        if (startEl && !startEl.value) startEl.value = todayStr;
+        if (startEl) startEl.value = result.startDate || todayStr;
 
         if (endEl) {
             const days = result.durationDays || result.duration_days || 30;
@@ -5912,13 +5992,43 @@ function setupPrescriptionUpload() {
             ].join("-");
         }
 
-        const timeIds = ["time-1", "time-2", "time-3"];
-        timeIds.forEach((id, i) => {
-            const el = document.getElementById(id);
+        // Map schedule slots to the three fixed time fields:
+        // time-1 = Morning (08:00), time-2 = Afternoon (13:00), time-3 = Evening/Night
+        // Use the boolean morning/afternoon/evening/night flags from the extracted result
+        // so the mapping is semantic, not positional.
+        const slotMap = [
+            { field: "time-1", flagKey: "morning",   fallback: "08:00" },
+            { field: "time-2", flagKey: "afternoon",  fallback: "13:00" },
+            { field: "time-3", flagKey: "evening",    fallback: "18:00", altKey: "night", altFallback: "21:00" }
+        ];
+
+        // Build a set of scheduled times from the result
+        const scheduledTimes = Array.isArray(result.times) ? result.times.map(normalizeTime).filter(Boolean) : [];
+
+        slotMap.forEach(({ field, flagKey, fallback, altKey, altFallback }) => {
+            const el = document.getElementById(field);
             if (!el) return;
-            el.value = (Array.isArray(result.times) && result.times[i])
-                ? normalizeTime(result.times[i])
-                : "";
+
+            const flagOn    = Boolean(result[flagKey]);
+            const altFlagOn = altKey ? Boolean(result[altKey]) : false;
+
+            if (flagOn) {
+                // Prefer the actual extracted time matching this slot's range
+                const matchedTime = scheduledTimes.find(t => {
+                    const h = parseInt(t.split(":")[0], 10);
+                    if (flagKey === "morning")   return h >= 5  && h < 12;
+                    if (flagKey === "afternoon") return h >= 12 && h < 17;
+                    if (flagKey === "evening")   return h >= 17 && h < 21;
+                    return false;
+                });
+                el.value = matchedTime || fallback;
+            } else if (altFlagOn && altKey) {
+                // Night slot overflows into time-3 if evening is empty
+                const nightTime = scheduledTimes.find(t => parseInt(t.split(":")[0], 10) >= 20);
+                el.value = nightTime || altFallback;
+            } else {
+                el.value = "";
+            }
         });
     }
 
@@ -6022,15 +6132,15 @@ function updateNotifPermissionStatus() {
 
     const perm = Notification.permission;
     if (perm === "granted") {
-        statusText.textContent  = "Notifications are enabled.";
+        statusText.textContent  = "✓ Enabled — you will receive dose reminders.";
         statusText.className    = "notif-perm-text notif-perm-granted";
         enableBtn.style.display = "none";
     } else if (perm === "denied") {
-        statusText.textContent  = "Notifications are blocked. Open your browser settings to allow them for this site.";
+        statusText.textContent  = "✕ Blocked — enable notifications in your browser settings to receive dose reminders.";
         statusText.className    = "notif-perm-text notif-perm-denied";
         enableBtn.style.display = "none";
     } else {
-        statusText.textContent  = "Notifications are not enabled yet.";
+        statusText.textContent  = "⚠ Permission required — click Enable Notifications to get started.";
         statusText.className    = "notif-perm-text notif-perm-default";
         enableBtn.style.display = "inline-flex";
     }
@@ -6042,6 +6152,7 @@ function openModal(id) {
     if (!modal || !backdrop) return;
     backdrop.classList.add("backdrop-visible");
     modal.classList.add("modal-open");
+    document.body.style.overflow = "hidden";
     const first = modal.querySelector("button, input, select, [tabindex]");
     if (first) setTimeout(() => first.focus(), 50);
 }
@@ -6053,12 +6164,14 @@ function closeModal(id) {
     modal.classList.remove("modal-open");
     const anyOpen = document.querySelectorAll(".modal.modal-open").length > 0;
     if (!anyOpen && backdrop) backdrop.classList.remove("backdrop-visible");
+    if (!anyOpen) document.body.style.overflow = "";
 }
 
 function closeAllModals() {
     document.querySelectorAll(".modal.modal-open").forEach(m => m.classList.remove("modal-open"));
     const backdrop = document.getElementById("modal-backdrop");
     if (backdrop) backdrop.classList.remove("backdrop-visible");
+    document.body.style.overflow = "";
 }
 
 function setupProfileDropdown() {
@@ -6143,9 +6256,15 @@ function doLogoutAction() {
     clearTokens(); // Clear JWT tokens
     // Clear all notification dedup state so the next login starts fresh
     firedReminderKeys.clear();
+    firedMissedAlertKeys.clear();
     _lastScheduledDate = "";
     clearScheduledTimeouts();
     clearMissTimeouts(); // Stop any pending 5-min miss-window timers
+    // Stop the checkReminders safety-net interval — it is restarted on next login
+    if (_reminderIntervalId) { clearInterval(_reminderIntervalId); _reminderIntervalId = null; }
+    // Clear in-app notification panel from memory (localStorage stays for next login)
+    notifStore = [];
+    refreshNotifBadge();
     medsCache = [];
     medsCacheDate = null;
     showAuthView();
@@ -6402,6 +6521,100 @@ document.addEventListener("DOMContentLoaded", () => {
             }
         });
     });
+
+    // "Send Test Notification" button
+    document.getElementById("notif-test-btn")?.addEventListener("click", async () => {        const resultEl = document.getElementById("notif-test-result");
+        const btn      = document.getElementById("notif-test-btn");
+
+        function showResult(msg, color) {
+            if (!resultEl) return;
+            resultEl.textContent   = msg;
+            resultEl.style.color   = color;
+            resultEl.style.display = "block";
+            setTimeout(() => { if (resultEl) resultEl.style.display = "none"; }, 6000);
+        }
+
+        if (!("Notification" in window)) {
+            showResult("❌ Notifications are not supported in this browser.", "var(--error, #e53e3e)");
+            return;
+        }
+        if (Notification.permission === "denied") {
+            showResult("⚠ Notifications are blocked. Enable them in your browser settings.", "var(--warning, #d97706)");
+            return;
+        }
+        if (Notification.permission !== "granted") {
+            showResult("⚠ Notifications are not enabled yet. Click Enable Notifications first.", "var(--warning, #d97706)");
+            return;
+        }
+
+        if (btn) { btn.disabled = true; btn.textContent = "Sending…"; }
+        try {
+            const n = new Notification("DoseBuddy Test ✓", {
+                body: "Notifications are working! You will receive your dose reminders.",
+                icon: "/favicon.ico",
+                tag:  "dosebuddy-test-" + Date.now(),
+            });
+            n.onerror = () => showResult("❌ Notification failed to display.", "var(--error, #e53e3e)");
+            showResult("✓ Test notification sent! Check your browser notifications.", "var(--success, #16a34a)");
+            if (typeof playReminderSound === "function") playReminderSound();
+        } catch (e) {
+            showResult(`❌ Error: ${e.message}`, "var(--error, #e53e3e)");
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = "Send Test"; }
+        }
+    });
+
+    // ── Dev-only "Test Missed Dose Alert" button ──────────────────────────
+    // Only visible when localStorage["dosebuddy_dev"] === "1". Never shown in
+    // production. Simulates a PENDING→MISSED transition: plays the missed-dose
+    // alert sound once, creates a missed in-app notification, and reports the
+    // result — without requiring the user to wait for a real missed dose.
+    (function setupDevMissedDoseTest() {
+        const devSection = document.getElementById("notif-dev-section");
+        if (!devSection) return;
+        try {
+            if (localStorage.getItem("dosebuddy_dev") === "1") {
+                devSection.style.display = "block";
+            }
+        } catch (e) { /* ignore */ }
+
+        document.getElementById("notif-test-missed-btn")?.addEventListener("click", () => {
+            const resultEl = document.getElementById("notif-missed-test-result");
+            const btn      = document.getElementById("notif-test-missed-btn");
+            function showResult(msg, color) {
+                if (!resultEl) return;
+                resultEl.textContent   = msg;
+                resultEl.style.color   = color;
+                resultEl.style.display = "block";
+                setTimeout(() => { if (resultEl) resultEl.style.display = "none"; }, 6000);
+            }
+
+            if (!currentUser) {
+                showResult("⚠ Log in first to test the missed-dose alert.", "var(--warning, #d97706)");
+                return;
+            }
+
+            // Deterministic key for the simulated event (unique per click via Date.now)
+            const simKey = `missed-${currentUser.id}-devsim-${Date.now()}`;
+            // Use the same dedup gate as the real transition so it honours
+            // firedMissedAlertKeys exactly like production behaviour.
+            if (firedMissedAlertKeys.has(simKey)) {
+                showResult("⚠ Simulated alert already fired. Click again to re-run.", "var(--warning, #d97706)");
+                return;
+            }
+            firedMissedAlertKeys.add(simKey);
+
+            addNotification(
+                "missed",
+                "Missed dose: Test Medicine",
+                "Scheduled at 10:00 — not taken. (dev simulation)"
+            );
+            playReminderSound();
+            if (btn) { btn.textContent = "Played ✓"; setTimeout(() => { if (btn) btn.textContent = "Simulate Miss"; }, 2000); }
+            showResult("✓ Missed-dose alert simulated: notification created + sound played once.", "var(--success, #16a34a)");
+            console.log(`[DoseBuddy] DEV missed-dose alert simulated: ${simKey}`);
+        });
+    })();
 });
 
 function openPrivacyModal() {
@@ -6520,7 +6733,44 @@ document.addEventListener("DOMContentLoaded", () => {
     setupProfileDropdown();
 });
 
-let notifStore = []; 
+let notifStore = [];
+
+// localStorage key for per-user in-app notifications (scoped by userId)
+function _notifStoreKey(userId) {
+    return `dosebuddy_notif_store_${userId}`;
+}
+
+/** Load this user's notifications from localStorage into notifStore. */
+function loadNotifStore(userId) {
+    if (!userId) { notifStore = []; return; }
+    try {
+        const raw = localStorage.getItem(_notifStoreKey(userId));
+        notifStore = raw ? JSON.parse(raw) : [];
+        if (!Array.isArray(notifStore)) notifStore = [];
+    } catch (e) {
+        notifStore = [];
+    }
+}
+
+/** Persist the current notifStore for this user to localStorage. */
+function saveNotifStore(userId) {
+    if (!userId) return;
+    try {
+        localStorage.setItem(_notifStoreKey(userId), JSON.stringify(notifStore.slice(0, 50)));
+    } catch (e) {
+        console.warn("[Notif] Could not persist notifications:", e.message);
+    }
+}
+
+/** Clear this user's notifications from localStorage and memory. */
+function clearNotifStore(userId) {
+    notifStore = [];
+    if (userId) {
+        try { localStorage.removeItem(_notifStoreKey(userId)); } catch (e) {}
+    }
+    refreshNotifBadge();
+    renderNotificationPanel();
+}
 
 const NOTIF_ICONS = {
     missed:      { iconSvg: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`, color: "notif-icon-orange" },
@@ -6559,8 +6809,8 @@ function renderNotificationPanel() {
         div.innerHTML = `
             <div class="notif-item-icon ${icon.color}">${icon.iconSvg}</div>
             <div class="notif-item-body">
-                <p class="notif-item-title">${item.title}</p>
-                <p class="notif-item-desc">${item.desc}</p>
+                <p class="notif-item-title">${escapeHtml(item.title)}</p>
+                <p class="notif-item-desc">${escapeHtml(item.desc)}</p>
                 <span class="notif-item-time">${timeAgo(item.ts)}</span>
             </div>
             ${item.unread ? '<span class="notif-item-dot"></span>' : ""}
@@ -6569,6 +6819,7 @@ function renderNotificationPanel() {
             item.unread = false;
             div.classList.remove("notif-item-unread");
             div.querySelector(".notif-item-dot")?.remove();
+            saveNotifStore(currentUser?.id);
             refreshNotifBadge();
         });
         list.appendChild(div);
@@ -6584,22 +6835,32 @@ function refreshNotifBadge() {
 }
 
 function addNotification(type, title, desc) {
-    notifStore.unshift({ id: `${type}-${Date.now()}`, type, title, desc, unread: true, ts: Date.now() });
-    notifStore = notifStore.slice(0, 20);
+    // Deterministic id: same event never creates a duplicate entry
+    const id = `${type}-${(currentUser?.id || "anon")}-${title.replace(/\s+/g, "_").substring(0, 40)}-${Math.floor(Date.now() / 60000)}`;
+    // Skip if already in store (same id = same minute, same title)
+    if (notifStore.some(n => n.id === id)) return;
+
+    notifStore.unshift({ id, type, title, desc, unread: true, ts: Date.now() });
+    notifStore = notifStore.slice(0, 50);
+    saveNotifStore(currentUser?.id);
     refreshNotifBadge();
+    // Live-update the panel if it's currently open
+    const panel = document.getElementById("notification-panel");
+    if (panel && panel.classList.contains("notif-panel-open")) {
+        renderNotificationPanel();
+    }
 }
 
 document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("notif-mark-all-btn")?.addEventListener("click", () => {
         notifStore.forEach(n => n.unread = false);
+        saveNotifStore(currentUser?.id);
         renderNotificationPanel();
         refreshNotifBadge();
     });
 
     document.getElementById("notif-clear-btn")?.addEventListener("click", () => {
-        notifStore = [];
-        renderNotificationPanel();
-        refreshNotifBadge();
+        clearNotifStore(currentUser?.id);
     });
 });
 

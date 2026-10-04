@@ -5,3 +5,7 @@ cloudflare-worker/node_modules/
 dist/
 .dist/
 worker-configuration.d.ts
+
+# Agent internal task artifacts
+.agents/
+
