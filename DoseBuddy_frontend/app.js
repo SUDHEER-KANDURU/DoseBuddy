@@ -4232,6 +4232,24 @@ function scheduleMedicineReminders() {
                                 } else {
                                     existing.status = "MISSED";
                                 }
+
+                                // ── PENDING → MISSED transition: alert sound + notification ──
+                                // This missTimeout usually fires before checkReminders, so the
+                                // alert MUST happen here (not only in checkReminders) or the user
+                                // never hears it. firedMissedAlertKeys guarantees it plays once
+                                // even if checkReminders later races the same transition.
+                                const missedAlertKey = `missed-${currentUser.id}-${capturedMed.id}-${capturedDate}-${capturedTime}`;
+                                if (!firedMissedAlertKeys.has(missedAlertKey)) {
+                                    firedMissedAlertKeys.add(missedAlertKey);
+                                    addNotification(
+                                        "missed",
+                                        `Missed dose: ${capturedMed.name}`,
+                                        `Scheduled at ${capturedTime} — not taken.`
+                                    );
+                                    playReminderSound();
+                                    console.log(`[DoseBuddy] MISSED ALERT fired (missTimeout): ${missedAlertKey}`);
+                                }
+
                                 updateMissedDoseNotifications(medsCache, capturedDate);
                                 renderReports(logs);
                                 refreshActivityFeed();
