@@ -417,31 +417,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // ── Audio unlock ────────────────────────────────────────────────────────
     // Browsers block audio until the user has interacted with the page.
-    // We listen on multiple interaction types so the very first tap/click/key
-    // on the page counts as a user gesture and silently pre-plays the audio at
-    // zero volume.  After that, reminder sounds will work without being blocked.
+    // We listen on genuine user-activation events ONLY (NOT scroll) and prime
+    // the audio element via a muted play() on the first interaction.  After
+    // that, reminder/missed-dose sounds work from setTimeout without being
+    // blocked.  See primeAudioElement() for the priming logic.
     function unlockAudio() {
-        if (audioUnlocked) return;
-        const audio = document.getElementById("notify-sound");
-        if (!audio) return;
-
-        audio.volume = 0;
-        const playPromise = audio.play();
-        if (playPromise !== undefined) {
-            playPromise.then(() => {
-                audio.pause();
-                audio.currentTime = 0;
-                audio.volume = 1;
-                audioUnlocked = true;
-                console.log("[DoseBuddy] Audio unlocked by user interaction.");
-            }).catch(err => {
-                // Autoplay blocked — will retry on next interaction
-                console.log("[DoseBuddy] Audio unlock attempt blocked:", err.message);
-            });
-        }
+        primeAudioElement();
     }
 
-    ["click", "touchstart", "keydown", "scroll"].forEach(evt =>
+    ["click", "pointerdown", "touchstart", "keydown"].forEach(evt =>
         document.addEventListener(evt, unlockAudio, { once: false, passive: true })
     );
     setupAuthView();
@@ -1313,25 +1297,12 @@ async function handleSignupApi(body, errorElem) {
 }
 
 // ── Unlock audio using the login button press as the user gesture ─────────────
-// Must be defined before handleLoginApi so it can be called there.
+// The login button click also triggers the document-level unlockAudio listener
+// synchronously (priming the element inside the gesture). This function is a
+// safety net called after the login await resolves — primeAudioElement() will
+// no-op if already unlocked, or attempt a muted priming (always allowed) if not.
 function unlockAudioOnLogin() {
-    if (audioUnlocked) return;
-    const audio = document.getElementById("notify-sound");
-    if (!audio) return;
-
-    audio.volume = 0;
-    const p = audio.play();
-    if (p !== undefined) {
-        p.then(() => {
-            audio.pause();
-            audio.currentTime = 0;
-            audio.volume = 1;
-            audioUnlocked = true;
-            console.log("[DoseBuddy] Audio unlocked at login.");
-        }).catch(err => {
-            console.log("[DoseBuddy] Audio unlock at login blocked:", err.message);
-        });
-    }
+    primeAudioElement();
 }
 
 async function handleLoginApi(email, password, errorElem) {
@@ -3882,48 +3853,116 @@ function stopReminderAudio() {
     }
 }
 
-// ── Plays the reminder sound with full production-safe handling ──────────────
-function playReminderSound() {
-    // Check user preference first
+// ── Audio unlock ───────────────────────────────────────────────────────────
+// Browsers block unmuted audio.play() until the user has interacted with the
+// page AND the audio element has been primed. We prime the element on the
+// FIRST genuine user gesture (click/pointerdown/touchstart/keydown) using a
+// MUTED play() — muted autoplay is ALWAYS allowed, so priming is guaranteed
+// even if the gesture timing is imperfect. After priming, unmuted play() from
+// setTimeout (reminders/missed-dose alerts) works for the rest of the session.
+//
+// NOTE: 'scroll' was previously in the listener list but is NOT a user
+// activation, so it caused "play() failed because the user didn't interact"
+// errors. Removed.
+function primeAudioElement() {
+    if (audioUnlocked) return Promise.resolve(true);
+    const audio = document.getElementById("notify-sound");
+    if (!audio) return Promise.resolve(false);
+
+    audio.muted = true;
+    const p = audio.play();
+    if (p && typeof p.then === "function") {
+        return p.then(() => {
+            audio.pause();
+            audio.currentTime = 0;
+            audio.muted = false;
+            audioUnlocked = true;
+            console.log("[DoseBuddy] Audio unlocked");
+            return true;
+        }).catch(err => {
+            audio.muted = false;
+            // Autoplay still blocked — will retry on next genuine gesture.
+            console.log("[DoseBuddy] Audio unlock attempt blocked:", err.message);
+            return false;
+        });
+    }
+    // Old browsers with no promise — optimistically consider unlocked.
+    audio.muted = false;
+    audioUnlocked = true;
+    return Promise.resolve(true);
+}
+
+// Throttle repeated audio log messages so checkReminders (every 30s) can't spam.
+let _lastAudioLogTs = 0;
+function _logAudioThrottled(msg) {
+    const now = Date.now();
+    if (now - _lastAudioLogTs > 60000) {
+        console.log(msg);
+        _lastAudioLogTs = now;
+    }
+}
+
+// ── Shared, authoritative notification-sound player ──────────────────────────
+// Used by BOTH playReminderSound() (scheduled reminder) and
+// playMissedDoseAlert() (PENDING → MISSED). One implementation, two entry points.
+function _playNotifSound(label) {
+    // 1. Respect user preference
     const prefs = loadFromLS(NOTIF_PREFS_KEY, { "sound-alerts": true });
     if (prefs["sound-alerts"] === false) {
-        console.log("[DoseBuddy] Sound alerts disabled by user.");
-        return;
+        _logAudioThrottled(`[DoseBuddy] ${label}: sound alerts disabled`);
+        return false;
+    }
+
+    // 2. Require the element to have been primed by a real user gesture
+    if (!audioUnlocked) {
+        _logAudioThrottled(`[DoseBuddy] ${label}: playback blocked (audio not unlocked — click the page once)`);
+        return false;
     }
 
     const audio = document.getElementById("notify-sound");
-    if (!audio) {
-        console.warn("[DoseBuddy] notify-sound element not found in DOM.");
-        return;
-    }
-
-    stopReminderAudio();
-
-    // Verify the audio file loaded successfully
+    if (!audio) return false;
     if (audio.error) {
-        console.error("[DoseBuddy] Audio element has error state:", audio.error.code, audio.error.message);
-        return;
+        console.warn(`[DoseBuddy] ${label}: audio element error`, audio.error.code, audio.error.message);
+        return false;
     }
 
-    audio.currentTime = 0;
-    audio.volume = 1;
-    audio.loop = false;
-
-    const playPromise = audio.play();
-    if (playPromise !== undefined) {
-        playPromise.then(() => {
-            console.log("[DoseBuddy] Reminder sound playing.");
+    console.log(`[DoseBuddy] ${label}: attempting playback`);
+    try {
+        stopReminderAudio();
+        audio.currentTime = 0;
+        audio.volume = 1;
+        audio.loop = false;
+        const playPromise = audio.play();
+        if (playPromise !== undefined && typeof playPromise.then === "function") {
+            playPromise.then(() => {
+                console.log(`[DoseBuddy] ${label}: playback started`);
+                activeReminderAudio = audio;
+            }).catch(err => {
+                console.warn(`[DoseBuddy] ${label}: playback blocked`, err.name, err.message);
+                // Re-prime on next gesture.
+                audioUnlocked = false;
+            });
+        } else {
+            // Old Safari — no promise returned, optimistically set
             activeReminderAudio = audio;
-        }).catch(err => {
-            console.warn("[DoseBuddy] Reminder sound blocked by autoplay policy:", err.name, err.message);
-            // Notification still fires — only the sound is silent.
-            // Mark audioUnlocked = false so the next interaction re-unlocks it.
-            audioUnlocked = false;
-        });
-    } else {
-        // Old Safari — no promise returned, optimistically set
-        activeReminderAudio = audio;
+        }
+        return true;
+    } catch (e) {
+        console.warn(`[DoseBuddy] ${label}: playback blocked`, e.message);
+        return false;
     }
+}
+
+// Scheduled medicine reminder sound (fires at the dose time via setTimeout)
+function playReminderSound() {
+    return _playNotifSound("Reminder audio");
+}
+
+// Missed-dose alert sound (fires at PENDING → MISSED transition, ~5 min late)
+// Distinct entry point so the two events are never confused, even though they
+// share the same asset + player.
+function playMissedDoseAlert() {
+    return _playNotifSound("Missed-dose audio");
 }
 
 function triggerDoseNotification(med, dateStr, displayTime) {
@@ -4122,7 +4161,7 @@ function checkReminders() {
                     );
 
                     // Audible missed-dose alert (plays once, same sound asset as reminder)
-                    playReminderSound();
+                    playMissedDoseAlert();
                     console.log(`[DoseBuddy] MISSED ALERT fired: ${missedAlertKey}`);
                 }
             });
@@ -4246,7 +4285,7 @@ function scheduleMedicineReminders() {
                                         `Missed dose: ${capturedMed.name}`,
                                         `Scheduled at ${capturedTime} — not taken.`
                                     );
-                                    playReminderSound();
+                                    playMissedDoseAlert();
                                     console.log(`[DoseBuddy] MISSED ALERT fired (missTimeout): ${missedAlertKey}`);
                                 }
 
@@ -6627,7 +6666,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 "Missed dose: Test Medicine",
                 "Scheduled at 10:00 — not taken. (dev simulation)"
             );
-            playReminderSound();
+            playMissedDoseAlert();
             if (btn) { btn.textContent = "Played ✓"; setTimeout(() => { if (btn) btn.textContent = "Simulate Miss"; }, 2000); }
             showResult("✓ Missed-dose alert simulated: notification created + sound played once.", "var(--success, #16a34a)");
             console.log(`[DoseBuddy] DEV missed-dose alert simulated: ${simKey}`);
