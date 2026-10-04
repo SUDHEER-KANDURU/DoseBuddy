@@ -1873,9 +1873,10 @@ img, canvas, svg, video { max-width: 100%; }
 }
 
 /* ── PART 4f: no horizontal overflow anywhere ────────────────── */
-* {
-  min-width: 0; /* flex/grid children collapse gracefully */
-}
+/* NOTE: a global `* { min-width: 0 }` was here previously but it let table
+   action-cells (width: 1%) collapse below their button content, causing the
+   Delete / Mark-taken buttons to render blank/clipped. Horizontal-overflow
+   prevention is handled by the scoped rules below instead. */
 
 @media (max-width: 768px) {
   .card,
