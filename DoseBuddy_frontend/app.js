@@ -3913,12 +3913,6 @@ function _playNotifSound(label) {
         return false;
     }
 
-    // 2. Require the element to have been primed by a real user gesture
-    if (!audioUnlocked) {
-        _logAudioThrottled(`[DoseBuddy] ${label}: playback blocked (audio not unlocked — click the page once)`);
-        return false;
-    }
-
     const audio = document.getElementById("notify-sound");
     if (!audio) return false;
     if (audio.error) {
@@ -3926,6 +3920,13 @@ function _playNotifSound(label) {
         return false;
     }
 
+    // 2. Attempt playback directly. When this is called from a genuine user
+    //    gesture (e.g. the Test button) the browser always allows it. When
+    //    called from a setTimeout (reminder/missed-dose) it works because the
+    //    element was primed by the first gesture (primeAudioElement) and the
+    //    tab has sticky user activation. We do NOT hard-gate on audioUnlocked —
+    //    doing so silently broke the Test button on its first click (the
+    //    document-level unlock listener fires AFTER the button handler).
     console.log(`[DoseBuddy] ${label}: attempting playback`);
     try {
         stopReminderAudio();
@@ -3936,15 +3937,18 @@ function _playNotifSound(label) {
         if (playPromise !== undefined && typeof playPromise.then === "function") {
             playPromise.then(() => {
                 console.log(`[DoseBuddy] ${label}: playback started`);
+                audioUnlocked = true;   // confirmed primed for future setTimeout calls
                 activeReminderAudio = audio;
             }).catch(err => {
                 console.warn(`[DoseBuddy] ${label}: playback blocked`, err.name, err.message);
-                // Re-prime on next gesture.
+                // Element not primed / no sticky activation — the document
+                // unlock listener will re-prime on the next genuine gesture.
                 audioUnlocked = false;
             });
         } else {
             // Old Safari — no promise returned, optimistically set
             activeReminderAudio = audio;
+            audioUnlocked = true;
         }
         return true;
     } catch (e) {
