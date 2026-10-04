@@ -649,40 +649,56 @@ async function parsePrescriptionWithAi(env: Env, base64: string, mimeType: strin
     // gemini-2.0-flash and gemini-1.5-* were shut down June 2026. Use current stable models.
     const models = [env.GEMINI_MODEL || "gemini-2.5-flash", "gemini-2.5-flash-lite"];
     for (const model of models) {
-      try {
-        const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${env.GEMINI_API_KEY}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{
-              parts: [
-                { text: PRESCRIPTION_PROMPT },
-                { inlineData: { mimeType: mimeType || "image/jpeg", data: base64 } }
-              ]
-            }],
-            generationConfig: {
-              temperature: 0.0
+      // Retry once on 503 (transient overload) before trying next model
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${env.GEMINI_API_KEY}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            signal: AbortSignal.timeout(25000),
+            body: JSON.stringify({
+              contents: [{
+                parts: [
+                  { text: PRESCRIPTION_PROMPT },
+                  { inlineData: { mimeType: mimeType || "image/jpeg", data: base64 } }
+                ]
+              }],
+              generationConfig: {
+                temperature: 0.0
+              }
+            })
+          });
+          if (resp.ok) {
+            const data = await resp.json<any>();
+            const candidate = data.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (candidate && candidate.trim()) {
+              rawJson = candidate.trim();
+              console.log(`[Prescription] Gemini ${model} returned ${candidate.length} chars`);
+              break;
+            } else {
+              const finishReason = data.candidates?.[0]?.finishReason || "unknown";
+              console.warn(`[Prescription] Gemini ${model} empty candidate. finishReason=${finishReason}`);
+              break; // empty candidate won't improve on retry — try next model
             }
-          })
-        });
-        if (resp.ok) {
-          const data = await resp.json<any>();
-          const candidate = data.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (candidate && candidate.trim()) {
-            rawJson = candidate.trim();
-            console.log(`[Prescription] Gemini ${model} returned ${candidate.length} chars`);
-            break;
+          } else if (resp.status === 503 && attempt === 0) {
+            console.warn(`[Prescription] Gemini ${model} 503 on attempt ${attempt+1}, retrying...`);
+            await new Promise(r => setTimeout(r, 1000));
+            continue; // retry once
           } else {
-            const finishReason = data.candidates?.[0]?.finishReason || "unknown";
-            console.warn(`[Prescription] Gemini ${model} empty candidate. finishReason=${finishReason}`);
+            const errBody = await resp.text().catch(() => "");
+            console.warn(`[Prescription] Gemini ${model} HTTP ${resp.status}: ${errBody.slice(0, 200)}`);
+            break; // non-retryable error — try next model
           }
-        } else {
-          const errBody = await resp.text().catch(() => "");
-          console.warn(`[Prescription] Gemini ${model} HTTP ${resp.status}: ${errBody.slice(0, 200)}`);
+        } catch (err: any) {
+          if (err?.name === "TimeoutError") {
+            console.warn(`[Prescription] Gemini ${model} timed out after 25s`);
+          } else {
+            console.error(`[Prescription] Gemini model ${model} error:`, err);
+          }
+          break; // error — try next model
         }
-      } catch (err) {
-        console.error(`[Prescription] Gemini model ${model} error:`, err);
       }
+      if (rawJson) break; // got result — stop trying models
     }
   }
 
@@ -771,53 +787,66 @@ async function parsePrescriptionBatchWithAi(
     // gemini-2.0-flash and gemini-1.5-* were shut down June 2026. Use current stable models.
     const models = [env.GEMINI_MODEL || "gemini-2.5-flash", "gemini-2.5-flash-lite"];
     for (const model of models) {
-      try {
-        const parts: any[] = [
-          {
-            text: PRESCRIPTION_PROMPT + (validMedia.length > 1
-              ? `\n\nMULTI-PAGE NOTE: The user has uploaded ${validMedia.length} files/pages belonging to ONE SINGLE prescription. Consolidate medications across all pages, preserve row-level schedule table assignments, deduplicate repeating items, and return one unified JSON result.`
-              : "")
-          }
-        ];
-
-        for (const item of validMedia) {
-          parts.push({
-            inlineData: {
-              mimeType: item.mimeType || "image/jpeg",
-              data: item.base64
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const parts: any[] = [
+            {
+              text: PRESCRIPTION_PROMPT + (validMedia.length > 1
+                ? `\n\nMULTI-PAGE NOTE: The user has uploaded ${validMedia.length} files/pages belonging to ONE SINGLE prescription. Consolidate medications across all pages, preserve row-level schedule table assignments, deduplicate repeating items, and return one unified JSON result.`
+                : "")
             }
+          ];
+
+          for (const item of validMedia) {
+            parts.push({
+              inlineData: {
+                mimeType: item.mimeType || "image/jpeg",
+                data: item.base64
+              }
+            });
+          }
+
+          const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${env.GEMINI_API_KEY}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            signal: AbortSignal.timeout(25000),
+            body: JSON.stringify({
+              contents: [{ parts }],
+              generationConfig: { temperature: 0.0 }
+            })
           });
-        }
 
-        const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${env.GEMINI_API_KEY}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{ parts }],
-            generationConfig: {
-              temperature: 0.0
+          if (resp.ok) {
+            const data = await resp.json<any>();
+            const candidate = data.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (candidate && candidate.trim()) {
+              const unifiedResult = normalizePrescriptionResult(candidate.trim());
+              console.log(`[Prescription] Batch Gemini ${model}: ${unifiedResult.medicines?.length ?? 0} medicines extracted`);
+              if (unifiedResult.medicines && unifiedResult.medicines.length > 0) {
+                return unifiedResult;
+              }
+            } else {
+              const finishReason = data.candidates?.[0]?.finishReason || "unknown";
+              console.warn(`[Prescription] Batch Gemini ${model} empty candidate finishReason=${finishReason}`);
             }
-          })
-        });
-
-        if (resp.ok) {
-          const data = await resp.json<any>();
-          const candidate = data.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (candidate && candidate.trim()) {
-            const unifiedResult = normalizePrescriptionResult(candidate.trim());
-            console.log(`[Prescription] Batch Gemini ${model}: ${unifiedResult.medicines?.length ?? 0} medicines extracted`);
-            if (unifiedResult.medicines && unifiedResult.medicines.length > 0) {
-              return unifiedResult;
-            }
+            break; // no point retrying an empty/zero result
+          } else if (resp.status === 503 && attempt === 0) {
+            console.warn(`[Prescription] Batch Gemini ${model} 503, retrying...`);
+            await new Promise(r => setTimeout(r, 1000));
+            continue;
           } else {
-            console.warn(`[Prescription] Batch Gemini ${model} empty candidate`);
+            const errBody = await resp.text().catch(() => "");
+            console.warn(`[Prescription] Batch Gemini ${model} HTTP ${resp.status}: ${errBody.slice(0, 200)}`);
+            break;
           }
-        } else {
-          const errBody = await resp.text().catch(() => "");
-          console.warn(`[Prescription] Batch Gemini ${model} HTTP ${resp.status}: ${errBody.slice(0, 200)}`);
+        } catch (err: any) {
+          if (err?.name === "TimeoutError") {
+            console.warn(`[Prescription] Batch Gemini ${model} timed out after 25s`);
+          } else {
+            console.error(`[Prescription] Batch Gemini ${model} error:`, err);
+          }
+          break;
         }
-      } catch (err) {
-        console.error(`[Prescription] Batch Gemini ${model} error:`, err);
       }
     }
   }
