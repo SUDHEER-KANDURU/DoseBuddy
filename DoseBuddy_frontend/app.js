@@ -180,6 +180,7 @@ const firedReminderKeys    = new Set();
 const firedMissedAlertKeys = new Set();
 let _lastScheduledDate = "";   // "" means "never scheduled yet"
 let _reminderIntervalId = null; // interval ID for checkReminders — cleared on logout
+let _lastCheckRemindersLog = 0; // throttle for checkReminders diagnostic log
 let weeklyChart = null;
 
 const ACTIVITY_TYPES = {
@@ -4023,11 +4024,19 @@ function playMissedDoseAlert() {
 }
 
 function triggerDoseNotification(med, dateStr, displayTime) {
-    if (!currentUser) return;
+    console.log(`[DoseBuddy] triggerDoseNotification — med:"${med?.name}" time:${displayTime} date:${dateStr} user:${currentUser?.id}`);
+
+    if (!currentUser) {
+        console.log("[DoseBuddy] REMINDER SKIPPED (no currentUser)");
+        return;
+    }
 
     // Check if medicine-reminders pref is enabled (defaults true)
     const prefs = loadFromLS(NOTIF_PREFS_KEY, { "medicine-reminders": true });
-    if (prefs["medicine-reminders"] === false) return;
+    if (prefs["medicine-reminders"] === false) {
+        console.log("[DoseBuddy] REMINDER SKIPPED (medicine-reminders preference is OFF)");
+        return;
+    }
 
     const key = `${currentUser.id}-${med.id}-${dateStr}-${displayTime}`;
 
@@ -4100,66 +4109,68 @@ function clearMissTimeouts() {
 // scheduleMedicineReminders() is the single scheduling system.
 // See scheduleMedicineReminders() below.
 
-// ─── Interval-based safety net (every 30 s) ───────────────────────────────
-// Purpose: catch any doses that fell through the setTimeout cracks (e.g.,
-// the page was refreshed right before a dose time, or the system clock
-// drifted).  This does NOT replace the setTimeout scheduling — it's a
-// last-resort check only.
-// IMPORTANT: this function must NOT call renderDashboard() or
-// scheduleMedicineReminders() — that would clearScheduledTimeouts() and
-// destroy all pending timeouts for the day.
+// ─── Interval-based reminder driver (every 30 s) ─────────────────────────────
+// This is the ONLY mechanism that fires reminders and missed-dose alerts.
+// The old setTimeout approach was wiped by every renderDashboard() call.
+// Strategy:
+//   - Runs every 30 s regardless of page state
+//   - diff = nowMinutes - doseMinutes (positive = past, negative = future)
+//   - Reminder: diff in [-1, 4]  → fires triggerDoseNotification (deduped)
+//   - Missed:   diff > 5  AND status PENDING → mark missed + alert (deduped)
 function checkReminders() {
-
     if (!currentUser) return;
     if (!medsCache || medsCache.length === 0) return;
 
     const now = new Date();
-    // Use local date string (matches how medsCacheDate is set in renderDashboard)
     const todayStr = [
         now.getFullYear(),
         String(now.getMonth() + 1).padStart(2, "0"),
         String(now.getDate()).padStart(2, "0")
     ].join("-");
 
-    if (medsCacheDate !== todayStr) return;
+    // Diagnostic — log every check so we can see the pipeline is running
+    const nowTs = Date.now();
+    if (nowTs - _lastCheckRemindersLog > 30000) {
+        const nowMinutesDbg = now.getHours() * 60 + now.getMinutes();
+        const times = medsCache.flatMap(m => (m.times || []).map(t => t.timeOfDay?.substring(0,5))).join(", ");
+        console.log(`[DoseBuddy] checkReminders tick — ${now.getHours()}:${String(now.getMinutes()).padStart(2,"0")} | medsCacheDate=${medsCacheDate} todayStr=${todayStr} | doses: [${times}]`);
+        _lastCheckRemindersLog = nowTs;
+    }
+
+    // If medsCacheDate is missing or stale, use medsCache anyway — it may be
+    // a same-day load where medsCacheDate was not set correctly.
+    // Only skip if cacheDate is a DIFFERENT day, not if it's missing.
+    if (medsCacheDate && medsCacheDate !== todayStr) {
+        console.log(`[DoseBuddy] checkReminders — SKIPPED: cache is for ${medsCacheDate}, not ${todayStr}`);
+        return;
+    }
 
     const nowMinutes = now.getHours() * 60 + now.getMinutes();
     const toMarkMissed = [];
 
     for (const med of medsCache) {
-
-        // Skip medicines that are not active today (end-date expiry guard)
         if (!isMedicationActiveToday(med, todayStr)) continue;
-
         if (!Array.isArray(med.times)) continue;
 
         for (const timeObj of med.times) {
-
             const rawTime = timeObj.timeOfDay || "";
             const displayTime = rawTime.substring(0, 5);
+            if (!displayTime || displayTime.length < 5) continue;
 
-            const parts = displayTime.split(":");
-            const h = parseInt(parts[0], 10);
-            const m = parseInt(parts[1], 10);
-            if (isNaN(h) || isNaN(m)) continue;
+            const [hh, mm] = displayTime.split(":").map(Number);
+            if (isNaN(hh) || isNaN(mm)) continue;
 
-            const doseMinutes = h * 60 + m;
-            const diff = nowMinutes - doseMinutes;
+            const doseMinutes = hh * 60 + mm;
+            const diff = nowMinutes - doseMinutes; // positive = past, negative = future
 
-            // Safety-net: fire a notification if the setTimeout was missed
-            // (page refresh, clock drift, etc.) and we're still within the
-            // reminder window.  firedReminderKeys prevents double-firing when
-            // the setTimeout already ran at the same minute.
-            // Window 0-5 min covers cases where the page loaded slightly after
-            // the scheduled minute (e.g. loaded 30s late → diff=1) AND closes
-            // the previous dead zone (diff 3-5 used to fire neither reminder
-            // nor missed). firedReminderKeys guarantees the key never fires twice.
-            if (diff >= 0 && diff <= 5) {
+            // ── Reminder window: [-1, 4] minutes around the dose time ────
+            // diff -1 catches early checks; diff 4 gives a 4-minute safety net.
+            if (diff >= -1 && diff <= 4) {
+                console.log(`[DoseBuddy] REMINDER WINDOW: ${med.name} at ${displayTime}, diff=${diff}min`);
                 triggerDoseNotification(med, todayStr, displayTime);
             }
 
-            // Mark missed if more than 5 minutes past and still PENDING.
-            // Do NOT call renderDashboard here — that would clear all timeouts.
+            // ── Missed: more than 5 min past and still PENDING ──────────
             if (diff > 5) {
                 const status = getDoseStatus(currentUser.id, med.id, todayStr, displayTime);
                 if (status !== "TAKEN" && status !== "MISSED") {
@@ -4182,52 +4193,39 @@ function checkReminders() {
         })
         .then(() => {
             invalidateDataCache("/logs/today/", "/logs/summary/", "/logs/adherence/", "/streaks/");
-            // Update in-memory logs so getDoseStatus returns MISSED immediately,
-            // then refresh just the UI display — do NOT call renderDashboard()
-            // as that would wipe all scheduled timeouts.
             toMarkMissed.forEach(entry => {
+                // Update in-memory logs so getDoseStatus returns MISSED immediately
                 const existing = logs.find(
                     l => (l.medId === entry.medicationId || l.medicationId === entry.medicationId)
                       && l.date === entry.date && l.time === entry.time
                 );
                 if (!existing) {
-                    logs.push({
-                        medicationId: entry.medicationId,
-                        date: entry.date,
-                        time: entry.time,
-                        status: "MISSED"
-                    });
+                    logs.push({ medicationId: entry.medicationId, date: entry.date, time: entry.time, status: "MISSED" });
                 } else {
                     existing.status = "MISSED";
                 }
 
-                // ── PENDING → MISSED transition: alert sound + notification ──
-                // Deterministic key prevents the sound replaying every 30-second poll.
+                // ── PENDING → MISSED: sound + in-app notification (once per dose) ──
                 const missedAlertKey = `missed-${entry.userId}-${entry.medicationId}-${entry.date}-${entry.time}`;
                 if (!firedMissedAlertKeys.has(missedAlertKey)) {
                     firedMissedAlertKeys.add(missedAlertKey);
-
-                    // Find the medicine name from medsCache for a useful notification
-                    const missedMed = medsCache.find(m => String(m.id) === String(entry.medicationId));
+                    const missedMed  = medsCache.find(m => String(m.id) === String(entry.medicationId));
                     const missedName = missedMed ? missedMed.name : "Medicine";
 
-                    // In-app notification (distinct from the reminder notification)
+                    // In-app notification — use addNotification (persists to localStorage)
+                    // Do NOT call updateMissedDoseNotifications here — it wipes the notifStore
+                    // type="missed" items and rebuilds with a different id scheme, destroying
+                    // the entry we just added.
                     addNotification(
                         "missed",
                         `Missed dose: ${missedName}`,
                         `Scheduled at ${entry.time} — not taken.`
                     );
-
-                    // Audible missed-dose alert (plays once, same sound asset as reminder)
                     playMissedDoseAlert();
-                    console.log(`[DoseBuddy] MISSED ALERT fired: ${missedAlertKey}`);
+                    console.log(`[DoseBuddy] MISSED ALERT: ${missedAlertKey}`);
                 }
             });
-            updateMissedDoseNotifications(medsCache, todayStr);
-            // Pass the updated in-memory logs[] so renderReports() reuses them
-            // rather than firing a fresh GET /logs/history fetch.  This avoids
-            // the race where the server-side missed-batch write might not yet be
-            // committed when the fresh fetch lands.
+            // Refresh charts and activity without wiping the notification store
             renderReports(logs);
             refreshActivityFeed();
         })
@@ -4235,137 +4233,37 @@ function checkReminders() {
     }
 }
 
-// ─── Single source of truth for dose-time scheduling ─────────────────────────
-// Rules:
-//   1. Called once per renderDashboard() — after medsCache is populated.
-//   2. Clears all previous timeouts before registering new ones.
-//   3. Only schedules FUTURE doses (delay > 0).
-//   4. No upper cap — handles doses up to 23:59 correctly.
-//   5. Captures `today` at schedule time; timeout callback uses the same value.
-//   6. After firing the reminder, waits 5 min and auto-marks missed if still PENDING.
+// ─── Single reminder driver (interval-based, replaces setTimeout scheduling) ──
+// Strategy: instead of fragile per-dose setTimeout timers (which were cleared by
+// every renderDashboard() call), we use ONE setInterval that wakes every 30 s and
+// checks every dose directly. This is the ONLY mechanism that fires reminders and
+// missed-dose alerts. scheduleMedicineReminders() is kept for backward compat but
+// now only does dedup-key housekeeping (no more setTimeout timers).
+//
+// Reminder fires when: nowMinutes - doseMinutes is in [0, 4] → grace window of 4 min
+// Missed fires when:   nowMinutes - doseMinutes > 5  AND status is PENDING
+// Both are deduped by their respective Sets.
+
 function scheduleMedicineReminders() {
-
-    clearScheduledTimeouts();
-
+    // Keep only day-rollover cleanup — no more setTimeout timers that get wiped
+    // by the next renderDashboard() call.
     if (!medsCache || medsCache.length === 0) return;
 
     const now = new Date();
-    // Capture the LOCAL date string at scheduling time so the callback closure
-    // references the same day the schedule was built for.
     const today = [
         now.getFullYear(),
         String(now.getMonth() + 1).padStart(2, "0"),
         String(now.getDate()).padStart(2, "0")
     ].join("-");
 
-    // Day-rollover detection:
-    //   Only clear firedReminderKeys when we are genuinely scheduling for a NEW
-    //   calendar day.  _lastScheduledDate starts as "" so the very first call
-    //   (today !== "") correctly skips the clear and just sets the date.
-    //   Subsequent calls on the same day (e.g. from renderDashboard after marking
-    //   a dose taken) leave firedReminderKeys intact — that is the whole point.
     if (_lastScheduledDate !== "" && _lastScheduledDate !== today) {
         firedReminderKeys.clear();
-        console.log("[DoseBuddy] New calendar day — cleared fired reminder keys.");
+        firedMissedAlertKeys.clear();
+        console.log("[DoseBuddy] New calendar day — cleared dedup keys.");
     }
     _lastScheduledDate = today;
-    // Guard: only schedule if the cache is for today
-    if (medsCacheDate !== today) return;
 
-    const nowMs = now.getTime();
-
-    for (const med of medsCache) {
-
-        // Skip medicines whose end date has passed (expiry guard)
-        if (!isMedicationActiveToday(med, today)) continue;
-
-        if (!Array.isArray(med.times)) continue;
-
-        for (const t of med.times) {
-
-            const timeStr = (t.timeOfDay || "").substring(0, 5);
-            if (!timeStr || timeStr.length < 5) continue;
-
-            const parts = timeStr.split(":");
-            const h = parseInt(parts[0], 10);
-            const m = parseInt(parts[1], 10);
-            if (isNaN(h) || isNaN(m)) continue;
-
-            const reminderTime = new Date(now);
-            reminderTime.setHours(h, m, 0, 0);
-
-            const delay = reminderTime.getTime() - nowMs;
-
-            // Skip past doses — checkReminders() handles missed detection
-            if (delay <= 0) continue;
-
-            // Capture loop variables explicitly for closure safety
-            const capturedMed     = med;
-            const capturedDate    = today;
-            const capturedTime    = timeStr;
-
-            const timeoutId = setTimeout(() => {
-                console.log(`[DoseBuddy] REMINDER FIRED: user=${currentUser && currentUser.id} med=${capturedMed.id} date=${capturedDate} time=${capturedTime} key=${currentUser ? currentUser.id + "-" + capturedMed.id + "-" + capturedDate + "-" + capturedTime : "?"}`);
-                triggerDoseNotification(capturedMed, capturedDate, capturedTime);
-
-                // 5-minute grace period, then auto-mark missed.
-                // Do NOT call renderDashboard() here — that would invoke
-                // scheduleMedicineReminders() → clearScheduledTimeouts() and
-                // destroy all other pending reminder timeouts for the day.
-                const missTimeout = setTimeout(() => {
-                    if (!currentUser) return;
-                    const status = getDoseStatus(currentUser.id, capturedMed.id, capturedDate, capturedTime);
-                    if (status !== "TAKEN" && status !== "MISSED") {
-                        markDoseMissed(currentUser.id, capturedMed.id, capturedDate, capturedTime)
-                             .then(() => {
-                                invalidateDataCache("/logs/today/", "/logs/summary/", "/logs/adherence/", "/streaks/");
-                                // Update in-memory logs directly (same pattern as checkReminders)
-                                const existing = logs.find(
-                                    l => (l.medId === capturedMed.id || l.medicationId === capturedMed.id)
-                                      && l.date === capturedDate && l.time === capturedTime
-                                );
-                                if (!existing) {
-                                    logs.push({ medicationId: capturedMed.id, date: capturedDate, time: capturedTime, status: "MISSED" });
-                                } else {
-                                    existing.status = "MISSED";
-                                }
-
-                                // ── PENDING → MISSED transition: alert sound + notification ──
-                                // This missTimeout usually fires before checkReminders, so the
-                                // alert MUST happen here (not only in checkReminders) or the user
-                                // never hears it. firedMissedAlertKeys guarantees it plays once
-                                // even if checkReminders later races the same transition.
-                                const missedAlertKey = `missed-${currentUser.id}-${capturedMed.id}-${capturedDate}-${capturedTime}`;
-                                if (!firedMissedAlertKeys.has(missedAlertKey)) {
-                                    firedMissedAlertKeys.add(missedAlertKey);
-                                    addNotification(
-                                        "missed",
-                                        `Missed dose: ${capturedMed.name}`,
-                                        `Scheduled at ${capturedTime} — not taken.`
-                                    );
-                                    playMissedDoseAlert();
-                                    console.log(`[DoseBuddy] MISSED ALERT fired (missTimeout): ${missedAlertKey}`);
-                                }
-
-                                updateMissedDoseNotifications(medsCache, capturedDate);
-                                renderReports(logs);
-                                refreshActivityFeed();
-                            });
-                    }
-                }, 5 * 60 * 1000);
-
-                // Track miss-window timers in a SEPARATE array so that
-                // clearScheduledTimeouts() (called when rescheduling on
-                // mark-taken) does NOT cancel an already-running miss window.
-                activeMissTimeouts.push(missTimeout);
-
-            }, delay);
-
-            scheduledTimeouts.push(timeoutId);
-        }
-    }
-
-    console.log(`[DoseBuddy] Scheduled ${scheduledTimeouts.length} reminder timeout(s) for ${today}.`);
+    console.log(`[DoseBuddy] scheduleMedicineReminders — ${medsCache.length} med(s) in cache for ${today}, medsCacheDate=${medsCacheDate}`);
 }
 
 // ─── AI request lock ────────────────────────────────────────────────────────
