@@ -4204,11 +4204,6 @@ function checkReminders() {
                     existing.status = "MISSED";
                 }
 
-                // ── Update the status cell in the DOM immediately ──────────
-                // This changes "Due now" → "Missed" without re-rendering
-                // the entire dashboard (which would wipe all timeouts).
-                _updateDashboardStatusCell(entry.medicationId, entry.time, "MISSED");
-
                 // ── PENDING → MISSED: sound + in-app notification (once per dose) ──
                 const missedAlertKey = `missed-${entry.userId}-${entry.medicationId}-${entry.date}-${entry.time}`;
                 if (!firedMissedAlertKeys.has(missedAlertKey)) {
@@ -4226,9 +4221,11 @@ function checkReminders() {
                     console.log(`[DoseBuddy] MISSED ALERT: ${missedAlertKey}`);
                 }
             });
-            // Refresh charts and activity without wiping the notification store
-            renderReports(logs);
-            refreshActivityFeed();
+            // Re-render dashboard after 1.5 s so "Due now" → "Missed" updates.
+            // Short delay lets the DB write commit before refetch.
+            setTimeout(() => {
+                renderDashboard().catch(e => console.warn("[DoseBuddy] post-missed renderDashboard:", e));
+            }, 1500);
         })
         .catch(err => console.error("[DoseBuddy] checkReminders missed-batch error:", err));
     }
