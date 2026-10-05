@@ -3854,43 +3854,11 @@ function stopReminderAudio() {
     }
 }
 
-// ── Web Audio API: reliable alert tone (no autoplay quirks) ──────────────────
-// The AudioContext MUST be created inside a user gesture (Chrome blocks it
-// otherwise). We create it lazily in primeAudioElement() (the gesture handler)
-// and store it in _audioCtx. _playAlertTone() uses it only after it has been
-// created and resumed inside a gesture.
-let _audioCtx = null;
-
-// Short two-note alert tone (A5 → D6). Used for both reminder and missed-dose.
-// Returns true if playback was initiated, false if AudioContext not ready.
-function _playAlertTone() {
-    if (!_audioCtx || _audioCtx.state === "suspended") {
-        // Context not ready (no gesture yet, or suspended after inactivity).
-        // Fall through to mp3 fallback in _playNotifSound.
-        console.log("[DoseBuddy] alert tone: AudioContext not ready (state=" + (_audioCtx?.state || "null") + ")");
-        return false;
-    }
-    try {
-        const t = _audioCtx.currentTime;
-        const osc  = _audioCtx.createOscillator();
-        const gain = _audioCtx.createGain();
-        osc.type = "sine";
-        osc.frequency.setValueAtTime(880,  t);          // A5
-        osc.frequency.setValueAtTime(1175, t + 0.20);   // D6
-        gain.gain.setValueAtTime(0.0001, t);
-        gain.gain.exponentialRampToValueAtTime(0.4,  t + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.6);
-        osc.connect(gain);
-        gain.connect(_audioCtx.destination);
-        osc.start(t);
-        osc.stop(t + 0.65);
-        console.log("[DoseBuddy] alert tone: playing");
-        return true;
-    } catch (e) {
-        console.warn("[DoseBuddy] alert tone failed:", e.message);
-        return false;
-    }
-}
+// ── Audio: No AudioContext (avoids 'not allowed to start' errors) ────────────
+// We use only the <audio id="notify-sound"> element. The element is primed
+// (muted play → pause) on the first user gesture so that later unmuted calls
+// from setTimeout / setInterval succeed. No Web Audio API is used.
+let _audioCtx = null; // kept for backward compat, never used
 
 // ── Audio unlock ───────────────────────────────────────────────────────────
 // Browsers block unmuted audio.play() until the user has interacted with the
@@ -3907,21 +3875,6 @@ function _playAlertTone() {
 // activation, so it caused "play() failed because the user didn't interact"
 // errors. Removed.
 function primeAudioElement() {
-    // ── Create AND resume the AudioContext inside the gesture ───────────────
-    // MUST be done here (not in _playAlertTone) because Chrome blocks
-    // new AudioContext() outside a user-activation event.
-    if (!_audioCtx) {
-        try {
-            const AC = window.AudioContext || window.webkitAudioContext;
-            if (AC) _audioCtx = new AC();
-        } catch (e) { _audioCtx = null; }
-    }
-    if (_audioCtx && _audioCtx.state === "suspended") {
-        _audioCtx.resume().then(() => {
-            console.log("[DoseBuddy] AudioContext resumed");
-        }).catch(() => {});
-    }
-
     if (audioUnlocked) return Promise.resolve(true);
     const audio = document.getElementById("notify-sound");
     if (!audio) return Promise.resolve(false);
@@ -3977,34 +3930,24 @@ function _playNotifSound(label) {
         return false;
     }
 
-    // 2. Attempt playback. PRIMARY path is the Web Audio API tone — once the
-    //    AudioContext was resumed inside the first gesture it plays reliably
-    //    from setTimeout (reminders/missed-dose) for the whole session, with
-    //    no HTMLAudioElement autoplay restrictions. The mp3 is a fallback only
-    //    when Web Audio is unavailable, to avoid double-sound overlap.
+    // 2. Play the mp3 directly — no AudioContext, no tone.
+    // The element was primed (muted play → pause) on the first user gesture
+    // so unmuted play() from setInterval succeeds in Chrome/Edge/Safari.
     console.log(`[DoseBuddy] ${label}: attempting playback`);
-    let played = _playAlertTone();
-    if (played) {
-        console.log(`[DoseBuddy] ${label}: playback started (tone)`);
-        audioUnlocked = true;
-        return true;
-    }
-
-    // Fallback: HTMLAudioElement mp3 (gesture contexts always work; setTimeout
-    // works if the element was primed + tab has sticky activation).
     try {
         stopReminderAudio();
         audio.currentTime = 0;
         audio.volume = 1;
+        audio.muted = false;
         audio.loop = false;
         const playPromise = audio.play();
         if (playPromise !== undefined && typeof playPromise.then === "function") {
             playPromise.then(() => {
-                console.log(`[DoseBuddy] ${label}: playback started (mp3)`);
+                console.log(`[DoseBuddy] ${label}: playback started`);
                 audioUnlocked = true;
                 activeReminderAudio = audio;
             }).catch(err => {
-                console.warn(`[DoseBuddy] ${label}: playback blocked`, err.name, err.message);
+                console.warn(`[DoseBuddy] ${label}: playback blocked — ${err.name}: ${err.message}`);
                 audioUnlocked = false;
             });
         } else {
@@ -4013,7 +3956,7 @@ function _playNotifSound(label) {
         }
         return true;
     } catch (e) {
-        console.warn(`[DoseBuddy] ${label}: playback blocked`, e.message);
+        console.warn(`[DoseBuddy] ${label}: playback error — ${e.message}`);
         return false;
     }
 }
@@ -4203,18 +4146,26 @@ function checkReminders() {
         for (const timeObj of med.times) {
             const rawTime = timeObj.timeOfDay || "";
             const displayTime = rawTime.substring(0, 5);
-            if (!displayTime || displayTime.length < 5) continue;
+            if (!displayTime || displayTime.length < 5) {
+                console.log(`[DoseBuddy] checkReminders SKIP: med="${med.name}" rawTime="${rawTime}"`);
+                continue;
+            }
 
             const [hh, mm] = displayTime.split(":").map(Number);
-            if (isNaN(hh) || isNaN(mm)) continue;
+            if (isNaN(hh) || isNaN(mm)) {
+                console.log(`[DoseBuddy] checkReminders SKIP parse: med="${med.name}" time="${displayTime}"`);
+                continue;
+            }
 
             const doseMinutes = hh * 60 + mm;
             const diff = nowMinutes - doseMinutes; // positive = past, negative = future
 
+            // Always log so we can see exactly what's happening (not throttled)
+            console.log(`[DoseBuddy] CHECK: med="${med.name}" dose=${displayTime} now=${nowMinutes}min dose=${doseMinutes}min diff=${diff}`);
+
             // ── Reminder window: [-1, 4] minutes around the dose time ────
-            // diff -1 catches early checks; diff 4 gives a 4-minute safety net.
             if (diff >= -1 && diff <= 4) {
-                console.log(`[DoseBuddy] REMINDER WINDOW: ${med.name} at ${displayTime}, diff=${diff}min`);
+                console.log(`[DoseBuddy] REMINDER WINDOW HIT: ${med.name} at ${displayTime}, diff=${diff}`);
                 triggerDoseNotification(med, todayStr, displayTime);
             }
 
