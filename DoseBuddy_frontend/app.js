@@ -3855,39 +3855,36 @@ function stopReminderAudio() {
 }
 
 // ── Web Audio API: reliable alert tone (no autoplay quirks) ──────────────────
-// Once a single AudioContext is resumed inside a genuine user gesture, tones
-// played via OscillatorNode work from ANY context (including setTimeout) for
-// the rest of the session. This is the most reliable cross-browser way to
-// play a scheduled alert sound. We keep notify-sound.mp3 as a secondary path.
+// The AudioContext MUST be created inside a user gesture (Chrome blocks it
+// otherwise). We create it lazily in primeAudioElement() (the gesture handler)
+// and store it in _audioCtx. _playAlertTone() uses it only after it has been
+// created and resumed inside a gesture.
 let _audioCtx = null;
-function _getAudioCtx() {
-    if (!_audioCtx) {
-        try {
-            const AC = window.AudioContext || window.webkitAudioContext;
-            if (AC) _audioCtx = new AC();
-        } catch (e) { _audioCtx = null; }
-    }
-    return _audioCtx;
-}
 
-// Short two-note alert tone (A5 → E6). Used for both reminder and missed-dose.
+// Short two-note alert tone (A5 → D6). Used for both reminder and missed-dose.
+// Returns true if playback was initiated, false if AudioContext not ready.
 function _playAlertTone() {
-    const ctx = _getAudioCtx();
-    if (!ctx) return false;
-    if (ctx.state === "suspended") { ctx.resume().catch(() => {}); }
+    if (!_audioCtx || _audioCtx.state === "suspended") {
+        // Context not ready (no gesture yet, or suspended after inactivity).
+        // Fall through to mp3 fallback in _playNotifSound.
+        console.log("[DoseBuddy] alert tone: AudioContext not ready (state=" + (_audioCtx?.state || "null") + ")");
+        return false;
+    }
     try {
-        const t = ctx.currentTime;
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
+        const t = _audioCtx.currentTime;
+        const osc  = _audioCtx.createOscillator();
+        const gain = _audioCtx.createGain();
         osc.type = "sine";
-        osc.frequency.setValueAtTime(880, t);          // A5
-        osc.frequency.setValueAtTime(1175, t + 0.18);  // D6
+        osc.frequency.setValueAtTime(880,  t);          // A5
+        osc.frequency.setValueAtTime(1175, t + 0.20);   // D6
         gain.gain.setValueAtTime(0.0001, t);
-        gain.gain.exponentialRampToValueAtTime(0.35, t + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.55);
-        osc.connect(gain).connect(ctx.destination);
+        gain.gain.exponentialRampToValueAtTime(0.4,  t + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.6);
+        osc.connect(gain);
+        gain.connect(_audioCtx.destination);
         osc.start(t);
-        osc.stop(t + 0.6);
+        osc.stop(t + 0.65);
+        console.log("[DoseBuddy] alert tone: playing");
         return true;
     } catch (e) {
         console.warn("[DoseBuddy] alert tone failed:", e.message);
@@ -3910,11 +3907,21 @@ function _playAlertTone() {
 // activation, so it caused "play() failed because the user didn't interact"
 // errors. Removed.
 function primeAudioElement() {
-    // Resume the Web Audio context inside the gesture (required for tones).
-    const ctx = _getAudioCtx();
-    if (ctx && ctx.state === "suspended") {
-        ctx.resume().catch(() => {});
+    // ── Create AND resume the AudioContext inside the gesture ───────────────
+    // MUST be done here (not in _playAlertTone) because Chrome blocks
+    // new AudioContext() outside a user-activation event.
+    if (!_audioCtx) {
+        try {
+            const AC = window.AudioContext || window.webkitAudioContext;
+            if (AC) _audioCtx = new AC();
+        } catch (e) { _audioCtx = null; }
     }
+    if (_audioCtx && _audioCtx.state === "suspended") {
+        _audioCtx.resume().then(() => {
+            console.log("[DoseBuddy] AudioContext resumed");
+        }).catch(() => {});
+    }
+
     if (audioUnlocked) return Promise.resolve(true);
     const audio = document.getElementById("notify-sound");
     if (!audio) return Promise.resolve(false);
@@ -4109,6 +4116,47 @@ function clearMissTimeouts() {
 // scheduleMedicineReminders() is the single scheduling system.
 // See scheduleMedicineReminders() below.
 
+// ── Update a single status cell in the dashboard table without re-rendering ──
+// Called after mark-missed-batch so "Due now" → "Missed" immediately.
+function _updateDashboardStatusCell(medId, timeStr, newStatus) {
+    try {
+        const rows = document.querySelectorAll(`tr.med-row-${medId}`);
+        rows.forEach(tr => {
+            // Find the time cell (td:nth-child(1)) and check it matches
+            const timeCell = tr.querySelector("td:first-child");
+            if (!timeCell) return;
+            const rowTime = (timeCell.textContent || "").trim();
+            if (rowTime !== timeStr) return;
+
+            // Find the status pill (td:nth-child(5) .status-pill)
+            const statusCell = tr.querySelector("td:nth-child(5)");
+            if (!statusCell) return;
+            const pill = statusCell.querySelector(".status-pill");
+            if (!pill) return;
+
+            if (newStatus === "MISSED") {
+                pill.className = "status-pill status-missed";
+                pill.textContent = "Missed";
+                // Also disable the Mark taken button and show Missed button
+                const actionCell = tr.querySelector("td:nth-child(6)");
+                if (actionCell) {
+                    const takeBtn = actionCell.querySelector(".action-btn-take");
+                    if (takeBtn) {
+                        takeBtn.textContent = "Missed";
+                        takeBtn.className = "action-btn action-btn-disabled";
+                        takeBtn.disabled = true;
+                    }
+                }
+                // Update the left accent stripe color
+                tr.style.setProperty("--row-accent", "var(--danger, #dc2626)");
+            }
+        });
+    } catch (e) {
+        // DOM update failed — non-critical, dashboard will reflect correct
+        // state on next renderDashboard call.
+    }
+}
+
 // ─── Interval-based reminder driver (every 30 s) ─────────────────────────────
 // This is the ONLY mechanism that fires reminders and missed-dose alerts.
 // The old setTimeout approach was wiped by every renderDashboard() call.
@@ -4205,6 +4253,11 @@ function checkReminders() {
                     existing.status = "MISSED";
                 }
 
+                // ── Update the status cell in the DOM immediately ──────────
+                // This changes "Due now" → "Missed" without re-rendering
+                // the entire dashboard (which would wipe all timeouts).
+                _updateDashboardStatusCell(entry.medicationId, entry.time, "MISSED");
+
                 // ── PENDING → MISSED: sound + in-app notification (once per dose) ──
                 const missedAlertKey = `missed-${entry.userId}-${entry.medicationId}-${entry.date}-${entry.time}`;
                 if (!firedMissedAlertKeys.has(missedAlertKey)) {
@@ -4212,10 +4265,7 @@ function checkReminders() {
                     const missedMed  = medsCache.find(m => String(m.id) === String(entry.medicationId));
                     const missedName = missedMed ? missedMed.name : "Medicine";
 
-                    // In-app notification — use addNotification (persists to localStorage)
-                    // Do NOT call updateMissedDoseNotifications here — it wipes the notifStore
-                    // type="missed" items and rebuilds with a different id scheme, destroying
-                    // the entry we just added.
+                    // In-app notification — addNotification persists to localStorage
                     addNotification(
                         "missed",
                         `Missed dose: ${missedName}`,
