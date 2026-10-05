@@ -1,4 +1,4 @@
-const API_BASE_URL = (window.APP_CONFIG && window.APP_CONFIG.apiBaseUrl)
+﻿const API_BASE_URL = (window.APP_CONFIG && window.APP_CONFIG.apiBaseUrl)
     ? window.APP_CONFIG.apiBaseUrl
     : "https://dosebuddy.sudheerkanduru-5588.workers.dev";
 const API_BASE = (window.APP_CONFIG && window.APP_CONFIG.apiBase)
@@ -1688,6 +1688,7 @@ function setupNav() {
         firedMissedAlertKeys.clear();
         _lastScheduledDate = "";
         clearScheduledTimeouts();
+        _clearDoseTimers(); // cancel all exact-time reminder + missed-dose timers
         clearMissTimeouts(); // Stop any pending 5-min miss-window timers
         // Stop the checkReminders safety-net interval — it is restarted on next login
         if (_reminderIntervalId) { clearInterval(_reminderIntervalId); _reminderIntervalId = null; }
@@ -2303,11 +2304,8 @@ async function deleteMedication(medId) {
             medsCache = medsCache.filter(m => m.id !== medId);
         }
 
-        // Cancel any scheduled reminder for the deleted medicine right away.
-        // Note: scheduledTimeouts stores raw IDs without medId metadata, so we
-        // cannot cancel selectively. The background renderDashboard() call below
-        // will rebuild scheduledTimeouts from the updated medsCache (which no longer
-        // contains the deleted med), effectively clearing its reminder.
+        // Cancel exact-time reminder + missed-dose timers for this medicine immediately.
+        _cancelDoseTimersForMed(medId);
 
         invalidateDataCache("/medications/", "/logs/", "/streaks/");
 
@@ -3855,26 +3853,69 @@ function stopReminderAudio() {
 }
 
 // ── Audio: No AudioContext (avoids 'not allowed to start' errors) ────────────
-// We use only the <audio id="notify-sound"> element. The element is primed
-// (muted play → pause) on the first user gesture so that later unmuted calls
-// from setTimeout / setInterval succeed. No Web Audio API is used.
-let _audioCtx = null; // kept for backward compat, never used
+// ── Audio system ──────────────────────────────────────────────────────────────
+// DoseBuddy uses Web Audio API as PRIMARY (no autoplay issues once the context
+// is created and resumed inside a user gesture) with the notify-sound.mp3
+// element as FALLBACK.
+//
+// KEY RULE: AudioContext MUST be created inside a user gesture. We do it lazily
+// inside primeAudioElement() which is called from the gesture listeners.
+// _playAlertTone() checks the context is ready before using it.
 
-// ── Audio unlock ───────────────────────────────────────────────────────────
-// Browsers block unmuted audio.play() until the user has interacted with the
-// page AND the audio element has been primed. We prime the element on the
-// FIRST genuine user gesture (click/pointerdown/touchstart/keydown) using a
-// MUTED play() — muted autoplay is ALWAYS allowed, so priming is guaranteed
-// even if the gesture timing is imperfect. After priming, unmuted play() from
-// setTimeout (reminders/missed-dose alerts) works for the rest of the session.
-//
-// We ALSO resume a single Web Audio AudioContext here, inside the gesture —
-// that unlocks oscillator-based tones for setTimeout playback all session.
-//
-// NOTE: 'scroll' was previously in the listener list but is NOT a user
-// activation, so it caused "play() failed because the user didn't interact"
-// errors. Removed.
+let _audioCtx   = null;   // created inside first gesture
+let _audioReady = false;  // true once AudioContext is running
+
+// Create the AudioContext (called only from inside a gesture).
+function _ensureAudioCtx() {
+    if (_audioCtx) return;
+    try {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (AC) { _audioCtx = new AC(); }
+    } catch (e) { _audioCtx = null; }
+}
+
+// A two-note beep tone: 880 Hz (A5) → 1175 Hz (D6), 600 ms total.
+// Requires AudioContext to be in "running" state.
+function _playAlertTone() {
+    if (!_audioCtx || _audioCtx.state !== "running") return false;
+    try {
+        const t    = _audioCtx.currentTime;
+        const osc  = _audioCtx.createOscillator();
+        const gain = _audioCtx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(880,  t);
+        osc.frequency.setValueAtTime(1175, t + 0.22);
+        gain.gain.setValueAtTime(0.0001, t);
+        gain.gain.exponentialRampToValueAtTime(0.45, t + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.60);
+        osc.connect(gain);
+        gain.connect(_audioCtx.destination);
+        osc.start(t);
+        osc.stop(t + 0.65);
+        return true;
+    } catch (e) {
+        console.warn("[DoseBuddy] alert tone error:", e.message);
+        return false;
+    }
+}
+
+// Prime the audio system. Must be called from inside a genuine user gesture
+// (click / pointerdown / touchstart / keydown).  Does two things:
+//   1. Creates and resumes the AudioContext (Web Audio primary path).
+//   2. Primes the <audio> element with a muted play (mp3 fallback path).
 function primeAudioElement() {
+    // ── Step 1: Web Audio context ──────────────────────────────────────────
+    _ensureAudioCtx();
+    if (_audioCtx && _audioCtx.state === "suspended") {
+        _audioCtx.resume().then(() => {
+            _audioReady = (_audioCtx.state === "running");
+            if (_audioReady) console.log("[DoseBuddy] AudioContext running (Web Audio ready)");
+        }).catch(() => {});
+    } else if (_audioCtx && _audioCtx.state === "running") {
+        _audioReady = true;
+    }
+
+    // ── Step 2: HTMLAudioElement muted-prime (mp3 fallback) ───────────────
     if (audioUnlocked) return Promise.resolve(true);
     const audio = document.getElementById("notify-sound");
     if (!audio) return Promise.resolve(false);
@@ -3887,67 +3928,56 @@ function primeAudioElement() {
             audio.currentTime = 0;
             audio.muted = false;
             audioUnlocked = true;
-            console.log("[DoseBuddy] Audio unlocked");
+            console.log("[DoseBuddy] Audio unlocked (mp3 element primed)");
             return true;
         }).catch(err => {
             audio.muted = false;
-            // Autoplay still blocked — will retry on next genuine gesture.
-            console.log("[DoseBuddy] Audio unlock attempt blocked:", err.message);
+            console.log("[DoseBuddy] Audio mp3-prime blocked:", err.message);
             return false;
         });
     }
-    // Old browsers with no promise — optimistically consider unlocked.
-    audio.muted = false;
+    audio.muted  = false;
     audioUnlocked = true;
     return Promise.resolve(true);
 }
 
-// Throttle repeated audio log messages so checkReminders (every 30s) can't spam.
-let _lastAudioLogTs = 0;
-function _logAudioThrottled(msg) {
-    const now = Date.now();
-    if (now - _lastAudioLogTs > 60000) {
-        console.log(msg);
-        _lastAudioLogTs = now;
-    }
-}
-
-// ── Shared, authoritative notification-sound player ──────────────────────────
-// Used by BOTH playReminderSound() (scheduled reminder) and
-// playMissedDoseAlert() (PENDING → MISSED). One implementation, two entry points.
+// ── Unified alert player ──────────────────────────────────────────────────────
+// Called by playReminderSound() and playMissedDoseAlert().
+// Tries Web Audio tone first (most reliable from setTimeout); falls back to mp3.
 function _playNotifSound(label) {
-    // 1. Respect user preference
     const prefs = loadFromLS(NOTIF_PREFS_KEY, { "sound-alerts": true });
     if (prefs["sound-alerts"] === false) {
-        _logAudioThrottled(`[DoseBuddy] ${label}: sound alerts disabled`);
+        console.log(`[DoseBuddy] ${label}: sound alerts disabled`);
         return false;
     }
 
+    console.log(`[DoseBuddy] ${label}: attempting playback (audioReady=${_audioReady} audioUnlocked=${audioUnlocked})`);
+
+    // PRIMARY: Web Audio tone (works from setTimeout once context is running)
+    if (_audioReady && _playAlertTone()) {
+        console.log(`[DoseBuddy] ${label}: Web Audio tone playing`);
+        return true;
+    }
+
+    // FALLBACK: HTMLAudioElement mp3
     const audio = document.getElementById("notify-sound");
-    if (!audio) return false;
-    if (audio.error) {
-        console.warn(`[DoseBuddy] ${label}: audio element error`, audio.error.code, audio.error.message);
-        return false;
-    }
+    if (!audio) { console.warn(`[DoseBuddy] ${label}: no audio element`); return false; }
+    if (audio.error) { console.warn(`[DoseBuddy] ${label}: audio element error ${audio.error.code}`); return false; }
 
-    // 2. Play the mp3 directly — no AudioContext, no tone.
-    // The element was primed (muted play → pause) on the first user gesture
-    // so unmuted play() from setInterval succeeds in Chrome/Edge/Safari.
-    console.log(`[DoseBuddy] ${label}: attempting playback`);
     try {
         stopReminderAudio();
         audio.currentTime = 0;
         audio.volume = 1;
-        audio.muted = false;
-        audio.loop = false;
-        const playPromise = audio.play();
-        if (playPromise !== undefined && typeof playPromise.then === "function") {
-            playPromise.then(() => {
-                console.log(`[DoseBuddy] ${label}: playback started`);
-                audioUnlocked = true;
+        audio.muted  = false;
+        audio.loop   = false;
+        const pp = audio.play();
+        if (pp && typeof pp.then === "function") {
+            pp.then(() => {
+                console.log(`[DoseBuddy] ${label}: mp3 playback started`);
+                audioUnlocked     = true;
                 activeReminderAudio = audio;
             }).catch(err => {
-                console.warn(`[DoseBuddy] ${label}: playback blocked — ${err.name}: ${err.message}`);
+                console.warn(`[DoseBuddy] ${label}: mp3 blocked — ${err.name}: ${err.message}`);
                 audioUnlocked = false;
             });
         } else {
@@ -3956,7 +3986,7 @@ function _playNotifSound(label) {
         }
         return true;
     } catch (e) {
-        console.warn(`[DoseBuddy] ${label}: playback error — ${e.message}`);
+        console.warn(`[DoseBuddy] ${label}: mp3 error — ${e.message}`);
         return false;
     }
 }
@@ -4100,169 +4130,262 @@ function _updateDashboardStatusCell(medId, timeStr, newStatus) {
     }
 }
 
-// ─── Interval-based reminder driver (every 30 s) ─────────────────────────────
-// This is the ONLY mechanism that fires reminders and missed-dose alerts.
-// The old setTimeout approach was wiped by every renderDashboard() call.
-// Strategy:
-//   - Runs every 30 s regardless of page state
-//   - diff = nowMinutes - doseMinutes (positive = past, negative = future)
-//   - Reminder: diff in [-1, 4]  → fires triggerDoseNotification (deduped)
-//   - Missed:   diff > 5  AND status PENDING → mark missed + alert (deduped)
-function checkReminders() {
-    if (!currentUser) return;
-    if (!medsCache || medsCache.length === 0) return;
+// ─── Exact-time scheduler + safety-net ───────────────────────────────────────
+// Architecture (per the product requirement):
+//
+//   PRIMARY:  scheduleMedicineReminders() sets an exact setTimeout for each
+//             future dose time AND a second setTimeout (reminder + GRACE_MIN)
+//             for the missed-dose check.  Both fire at the calculated wall-clock
+//             time — NOT "whenever the next 30-second poll happens to run".
+//
+//   SECONDARY: checkReminders() (every 30 s) acts as a safety net to catch
+//              doses whose timeouts were lost (page refresh, clock drift, tab
+//              throttling). It also handles page-load catch-up for doses that
+//              should already have fired.
+//
+//   TERTIARY:  visibilitychange listener reconciles anything that fired while
+//              the tab was hidden/backgrounded.
+//
+// Grace period before a dose is considered missed:
+const MISSED_GRACE_MIN = 5;   // minutes
 
-    const now = new Date();
-    const todayStr = [
-        now.getFullYear(),
-        String(now.getMonth() + 1).padStart(2, "0"),
-        String(now.getDate()).padStart(2, "0")
-    ].join("-");
+// Per-dose timer registry — keyed by "medId-date-time"
+// Value: { reminderId, missedId } — TimeoutID values
+const _doseTimers = {};
 
-    // Diagnostic — log every check so we can see the pipeline is running
-    const nowTs = Date.now();
-    if (nowTs - _lastCheckRemindersLog > 30000) {
-        const nowMinutesDbg = now.getHours() * 60 + now.getMinutes();
-        const times = medsCache.flatMap(m => (m.times || []).map(t => t.timeOfDay?.substring(0,5))).join(", ");
-        console.log(`[DoseBuddy] checkReminders tick — ${now.getHours()}:${String(now.getMinutes()).padStart(2,"0")} | medsCacheDate=${medsCacheDate} todayStr=${todayStr} | doses: [${times}]`);
-        _lastCheckRemindersLog = nowTs;
-    }
-
-    // If medsCacheDate is missing or stale, use medsCache anyway — it may be
-    // a same-day load where medsCacheDate was not set correctly.
-    // Only skip if cacheDate is a DIFFERENT day, not if it's missing.
-    if (medsCacheDate && medsCacheDate !== todayStr) {
-        console.log(`[DoseBuddy] checkReminders — SKIPPED: cache is for ${medsCacheDate}, not ${todayStr}`);
-        return;
-    }
-
-    const nowMinutes = now.getHours() * 60 + now.getMinutes();
-    const toMarkMissed = [];
-
-    for (const med of medsCache) {
-        if (!isMedicationActiveToday(med, todayStr)) continue;
-        if (!Array.isArray(med.times)) continue;
-
-        for (const timeObj of med.times) {
-            const rawTime = timeObj.timeOfDay || "";
-            const displayTime = rawTime.substring(0, 5);
-            if (!displayTime || displayTime.length < 5) {
-                console.log(`[DoseBuddy] checkReminders SKIP: med="${med.name}" rawTime="${rawTime}"`);
-                continue;
-            }
-
-            const [hh, mm] = displayTime.split(":").map(Number);
-            if (isNaN(hh) || isNaN(mm)) {
-                console.log(`[DoseBuddy] checkReminders SKIP parse: med="${med.name}" time="${displayTime}"`);
-                continue;
-            }
-
-            const doseMinutes = hh * 60 + mm;
-            const diff = nowMinutes - doseMinutes; // positive = past, negative = future
-
-            // Always log so we can see exactly what's happening (not throttled)
-            console.log(`[DoseBuddy] CHECK: med="${med.name}" dose=${displayTime} now=${nowMinutes}min dose=${doseMinutes}min diff=${diff}`);
-
-            // ── Reminder window: [-1, 4] minutes around the dose time ────
-            if (diff >= -1 && diff <= 4) {
-                console.log(`[DoseBuddy] REMINDER WINDOW HIT: ${med.name} at ${displayTime}, diff=${diff}`);
-                triggerDoseNotification(med, todayStr, displayTime);
-            }
-
-            // ── Missed: more than 5 min past and still PENDING ──────────
-            if (diff > 5) {
-                const status = getDoseStatus(currentUser.id, med.id, todayStr, displayTime);
-                if (status !== "TAKEN" && status !== "MISSED") {
-                    toMarkMissed.push({
-                        userId:       currentUser.id,
-                        medicationId: med.id,
-                        date:         todayStr,
-                        time:         displayTime
-                    });
-                }
-            }
-        }
-    }
-
-    if (toMarkMissed.length > 0) {
-        authFetch(`${API_BASE}/logs/mark-missed-batch`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(toMarkMissed),
-        })
-        .then(() => {
-            invalidateDataCache("/logs/today/", "/logs/summary/", "/logs/adherence/", "/streaks/");
-            toMarkMissed.forEach(entry => {
-                // Update in-memory logs so getDoseStatus returns MISSED immediately
-                const existing = logs.find(
-                    l => (l.medId === entry.medicationId || l.medicationId === entry.medicationId)
-                      && l.date === entry.date && l.time === entry.time
-                );
-                if (!existing) {
-                    logs.push({ medicationId: entry.medicationId, date: entry.date, time: entry.time, status: "MISSED" });
-                } else {
-                    existing.status = "MISSED";
-                }
-
-                // ── PENDING → MISSED: sound + in-app notification (once per dose) ──
-                const missedAlertKey = `missed-${entry.userId}-${entry.medicationId}-${entry.date}-${entry.time}`;
-                if (!firedMissedAlertKeys.has(missedAlertKey)) {
-                    firedMissedAlertKeys.add(missedAlertKey);
-                    const missedMed  = medsCache.find(m => String(m.id) === String(entry.medicationId));
-                    const missedName = missedMed ? missedMed.name : "Medicine";
-
-                    // In-app notification — addNotification persists to localStorage
-                    addNotification(
-                        "missed",
-                        `Missed dose: ${missedName}`,
-                        `Scheduled at ${entry.time} — not taken.`
-                    );
-                    playMissedDoseAlert();
-                    console.log(`[DoseBuddy] MISSED ALERT: ${missedAlertKey}`);
-                }
-            });
-            // Re-render dashboard after 1.5 s so "Due now" → "Missed" updates.
-            // Short delay lets the DB write commit before refetch.
-            setTimeout(() => {
-                renderDashboard().catch(e => console.warn("[DoseBuddy] post-missed renderDashboard:", e));
-            }, 1500);
-        })
-        .catch(err => console.error("[DoseBuddy] checkReminders missed-batch error:", err));
-    }
+function _clearDoseTimers() {
+    Object.values(_doseTimers).forEach(({ reminderId, missedId }) => {
+        if (reminderId != null) clearTimeout(reminderId);
+        if (missedId   != null) clearTimeout(missedId);
+    });
+    for (const k in _doseTimers) delete _doseTimers[k];
 }
 
-// ─── Single reminder driver (interval-based, replaces setTimeout scheduling) ──
-// Strategy: instead of fragile per-dose setTimeout timers (which were cleared by
-// every renderDashboard() call), we use ONE setInterval that wakes every 30 s and
-// checks every dose directly. This is the ONLY mechanism that fires reminders and
-// missed-dose alerts. scheduleMedicineReminders() is kept for backward compat but
-// now only does dedup-key housekeeping (no more setTimeout timers).
-//
-// Reminder fires when: nowMinutes - doseMinutes is in [0, 4] → grace window of 4 min
-// Missed fires when:   nowMinutes - doseMinutes > 5  AND status is PENDING
-// Both are deduped by their respective Sets.
+function _cancelDoseTimersForMed(medId) {
+    const prefix = `${medId}-`;
+    Object.keys(_doseTimers).forEach(key => {
+        if (key.startsWith(prefix)) {
+            const { reminderId, missedId } = _doseTimers[key];
+            if (reminderId != null) clearTimeout(reminderId);
+            if (missedId   != null) clearTimeout(missedId);
+            delete _doseTimers[key];
+        }
+    });
+}
 
+// Expose for delete-medication to cancel its timers immediately
+function cancelTimersForMedication(medId) { _cancelDoseTimersForMed(medId); }
+
+// ── PRIMARY scheduler ────────────────────────────────────────────────────────
+// Called once after renderDashboard() populates medsCache.  Sets exact
+// setTimeout timers for every future dose.  Handles day-rollover dedup-key
+// cleanup.  Does NOT clear timers for past doses that are still in the grace
+// window (clearScheduledTimeouts is called before we get here via renderDash).
 function scheduleMedicineReminders() {
-    // Keep only day-rollover cleanup — no more setTimeout timers that get wiped
-    // by the next renderDashboard() call.
-    if (!medsCache || medsCache.length === 0) return;
+    if (!currentUser || !medsCache || medsCache.length === 0) return;
 
-    const now = new Date();
+    const now   = new Date();
     const today = [
         now.getFullYear(),
         String(now.getMonth() + 1).padStart(2, "0"),
         String(now.getDate()).padStart(2, "0")
     ].join("-");
 
+    // Day-rollover: clear dedup keys once per new calendar day
     if (_lastScheduledDate !== "" && _lastScheduledDate !== today) {
         firedReminderKeys.clear();
         firedMissedAlertKeys.clear();
-        console.log("[DoseBuddy] New calendar day — cleared dedup keys.");
+        _clearDoseTimers();
+        console.log("[DoseBuddy Scheduler] New calendar day — cleared dedup keys and timers.");
     }
     _lastScheduledDate = today;
 
-    console.log(`[DoseBuddy] scheduleMedicineReminders — ${medsCache.length} med(s) in cache for ${today}, medsCacheDate=${medsCacheDate}`);
+    // Cancel any pre-existing timers for all meds (they will be rescheduled)
+    _clearDoseTimers();
+
+    const nowMs    = now.getTime();
+    let scheduled  = 0;
+
+    for (const med of medsCache) {
+        if (!isMedicationActiveToday(med, today)) continue;
+        if (!Array.isArray(med.times))            continue;
+
+        for (const timeObj of med.times) {
+            const rawTime    = timeObj.timeOfDay || "";
+            const timeStr    = rawTime.substring(0, 5);
+            if (!timeStr || timeStr.length < 5)  continue;
+
+            const [hh, mm] = timeStr.split(":").map(Number);
+            if (isNaN(hh) || isNaN(mm))          continue;
+
+            // Build the exact local wall-clock Date for this dose
+            const doseAt = new Date(now);
+            doseAt.setHours(hh, mm, 0, 0);
+            const doseMs     = doseAt.getTime();
+            const missedMs   = doseMs + MISSED_GRACE_MIN * 60 * 1000;
+            const timerKey   = `${med.id}-${today}-${timeStr}`;
+
+            // ── Reminder timeout ────────────────────────────────────────
+            const reminderDelay = doseMs - nowMs;
+            let reminderId = null;
+            if (reminderDelay > 0) {
+                const capturedMed  = med;
+                const capturedDate = today;
+                const capturedTime = timeStr;
+                reminderId = setTimeout(() => {
+                    console.log(`[DoseBuddy Scheduler] REMINDER FIRED — med="${capturedMed.name}" scheduled=${capturedTime} actual=${new Date().toLocaleTimeString()}`);
+                    triggerDoseNotification(capturedMed, capturedDate, capturedTime);
+                }, reminderDelay);
+                scheduled++;
+            } else if (reminderDelay > -MISSED_GRACE_MIN * 60 * 1000) {
+                // Dose time just passed (within grace window) and we missed the
+                // exact timeout (page load, tab was hidden). Fire now as a catch-up.
+                console.log(`[DoseBuddy Scheduler] REMINDER CATCH-UP — med="${med.name}" time=${timeStr} delta=${Math.round(-reminderDelay/1000)}s late`);
+                triggerDoseNotification(med, today, timeStr);
+            }
+
+            // ── Missed-dose timeout ─────────────────────────────────────
+            const missedDelay = missedMs - nowMs;
+            let missedId = null;
+            if (missedDelay > 0) {
+                const capturedMed  = med;
+                const capturedDate = today;
+                const capturedTime = timeStr;
+                missedId = setTimeout(() => {
+                    console.log(`[DoseBuddy Scheduler] MISSED CHECK FIRED — med="${capturedMed.name}" scheduled=${capturedTime} grace=${MISSED_GRACE_MIN}min actual=${new Date().toLocaleTimeString()}`);
+                    _handleMissedDoseCheck(capturedMed, capturedDate, capturedTime);
+                }, missedDelay);
+            } else {
+                // Missed window already passed on this page load — run check now
+                _handleMissedDoseCheck(med, today, timeStr);
+            }
+
+            _doseTimers[timerKey] = { reminderId, missedId };
+
+            console.log(`[DoseBuddy Scheduler] med="${med.name}" dose=${timeStr} | reminderIn=${reminderDelay > 0 ? Math.round(reminderDelay/1000)+'s' : 'catch-up'} | missedIn=${missedDelay > 0 ? Math.round(missedDelay/1000)+'s' : 'immediate'}`);
+        }
+    }
+    console.log(`[DoseBuddy Scheduler] Scheduled ${scheduled} reminder(s) + ${Object.keys(_doseTimers).length} missed-dose check(s) for ${today}.`);
 }
+
+// ── Missed-dose handler (called by exact timeout OR catch-up on page load) ──
+// 1. Re-checks the freshest available status to avoid false positives.
+// 2. Only marks MISSED if status is still PENDING.
+// 3. Fires exactly once per dose per session via firedMissedAlertKeys.
+function _handleMissedDoseCheck(med, dateStr, timeStr) {
+    if (!currentUser) return;
+
+    const status = getDoseStatus(currentUser.id, med.id, dateStr, timeStr);
+    console.log(`[DoseBuddy Scheduler] MISSED CHECK — med="${med.name}" time=${timeStr} status=${status}`);
+
+    if (status === "TAKEN" || status === "MISSED") return; // already handled
+
+    const missedAlertKey = `missed-${currentUser.id}-${med.id}-${dateStr}-${timeStr}`;
+    if (firedMissedAlertKeys.has(missedAlertKey)) return; // deduped
+    firedMissedAlertKeys.add(missedAlertKey);
+
+    // Mark on server + update in memory
+    markDoseMissed(currentUser.id, med.id, dateStr, timeStr).then(() => {
+        invalidateDataCache("/logs/today/", "/logs/summary/", "/logs/adherence/", "/streaks/");
+
+        const existing = logs.find(
+            l => (l.medicationId === med.id || l.medId === med.id)
+              && l.date === dateStr && l.time === timeStr
+        );
+        if (!existing) {
+            logs.push({ medicationId: med.id, date: dateStr, time: timeStr, status: "MISSED" });
+        } else {
+            existing.status = "MISSED";
+        }
+
+        // In-app notification (persisted to localStorage)
+        addNotification(
+            "missed",
+            `Missed dose: ${med.name}`,
+            `Scheduled at ${timeStr} — not taken.`
+        );
+
+        // Sound
+        playMissedDoseAlert();
+
+        console.log(`[DoseBuddy Scheduler] MISSED ALERT fired — med="${med.name}" key=${missedAlertKey}`);
+
+        // Re-render dashboard so "Due now" → "Missed" appears
+        setTimeout(() => {
+            renderDashboard().catch(e => console.warn("[DoseBuddy Scheduler] post-missed render:", e));
+        }, 1500);
+    }).catch(err => {
+        console.error("[DoseBuddy Scheduler] markDoseMissed failed:", err);
+    });
+}
+
+// ── SECONDARY: 30-second safety-net ─────────────────────────────────────────
+// Catches doses whose exact timers were lost (page refresh, browser tab
+// throttling, clock drift).  Does NOT drive the primary schedule — that is
+// done by scheduleMedicineReminders() above.
+function checkReminders() {
+    if (!currentUser) return;
+    if (!medsCache || medsCache.length === 0) return;
+
+    const now      = new Date();
+    const todayStr = [
+        now.getFullYear(),
+        String(now.getMonth() + 1).padStart(2, "0"),
+        String(now.getDate()).padStart(2, "0")
+    ].join("-");
+
+    if (medsCacheDate && medsCacheDate !== todayStr) return;
+
+    const nowMs      = now.getTime();
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+
+    for (const med of medsCache) {
+        if (!isMedicationActiveToday(med, todayStr)) continue;
+        if (!Array.isArray(med.times))               continue;
+
+        for (const timeObj of med.times) {
+            const rawTime    = timeObj.timeOfDay || "";
+            const displayTime = rawTime.substring(0, 5);
+            if (!displayTime || displayTime.length < 5) continue;
+
+            const [hh, mm] = displayTime.split(":").map(Number);
+            if (isNaN(hh) || isNaN(mm)) continue;
+
+            const doseMinutes = hh * 60 + mm;
+            const diff = nowMinutes - doseMinutes; // >0 = past, <0 = future
+
+            // Safety-net reminder: catches page-loads that missed the exact window
+            // (diff 0–4 min). firedReminderKeys prevents double-fire.
+            if (diff >= 0 && diff <= 4) {
+                triggerDoseNotification(med, todayStr, displayTime);
+            }
+
+            // Safety-net missed: catches missed-dose timeouts lost to tab throttling
+            if (diff > MISSED_GRACE_MIN) {
+                const status = getDoseStatus(currentUser.id, med.id, todayStr, displayTime);
+                if (status !== "TAKEN" && status !== "MISSED") {
+                    const missedAlertKey = `missed-${currentUser.id}-${med.id}-${todayStr}-${displayTime}`;
+                    if (!firedMissedAlertKeys.has(missedAlertKey)) {
+                        console.log(`[DoseBuddy Scheduler] SAFETY-NET MISSED: med="${med.name}" diff=${diff}min`);
+                        _handleMissedDoseCheck(med, todayStr, displayTime);
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── TERTIARY: visibility-change reconciliation ───────────────────────────────
+// When the user returns to the tab after it was hidden, immediately run
+// checkReminders() to process any events that fired while throttled.
+(function setupVisibilityReconciliation() {
+    document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible" && currentUser && medsCache.length > 0) {
+            console.log("[DoseBuddy Scheduler] Tab became visible — reconciling reminders.");
+            checkReminders();
+        }
+    });
+})();
 
 // ─── AI request lock ────────────────────────────────────────────────────────
 // Ensures only ONE AI request is in-flight at any time across all AI features.
