@@ -72,7 +72,14 @@ async function getDbConnection(env: Env) {
     database: env.HYPERDRIVE.database,
     port: env.HYPERDRIVE.port,
     disableEval: true,
-    timezone: "Z"
+    timezone: "Z",
+    connectTimeout: 5000,         // 5 second connection timeout
+    acquireTimeout: 5000,         // 5 second acquire timeout
+    timeout: 10000,               // 10 second query timeout
+    connectionLimit: 10,          // Connection pool limit
+    queueLimit: 0,                // No queue limit
+    acquireTimeout: 60000,        // 60 second acquire timeout for pool
+    multipleStatements: false     // Security: disable multiple statements
   })) as any;
 }
 
@@ -81,12 +88,33 @@ async function query<T = Json[]>(
   statement: string,
   values: unknown[] = []
 ): Promise<[T, unknown]> {
+  const queryStart = Date.now();
+  
   if (envOrConn && typeof envOrConn.query === "function") {
-    return (await envOrConn.query(statement, values)) as [T, unknown];
+    try {
+      const result = (await envOrConn.query(statement, values)) as [T, unknown];
+      const queryTime = Date.now() - queryStart;
+      if (queryTime > 1000) {  // Log slow queries over 1 second
+        console.warn(`[DB] Slow query took ${queryTime}ms: ${statement.slice(0, 100)}...`);
+      }
+      return result;
+    } catch (error) {
+      console.error(`[DB] Query failed after ${Date.now() - queryStart}ms:`, statement.slice(0, 100));
+      throw error;
+    }
   }
+  
   const db = await getDbConnection(envOrConn as Env);
   try {
-    return (await db.query(statement, values)) as [T, unknown];
+    const result = (await db.query(statement, values)) as [T, unknown];
+    const queryTime = Date.now() - queryStart;
+    if (queryTime > 1000) {  // Log slow queries over 1 second
+      console.warn(`[DB] Slow query took ${queryTime}ms: ${statement.slice(0, 100)}...`);
+    }
+    return result;
+  } catch (error) {
+    console.error(`[DB] Query failed after ${Date.now() - queryStart}ms:`, statement.slice(0, 100));
+    throw error;
   } finally {
     await db.end();
   }
@@ -956,9 +984,16 @@ async function callAi(env: Env, prompt: string): Promise<Response> {
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    const startTime = Date.now();
+    const url = new URL(request.url);
+    const path = url.pathname;
+    
+    // Log request start for key endpoints
+    if (path.includes('/medications/add') || path.includes('/logs/mark')) {
+      console.log(`[Worker] ${request.method} ${path} - Request started`);
+    }
+
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
-    const url = new URL(request.url),
-      path = url.pathname;
 
     try {
       if (path === "/" && request.method === "GET") return json({ message: "DoseBuddy API is running" });
@@ -1757,8 +1792,17 @@ export default {
 
       return json({ message: "Not found" }, 404);
     } catch (e) {
+      const duration = Date.now() - startTime;
+      if (path.includes('/medications/add') || path.includes('/logs/mark')) {
+        console.error(`[Worker] ${request.method} ${path} - Error after ${duration}ms:`, e instanceof Error ? e.message : "unknown");
+      }
       console.error("DoseBuddy Worker error", e instanceof Error ? e.message : "unknown");
       return json({ message: "Internal server error", error: e instanceof Error ? e.message : String(e) }, 500);
+    } finally {
+      const duration = Date.now() - startTime;
+      if (path.includes('/medications/add') || path.includes('/logs/mark')) {
+        console.log(`[Worker] ${request.method} ${path} - Completed in ${duration}ms`);
+      }
     }
   }
 };

@@ -1,10 +1,6 @@
-// DoseBuddy Service Worker
-// Handles system notifications and notification click events.
-// Registered from app.js — scope: / (root of the Cloudflare static site)
 
 const DOSEBUDDY_URL = self.location.origin;
 
-// ── Install: activate immediately, no cache needed ──────────────────────────
 self.addEventListener("install", () => {
     self.skipWaiting();
 });
@@ -13,7 +9,6 @@ self.addEventListener("activate", (event) => {
     event.waitUntil(self.clients.claim());
 });
 
-// ── Push (future Web Push support) ──────────────────────────────────────────
 self.addEventListener("push", (event) => {
     if (!event.data) return;
     try {

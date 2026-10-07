@@ -76,6 +76,9 @@ async function refreshAccessToken() {
 }
 
 async function authFetch(url, options = {}) {
+    const startTime = performance.now();
+    console.log(`[AuthFetch] Starting request to ${url}`);
+    
     // Refresh proactively if the token is about to expire
     if (isAccessTokenExpired()) {
         const newToken = await refreshAccessToken();
@@ -91,20 +94,73 @@ async function authFetch(url, options = {}) {
         ...(token ? { "Authorization": `Bearer ${token}` } : {})
     };
 
-    const fetchOptions = { cache: "no-store", ...options, headers };
-    let response = await fetch(url, fetchOptions);
+    // Add timeout for UI operations (add medicine, mark taken)
+    const timeoutMs = options.timeout || (
+        (url.includes('/medications/add') || url.includes('/logs/mark')) ? 5000 : 15000
+    );
+    
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+        console.log(`[AuthFetch] Request timeout after ${timeoutMs}ms for ${url}`);
+        controller.abort();
+    }, timeoutMs);
 
-    if (response.status === 401) {
-        const newToken = await refreshAccessToken();
-        if (!newToken) {
-            _handleAuthExpiry();
-            throw new Error("Session expired. Please log in again.");
+    const fetchOptions = { 
+        cache: "no-store", 
+        ...options, 
+        headers,
+        signal: controller.signal 
+    };
+    
+    try {
+        let response = await fetch(url, fetchOptions);
+        clearTimeout(timeoutId);
+        
+        const fetchTime = performance.now() - startTime;
+        console.log(`[AuthFetch] Initial response in ${fetchTime.toFixed(2)}ms, status: ${response.status}`);
+
+        if (response.status === 401) {
+            const retryStartTime = performance.now();
+            const newToken = await refreshAccessToken();
+            if (!newToken) {
+                _handleAuthExpiry();
+                throw new Error("Session expired. Please log in again.");
+            }
+            const retryHeaders = { ...headers, "Authorization": `Bearer ${newToken}` };
+            
+            // Set new timeout for retry
+            const retryController = new AbortController();
+            const retryTimeoutId = setTimeout(() => {
+                console.log(`[AuthFetch] Retry timeout after ${timeoutMs}ms for ${url}`);
+                retryController.abort();
+            }, timeoutMs);
+            
+            response = await fetch(url, { 
+                cache: "no-store", 
+                ...options, 
+                headers: retryHeaders, 
+                signal: retryController.signal 
+            });
+            clearTimeout(retryTimeoutId);
+            
+            const totalTime = performance.now() - startTime;
+            console.log(`[AuthFetch] Retry response in ${(performance.now() - retryStartTime).toFixed(2)}ms, total: ${totalTime.toFixed(2)}ms`);
+        } else {
+            const totalTime = performance.now() - startTime;
+            console.log(`[AuthFetch] Request completed in ${totalTime.toFixed(2)}ms for ${url}`);
         }
-        const retryHeaders = { ...headers, "Authorization": `Bearer ${newToken}` };
-        response = await fetch(url, { cache: "no-store", ...options, headers: retryHeaders });
-    }
 
-    return response;
+        return response;
+    } catch (error) {
+        clearTimeout(timeoutId);
+        const totalTime = performance.now() - startTime;
+        if (error.name === 'AbortError') {
+            console.error(`[AuthFetch] Request aborted after ${totalTime.toFixed(2)}ms for ${url}`);
+            throw new Error(`Request timeout after ${(timeoutMs/1000).toFixed(1)}s. Please try again.`);
+        }
+        console.error(`[AuthFetch] Request failed after ${totalTime.toFixed(2)}ms for ${url}:`, error);
+        throw error;
+    }
 }
 
 const _jsonCache = new Map();
@@ -1927,6 +1983,11 @@ function setupMedicineForm() {
         };
 
         try {
+            const submitBtn = medForm.querySelector('button[type="submit"]');
+            const originalText = submitBtn.textContent;
+            submitBtn.textContent = "Saving...";
+            submitBtn.disabled = true;
+
             const res = await authFetch(`${API_BASE}/medications/add`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -1953,6 +2014,14 @@ function setupMedicineForm() {
             await renderDashboard();
             await refreshActivityFeed();
         } catch (err) {
+            errorText.textContent = err.message || "Network error. Please try again.";
+        } finally {
+            const submitBtn = medForm.querySelector('button[type="submit"]');
+            if (submitBtn) {
+                submitBtn.textContent = submitBtn.textContent === "Saving..." ? "Save Medicine" : submitBtn.textContent;
+                submitBtn.disabled = false;
+            }
+        }
             console.error(err);
             errorText.textContent = "Error connecting to server.";
             showToast("Error connecting to server.", "error");
@@ -2530,6 +2599,20 @@ async function markDoseTaken(userId, medId, dateStr, timeStr, medName = "") {
         status: "TAKEN",
     };
 
+    // Find and update the button to show loading state
+    const buttons = document.querySelectorAll('.action-btn-take');
+    let targetButton = null;
+    buttons.forEach(btn => {
+        if (btn.textContent === "Mark taken" && !btn.disabled) {
+            targetButton = btn;
+        }
+    });
+
+    if (targetButton) {
+        targetButton.textContent = "Marking...";
+        targetButton.disabled = true;
+    }
+
     try {
         const res = await authFetch(`${API_BASE}/logs/mark`, {
             method: "POST",
@@ -2538,6 +2621,11 @@ async function markDoseTaken(userId, medId, dateStr, timeStr, medName = "") {
         });
         if (!res.ok) {
             console.error("Failed to save log");
+            if (targetButton) {
+                targetButton.textContent = "Mark taken";
+                targetButton.disabled = false;
+            }
+            showToast("Failed to mark dose as taken. Please try again.", "error");
         } else {
             invalidateDataCache("/logs/today/", "/logs/summary/", "/logs/adherence/", "/streaks/");
             if (medName) {
@@ -2547,9 +2635,18 @@ async function markDoseTaken(userId, medId, dateStr, timeStr, medName = "") {
                     `Dose at ${timeStr} recorded for ${dateStr}.`
                 );
             }
+            if (targetButton) {
+                targetButton.textContent = "Taken";
+                targetButton.className = "action-btn action-btn-taken";
+            }
         }
     } catch (err) {
         console.error(err);
+        if (targetButton) {
+            targetButton.textContent = "Mark taken";
+            targetButton.disabled = false;
+        }
+        showToast("Network error. Please try again.", "error");
     }
 }
 
