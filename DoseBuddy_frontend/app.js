@@ -4100,71 +4100,68 @@ function playReminderSound() {
 // share the same asset + player.
 // Add a simple test function you can call from browser console
 window.testMissedDoseSound = function() {
-    console.log("=== TESTING MISSED DOSE SOUND ===");
-    console.log("1. Testing playMissedDoseAlert() directly...");
+    console.log("=== TESTING MISSED DOSE SOUND (MP3) ===");
+    console.log("1. Checking audio element...");
     
-    const result = playMissedDoseAlert();
+    const audio = document.getElementById("notify-sound");
+    if (audio) {
+        console.log("✅ Audio element found");
+        console.log("   src:", audio.src);
+        console.log("   readyState:", audio.readyState);
+        console.log("   error:", audio.error);
+        
+        console.log("2. Testing playMissedDoseAlert() (should use MP3)...");
+        const result = playMissedDoseAlert();
+        console.log("   Result:", result);
+        
+    } else {
+        console.error("❌ No audio element found with id 'notify-sound'");
+    }
     
-    setTimeout(() => {
-        console.log("2. Testing direct mp3 play...");
-        const audio = document.getElementById("notify-sound");
-        if (audio) {
-            console.log("Audio element found:", audio);
-            console.log("Audio src:", audio.src);
-            console.log("Audio readyState:", audio.readyState);
-            audio.volume = 1.0;
-            audio.currentTime = 0;
-            const playPromise = audio.play();
-            if (playPromise) {
-                playPromise.then(() => {
-                    console.log("✅ DIRECT AUDIO PLAY WORKED!");
-                }).catch(err => {
-                    console.error("❌ DIRECT AUDIO PLAY FAILED:", err);
-                });
-            }
-        } else {
-            console.error("❌ No audio element found with id 'notify-sound'");
-        }
-    }, 1000);
-    
-    return result;
+    return "Test completed - check console output above";
 };
 
 console.log("=== TEST AVAILABLE ===");
-console.log("Run: testMissedDoseSound() in console to test the sound");
+console.log("Run: testMissedDoseSound() in console to test MP3 sound");
 
 function playMissedDoseAlert() {
     console.log("[DoseBuddy Audio] playMissedDoseAlert called");
     
-    // Try the complex system first
-    const result = _playNotifSound("Missed-dose audio");
-    console.log("[DoseBuddy Audio] _playNotifSound result:", result);
+    // FOR MISSED DOSES: Always use the MP3 file, not the Web Audio tone
+    console.log("[DoseBuddy Audio] Using direct mp3 for missed dose alert");
     
-    // If that failed, try a simple direct approach
-    if (!result) {
-        console.log("[DoseBuddy Audio] Complex system failed, trying direct mp3 play");
-        try {
-            const audio = document.getElementById("notify-sound");
-            if (audio) {
-                audio.currentTime = 0;
-                audio.volume = 1.0;
-                audio.muted = false;
-                const playPromise = audio.play();
-                if (playPromise) {
-                    playPromise.then(() => {
-                        console.log("[DoseBuddy Audio] DIRECT MP3 MISSED SOUND PLAYED SUCCESSFULLY");
-                    }).catch(err => {
-                        console.error("[DoseBuddy Audio] Direct mp3 play failed:", err);
-                    });
-                }
-                return true;
+    try {
+        const audio = document.getElementById("notify-sound");
+        if (audio) {
+            console.log("[DoseBuddy Audio] Found notify-sound element, src:", audio.src);
+            
+            // Stop any currently playing audio
+            audio.pause();
+            audio.currentTime = 0;
+            audio.volume = 1.0;
+            audio.muted = false;
+            
+            const playPromise = audio.play();
+            if (playPromise) {
+                playPromise.then(() => {
+                    console.log("[DoseBuddy Audio] MISSED DOSE MP3 SOUND PLAYED SUCCESSFULLY");
+                }).catch(err => {
+                    console.error("[DoseBuddy Audio] MP3 play failed:", err);
+                    // Fallback to Web Audio tone if mp3 fails
+                    console.log("[DoseBuddy Audio] Falling back to Web Audio tone");
+                    _playNotifSound("Missed-dose audio");
+                });
             }
-        } catch (e) {
-            console.error("[DoseBuddy Audio] Direct play error:", e);
+            return true;
+        } else {
+            console.error("[DoseBuddy Audio] No notify-sound element found, falling back to Web Audio");
+            return _playNotifSound("Missed-dose audio");
         }
+    } catch (e) {
+        console.error("[DoseBuddy Audio] Error playing mp3:", e);
+        // Fallback to Web Audio tone
+        return _playNotifSound("Missed-dose audio");
     }
-    
-    return result;
 }
 
 function triggerDoseNotification(med, dateStr, displayTime) {
