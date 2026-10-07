@@ -2126,6 +2126,10 @@ async function renderDashboard() {
     if (!currentUser) return;
     const renderId = ++_dashboardRenderId;
 
+    console.log(`[FEAT-001 DEBUG] renderDashboard() started, renderId: ${renderId}`);
+    console.log(`[FEAT-001 DEBUG] currentUser exists:`, !!currentUser);
+    console.log(`[FEAT-001 DEBUG] Initial medsCache state:`, medsCache ? medsCache.length + ' items' : 'null/undefined');
+
     // Update greeting and date every time the dashboard renders
     updateGreeting();
 
@@ -2147,6 +2151,8 @@ async function renderDashboard() {
         String(today.getDate()).padStart(2, "0")
     ].join("-");
 
+    console.log(`[FEAT-001 DEBUG] Today date string: ${todayStr}`);
+
     let medsUrl;
 
     if (currentUser.role === "CAREGIVER" && currentUser.patientEmail) {
@@ -2162,22 +2168,32 @@ async function renderDashboard() {
         if (patientNote) patientNote.textContent = "";
     }
 
+    console.log(`[FEAT-001 DEBUG] Medication fetch URL: ${medsUrl}`);
+
     // dateElem is already set by updateGreeting(); do not overwrite it here.
 
     try {
+        console.log(`[FEAT-001 DEBUG] Starting Promise.allSettled for logs and medications...`);
         const [logsRes, medsRes] = await Promise.allSettled([
             fetchJsonCached(`${API_BASE}/logs/today/${currentUser.id}?date=${encodeURIComponent(todayStr)}`, 10000),
             fetchJsonCached(`${medsUrl}?date=${encodeURIComponent(todayStr)}`, 30000)
         ]);
         if (renderId !== _dashboardRenderId) return;
 
+        console.log(`[FEAT-001 DEBUG] Promise.allSettled completed`);
+        console.log(`[FEAT-001 DEBUG] logsRes.status: ${logsRes.status}`);
+        console.log(`[FEAT-001 DEBUG] medsRes.status: ${medsRes.status}`);
+
         const todayLogs = (logsRes.status === "fulfilled" && Array.isArray(logsRes.value)) ? logsRes.value : [];
         logs = todayLogs;
 
         const meds = (medsRes.status === "fulfilled" && Array.isArray(medsRes.value)) ? medsRes.value : [];
-        console.log(`[DoseBuddy DEBUG] renderDashboard: fetched ${meds.length} medications:`, meds);
+        console.log(`[FEAT-001 DEBUG] renderDashboard: fetched ${meds.length} medications:`, meds);
+        console.log(`[FEAT-001 DEBUG] Updating medsCache from ${medsCache ? medsCache.length : 'null'} to ${meds.length} items`);
         medsCache = meds;
         medsCacheDate = todayStr;
+        console.log(`[FEAT-001 DEBUG] medsCache updated successfully, length: ${medsCache.length}`);
+        console.log(`[FEAT-001 DEBUG] medsCacheDate set to: ${medsCacheDate}`);
 
         if (medsRes.status === "rejected") {
             console.error("Failed to fetch medications:", medsRes.reason);
@@ -2345,19 +2361,51 @@ async function renderDashboard() {
         if (pendingElem)  pendingElem.textContent  = pending;
         if (adherenceElem) adherenceElem.textContent = percent + "%";
         updateMissedDoseNotifications(meds, todayStr);
-        // Single scheduling call — scheduleMedicineReminders is the sole
-        // source of truth for dose-time timeouts.
-        console.log(`[DoseBuddy DEBUG] About to call scheduleMedicineReminders() with ${meds.length} medications`);
-        console.log(`[DoseBuddy DEBUG] typeof scheduleMedicineReminders:`, typeof scheduleMedicineReminders);
-        console.log(`[DoseBuddy DEBUG] currentUser exists:`, !!currentUser);
-        console.log(`[DoseBuddy DEBUG] medsCache exists:`, !!medsCache);
+        
+        console.log(`[FEAT-001 DEBUG] About to call scheduleMedicineReminders() with ${meds.length} medications`);
+        console.log(`[FEAT-001 DEBUG] Pre-scheduler state:`);
+        console.log(`[FEAT-001 DEBUG] - currentUser exists: ${!!currentUser}`);
+        console.log(`[FEAT-001 DEBUG] - medsCache exists: ${!!medsCache}`);
+        console.log(`[FEAT-001 DEBUG] - medsCache length: ${medsCache ? medsCache.length : 'N/A'}`);
+        console.log(`[FEAT-001 DEBUG] - typeof scheduleMedicineReminders: ${typeof scheduleMedicineReminders}`);
+        console.log(`[FEAT-001 DEBUG] - Current _doseTimers count: ${Object.keys(_doseTimers).length}`);
+        
+        // Clear any existing timers before scheduling new ones
+        _clearDoseTimers();
+        console.log(`[FEAT-001 DEBUG] Cleared existing timers, _doseTimers count: ${Object.keys(_doseTimers).length}`);
         
         try {
+            // Retry logic: if medsCache is empty but meds were fetched successfully, wait and retry
+            if (meds.length > 0 && (!medsCache || medsCache.length === 0)) {
+                console.log(`[FEAT-001 DEBUG] medsCache is empty despite successful fetch, retrying in 100ms...`);
+                await new Promise(resolve => setTimeout(resolve, 100));
+                console.log(`[FEAT-001 DEBUG] After retry delay - medsCache length: ${medsCache ? medsCache.length : 'still null'}`);
+            }
+            
             scheduleMedicineReminders();
-            console.log(`[DoseBuddy DEBUG] scheduleMedicineReminders() call completed successfully`);
+            console.log(`[FEAT-001 DEBUG] scheduleMedicineReminders() call completed successfully`);
+            console.log(`[FEAT-001 DEBUG] Post-scheduler _doseTimers count: ${Object.keys(_doseTimers).length}`);
+            console.log(`[FEAT-001 DEBUG] Active timer keys:`, Object.keys(_doseTimers));
+            
+            // Verify timers were actually created
+            if (meds.length > 0 && Object.keys(_doseTimers).length === 0) {
+                console.error(`[FEAT-001 DEBUG] ERROR: No timers created despite having ${meds.length} medications!`);
+                // Attempt immediate retry
+                console.log(`[FEAT-001 DEBUG] Attempting immediate retry of scheduleMedicineReminders...`);
+                setTimeout(() => {
+                    console.log(`[FEAT-001 DEBUG] Retry attempt - medsCache length: ${medsCache ? medsCache.length : 'null'}`);
+                    scheduleMedicineReminders();
+                    console.log(`[FEAT-001 DEBUG] Retry completed - _doseTimers count: ${Object.keys(_doseTimers).length}`);
+                }, 200);
+            }
+            
         } catch (error) {
-            console.error(`[DoseBuddy DEBUG] scheduleMedicineReminders() call FAILED:`, error);
-            console.error(`[DoseBuddy DEBUG] Error stack:`, error.stack);
+            console.error(`[FEAT-001 DEBUG] scheduleMedicineReminders() call FAILED:`, error);
+            console.error(`[FEAT-001 DEBUG] Error stack:`, error.stack);
+            console.error(`[FEAT-001 DEBUG] Failure context:`);
+            console.error(`[FEAT-001 DEBUG] - currentUser: ${!!currentUser}`);
+            console.error(`[FEAT-001 DEBUG] - medsCache: ${medsCache ? medsCache.length + ' items' : 'null/undefined'}`);
+            console.error(`[FEAT-001 DEBUG] - meds array: ${meds.length} items`);
         }
         
         // Also run checkReminders immediately to catch any existing missed doses
@@ -4432,16 +4480,36 @@ function cancelTimersForMedication(medId) { _cancelDoseTimersForMed(medId); }
 // cleanup.  Does NOT clear timers for past doses that are still in the grace
 // window (clearScheduledTimeouts is called before we get here via renderDash).
 function scheduleMedicineReminders() {
-    console.log(`[DoseBuddy Scheduler DEBUG] scheduleMedicineReminders called`);
+    console.log(`[FEAT-001 Scheduler] scheduleMedicineReminders called at ${new Date().toLocaleTimeString()}`);
     
     try {
-        console.log(`[DoseBuddy Scheduler DEBUG] currentUser:`, !!currentUser);
-        console.log(`[DoseBuddy Scheduler DEBUG] medsCache:`, medsCache ? medsCache.length + ' items' : 'null/undefined');
+        console.log(`[FEAT-001 Scheduler] Input validation:`);
+        console.log(`[FEAT-001 Scheduler] - currentUser: ${!!currentUser} (${currentUser ? currentUser.id : 'N/A'})`);
+        console.log(`[FEAT-001 Scheduler] - medsCache: ${medsCache ? 'exists' : 'null/undefined'}`);
+        console.log(`[FEAT-001 Scheduler] - medsCache.length: ${medsCache ? medsCache.length : 'N/A'}`);
+        console.log(`[FEAT-001 Scheduler] - medsCache is array: ${Array.isArray(medsCache)}`);
         
-        if (!currentUser || !medsCache || medsCache.length === 0) {
-            console.log(`[DoseBuddy Scheduler DEBUG] EARLY EXIT - currentUser: ${!!currentUser}, medsCache: ${medsCache ? medsCache.length : 'null'}`);
+        if (!currentUser) {
+            console.log(`[FEAT-001 Scheduler] EARLY EXIT - no currentUser`);
             return;
         }
+        
+        if (!medsCache) {
+            console.log(`[FEAT-001 Scheduler] EARLY EXIT - medsCache is null/undefined`);
+            return;
+        }
+        
+        if (!Array.isArray(medsCache)) {
+            console.log(`[FEAT-001 Scheduler] EARLY EXIT - medsCache is not an array:`, typeof medsCache);
+            return;
+        }
+        
+        if (medsCache.length === 0) {
+            console.log(`[FEAT-001 Scheduler] EARLY EXIT - medsCache is empty array`);
+            return;
+        }
+        
+        console.log(`[FEAT-001 Scheduler] ✓ All validation checks passed, proceeding with scheduling`);
 
         const now   = new Date();
         const today = [
@@ -4450,57 +4518,72 @@ function scheduleMedicineReminders() {
             String(now.getDate()).padStart(2, "0")
         ].join("-");
         
-        console.log(`[DoseBuddy Scheduler DEBUG] today: ${today}, now: ${now.getHours()}:${now.getMinutes()}:${now.getSeconds()}`);
+        console.log(`[FEAT-001 Scheduler] Date/time context:`);
+        console.log(`[FEAT-001 Scheduler] - today: ${today}`); 
+        console.log(`[FEAT-001 Scheduler] - now: ${now.getHours()}:${now.getMinutes()}:${now.getSeconds()}`);
+        console.log(`[FEAT-001 Scheduler] - _lastScheduledDate: "${_lastScheduledDate}"`);
 
         // Day-rollover: clear dedup keys once per new calendar day
         if (_lastScheduledDate !== "" && _lastScheduledDate !== today) {
             firedReminderKeys.clear();
             firedMissedAlertKeys.clear();
             _clearDoseTimers();
-            console.log("[DoseBuddy Scheduler] New calendar day — cleared dedup keys and timers.");
+            console.log("[FEAT-001 Scheduler] New calendar day — cleared dedup keys and timers.");
         }
         _lastScheduledDate = today;
 
         // Cancel any pre-existing timers for all meds (they will be rescheduled)
+        const existingTimerCount = Object.keys(_doseTimers).length;
         _clearDoseTimers();
+        console.log(`[FEAT-001 Scheduler] Cleared ${existingTimerCount} existing timers`);
 
         const nowMs    = now.getTime();
         let scheduled  = 0;
+        let processed  = 0;
+        let skipped    = 0;
 
+    console.log(`[FEAT-001 Scheduler] Processing ${medsCache.length} medications...`);
+    
     for (const med of medsCache) {
-        console.log(`[DoseBuddy Scheduler DEBUG] Processing med: ${med.name}, id: ${med.id}`);
+        processed++;
+        console.log(`[FEAT-001 Scheduler] Processing med ${processed}/${medsCache.length}: ${med.name}, id: ${med.id}`);
         
         if (!isMedicationActiveToday(med, today)) {
-            console.log(`[DoseBuddy Scheduler SKIP] medicine="${med.name}" reason="not active today"`);
+            skipped++;
+            console.log(`[FEAT-001 Scheduler] SKIP med="${med.name}" reason="not active today"`);
             continue;
         }
         
         if (!Array.isArray(med.times)) {
-            console.log(`[DoseBuddy Scheduler SKIP] medicine="${med.name}" reason="times not array" times:`, med.times);
+            skipped++;
+            console.log(`[FEAT-001 Scheduler] SKIP med="${med.name}" reason="times not array" times:`, med.times);
             continue;
         }
         
-        console.log(`[DoseBuddy Scheduler DEBUG] med="${med.name}" has ${med.times.length} times:`, med.times);
+        console.log(`[FEAT-001 Scheduler] med="${med.name}" has ${med.times.length} dose times:`, med.times);
 
-        for (const timeObj of med.times) {
+        for (let timeIndex = 0; timeIndex < med.times.length; timeIndex++) {
+            const timeObj = med.times[timeIndex];
             const rawTime    = timeObj.timeOfDay || "";
             const timeStr    = rawTime.substring(0, 5);
             
-            console.log(`[DoseBuddy Scheduler DEBUG] rawTime: "${rawTime}", timeStr: "${timeStr}"`);
+            console.log(`[FEAT-001 Scheduler] Processing time ${timeIndex + 1}/${med.times.length} for ${med.name}`);
+            console.log(`[FEAT-001 Scheduler] - rawTime: "${rawTime}"`);
+            console.log(`[FEAT-001 Scheduler] - timeStr: "${timeStr}"`);
             
             if (!timeStr || timeStr.length < 5) {
-                console.log(`[DoseBuddy Scheduler SKIP] medicine="${med.name}" time="${timeStr}" reason="invalid time format"`);
+                console.log(`[FEAT-001 Scheduler] SKIP med="${med.name}" time="${timeStr}" reason="invalid time format"`);
                 continue;
             }
 
             const [hh, mm] = timeStr.split(":").map(Number);
             if (isNaN(hh) || isNaN(mm)) {
-                console.log(`[DoseBuddy Scheduler SKIP] medicine="${med.name}" time="${timeStr}" reason="parsed time is NaN" hh=${hh} mm=${mm}`);
+                console.log(`[FEAT-001 Scheduler] SKIP med="${med.name}" time="${timeStr}" reason="parsed time is NaN" hh=${hh} mm=${mm}`);
                 continue;
             }
             
             const status = getDoseStatus(currentUser.id, med.id, today, timeStr);
-            console.log(`[DoseBuddy Scheduler DEBUG] med="${med.name}" time=${timeStr} status="${status}"`);
+            console.log(`[FEAT-001 Scheduler] med="${med.name}" time=${timeStr} status="${status}"`);
 
             // Build the exact local wall-clock Date for this dose
             const doseAt = new Date(now);
@@ -4511,7 +4594,9 @@ function scheduleMedicineReminders() {
 
             // ── Reminder timeout ────────────────────────────────────────
             const reminderDelay = doseMs - nowMs;
-            console.log(`[DoseBuddy Scheduler DEBUG] med="${med.name}" time=${timeStr} reminderDelay=${reminderDelay}ms (${Math.round(reminderDelay/1000)}s)`);
+            console.log(`[FEAT-001 Scheduler] Timer calculations for ${med.name} at ${timeStr}:`);
+            console.log(`[FEAT-001 Scheduler] - doseAt: ${doseAt.toLocaleTimeString()}`);
+            console.log(`[FEAT-001 Scheduler] - reminderDelay: ${reminderDelay}ms (${Math.round(reminderDelay/1000)}s)`);
             
             let reminderId = null;
             if (reminderDelay > 0) {
@@ -4519,15 +4604,15 @@ function scheduleMedicineReminders() {
                 const capturedDate = today;
                 const capturedTime = timeStr;
                 reminderId = setTimeout(() => {
-                    console.log(`[DoseBuddy Scheduler] REMINDER FIRED — med="${capturedMed.name}" scheduled=${capturedTime} actual=${new Date().toLocaleTimeString()}`);
+                    console.log(`[FEAT-001 Scheduler] ⏰ REMINDER FIRED — med="${capturedMed.name}" scheduled=${capturedTime} actual=${new Date().toLocaleTimeString()}`);
                     triggerDoseNotification(capturedMed, capturedDate, capturedTime);
                 }, reminderDelay);
                 scheduled++;
-                console.log(`[DoseBuddy Scheduler DEBUG] Scheduled reminder timer for ${med.name} at ${timeStr}`);
+                console.log(`[FEAT-001 Scheduler] ✓ Scheduled reminder timer ${reminderId} for ${med.name} at ${timeStr} (in ${Math.round(reminderDelay/1000)}s)`);
             } else if (reminderDelay > -MISSED_GRACE_MIN * 60 * 1000) {
                 // Dose time just passed (within grace window) and we missed the
                 // exact timeout (page load, tab was hidden). Fire now as a catch-up.
-                console.log(`[DoseBuddy Scheduler] REMINDER CATCH-UP — med="${med.name}" time=${timeStr} delta=${Math.round(-reminderDelay/1000)}s late`);
+                console.log(`[FEAT-001 Scheduler] ⚡ REMINDER CATCH-UP — med="${med.name}" time=${timeStr} delta=${Math.round(-reminderDelay/1000)}s late`);
                 triggerDoseNotification(med, today, timeStr);
             }
 
