@@ -2173,10 +2173,29 @@
             </div>
             <div class="modal-section-label">Test</div>
             <div class="pref-list">
+                <!-- Enable Sound — important on mobile where audio needs explicit unlock -->
                 <div class="pref-row">
                     <div class="pref-info">
+                        <p class="pref-title">Enable Reminder Sounds</p>
+                        <p class="pref-desc" id="notif-sound-status-text">Tap to unlock reminder alert sounds in this browser</p>
+                    </div>
+                    <button class="modal-btn-secondary" id="notif-enable-sound-btn" type="button" style="flex-shrink:0;">Enable Sound</button>
+                </div>
+                <p id="notif-sound-enable-result" style="font-size:0.8rem;margin:4px 2px 0;display:none;"></p>
+                <!-- Test Reminder Sound — separate from system notification test -->
+                <div class="pref-row" style="margin-top:4px;">
+                    <div class="pref-info">
+                        <p class="pref-title">Test Reminder Sound</p>
+                        <p class="pref-desc">Play the reminder alert tone to confirm sound is working</p>
+                    </div>
+                    <button class="modal-btn-secondary" id="notif-test-sound-btn" type="button" style="flex-shrink:0;">Test Sound</button>
+                </div>
+                <p id="notif-test-sound-result" style="font-size:0.8rem;margin:4px 2px 0;display:none;"></p>
+                <!-- Test System Notification -->
+                <div class="pref-row" style="margin-top:4px;">
+                    <div class="pref-info">
                         <p class="pref-title">Test Notification</p>
-                        <p class="pref-desc">Send a test to verify your notification settings are working</p>
+                        <p class="pref-desc">Send a test system notification to verify your settings</p>
                     </div>
                     <button class="modal-btn-secondary" id="notif-test-btn" type="button" style="flex-shrink:0;">Send Test</button>
                 </div>

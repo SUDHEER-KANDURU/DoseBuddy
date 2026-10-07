@@ -181,6 +181,79 @@ const firedMissedAlertKeys = new Set();
 let _lastScheduledDate = "";   // "" means "never scheduled yet"
 let _reminderIntervalId = null; // interval ID for checkReminders — cleared on logout
 let _lastCheckRemindersLog = 0; // throttle for checkReminders diagnostic log
+
+// ── Service Worker registration + system notification abstraction ─────────────
+// Stored once on registration so every showDoseBuddySystemNotification() call
+// can reuse it without re-awaiting navigator.serviceWorker.ready.
+let _swRegistration = null;
+
+/**
+ * Register the DoseBuddy service worker.
+ * Called once from the main DOMContentLoaded handler.
+ * Safe to call multiple times — re-uses the same registration.
+ */
+function registerServiceWorker() {
+    if (!("serviceWorker" in navigator)) {
+        console.log("[DoseBuddy SW] serviceWorker not supported in this browser.");
+        return;
+    }
+    navigator.serviceWorker.register("./sw.js", { scope: "./" })
+        .then(reg => {
+            _swRegistration = reg;
+            console.log("[DoseBuddy SW] Registered. Scope:", reg.scope);
+            // Keep our reference up-to-date if the SW updates itself
+            reg.addEventListener("updatefound", () => {
+                _swRegistration = reg;
+            });
+        })
+        .catch(err => {
+            console.warn("[DoseBuddy SW] Registration failed:", err.message);
+        });
+
+    // Also pick up an existing registration from a previous page load
+    navigator.serviceWorker.ready.then(reg => {
+        if (!_swRegistration) _swRegistration = reg;
+    }).catch(() => {});
+}
+
+/**
+ * Show a system (browser) notification using the Service Worker.
+ * Falls back gracefully — NEVER throws.
+ * NEVER uses `new Notification()` — that constructor is forbidden on mobile.
+ *
+ * @param {string} title
+ * @param {Object} options  — body, icon, tag, data, badge, etc.
+ * @returns {Promise<{ok:boolean, reason?:string}>}
+ */
+async function showDoseBuddySystemNotification(title, options = {}) {
+    try {
+        if (!("Notification" in window)) {
+            return { ok: false, reason: "unsupported" };
+        }
+        if (Notification.permission !== "granted") {
+            return { ok: false, reason: "permission-not-granted" };
+        }
+        if (!("serviceWorker" in navigator)) {
+            return { ok: false, reason: "sw-unsupported" };
+        }
+
+        // Use cached registration or fall back to the ready promise
+        const reg = _swRegistration || await navigator.serviceWorker.ready;
+        if (!reg || typeof reg.showNotification !== "function") {
+            return { ok: false, reason: "sw-no-showNotification" };
+        }
+
+        await reg.showNotification(title, {
+            icon:  "/favicon.ico",
+            badge: "/favicon.ico",
+            ...options,
+        });
+        return { ok: true };
+    } catch (err) {
+        console.warn("[DoseBuddy Notifications] System notification failed:", err.message);
+        return { ok: false, reason: "error", error: err };
+    }
+}
 let weeklyChart = null;
 
 const ACTIVITY_TYPES = {
@@ -439,6 +512,7 @@ document.addEventListener("DOMContentLoaded", () => {
     setupThemeFromStorage();
     setupNotificationsUI();
     setupPrescriptionUpload();
+    registerServiceWorker();   // register sw.js for system notifications
     
     setHamburgerVisible(!!currentUser);
 
@@ -2204,52 +2278,11 @@ async function renderDashboard() {
     }
 }
 function updateMissedDoseNotifications(meds, todayStr) {
-    const countEl = document.getElementById("notification-count");
-    if (!countEl) return;
-
-    const now        = new Date();
-    const nowMinutes = now.getHours() * 60 + now.getMinutes();
-
-    const newItems = [];
-    meds.forEach(med => {
-        // Do not generate notifications for expired medicines
-        if (!isMedicationActiveToday(med, todayStr)) return;
-
-        if (!Array.isArray(med.times)) return;
-        med.times.forEach(t => {
-            const time        = (t.timeOfDay || "").substring(0, 5);
-            const [h, m]      = time.split(":").map(Number);
-            const doseMinutes = h * 60 + m;
-            if (doseMinutes < nowMinutes) {
-                const taken = getDoseStatus(currentUser.id, med.id, todayStr, time) === "TAKEN";
-                if (!taken) {
-                    newItems.push({
-                        id:      `missed-${med.id}-${time}`,
-                        type:    "missed",
-                        title:   `Missed dose: ${med.name}`,
-                        desc:    `Scheduled at ${time} — not yet taken`,
-                        time:    time,
-                        unread:  true,
-                        ts:      Date.now(),
-                    });
-                }
-            }
-        });
-    });
-
-    const existing = notifStore.filter(n => n.type !== "missed");
-    notifStore = [...newItems, ...existing].slice(0, 50);
-    saveNotifStore(currentUser?.id);
-
-    const unread = notifStore.filter(n => n.unread).length;
-    countEl.textContent = unread;
-    countEl.style.display = unread > 0 ? "flex" : "none";
-
-    const badge = document.getElementById("notif-unread-badge");
-    if (badge) {
-        badge.textContent = unread;
-        badge.style.display = unread > 0 ? "inline-flex" : "none";
-    }
+    // This function only updates the badge counter from the CURRENT notifStore.
+    // It does NOT rebuild notifStore from scratch — doing so would wipe
+    // notifications created by _handleMissedDoseCheck / addNotification.
+    // Actual missed-dose notifications are created by _handleMissedDoseCheck.
+    refreshNotifBadge();
 }
 
 async function deleteMedication(medId) {
@@ -3906,13 +3939,21 @@ function _playAlertTone() {
 function primeAudioElement() {
     // ── Step 1: Web Audio context ──────────────────────────────────────────
     _ensureAudioCtx();
-    if (_audioCtx && _audioCtx.state === "suspended") {
-        _audioCtx.resume().then(() => {
-            _audioReady = (_audioCtx.state === "running");
-            if (_audioReady) console.log("[DoseBuddy] AudioContext running (Web Audio ready)");
-        }).catch(() => {});
-    } else if (_audioCtx && _audioCtx.state === "running") {
-        _audioReady = true;
+    if (_audioCtx) {
+        if (_audioCtx.state === "suspended") {
+            // Mark optimistically — the resume() is async but the gesture IS valid.
+            // _playAlertTone() checks state === "running" so even if this races,
+            // the tone just won't fire and the mp3 fallback takes over.
+            _audioCtx.resume().then(() => {
+                _audioReady = (_audioCtx.state === "running");
+                if (_audioReady) console.log("[DoseBuddy Audio] UNLOCKED — AudioContext running");
+            }).catch(err => {
+                console.warn("[DoseBuddy Audio] resume() failed:", err.message);
+            });
+        } else if (_audioCtx.state === "running") {
+            _audioReady = true;
+            console.log("[DoseBuddy Audio] UNLOCKED — AudioContext already running");
+        }
     }
 
     // ── Step 2: HTMLAudioElement muted-prime (mp3 fallback) ───────────────
@@ -3953,10 +3994,13 @@ function _playNotifSound(label) {
 
     console.log(`[DoseBuddy] ${label}: attempting playback (audioReady=${_audioReady} audioUnlocked=${audioUnlocked})`);
 
-    // PRIMARY: Web Audio tone (works from setTimeout once context is running)
-    if (_audioReady && _playAlertTone()) {
-        console.log(`[DoseBuddy] ${label}: Web Audio tone playing`);
-        return true;
+    // PRIMARY: Web Audio tone — re-check state in case it changed since unlock
+    if (_audioCtx && _audioCtx.state === "running") {
+        _audioReady = true; // keep flag in sync
+        if (_playAlertTone()) {
+            console.log(`[DoseBuddy Audio] ${label === "Reminder audio" ? "REMINDER" : "MISSED"} SOUND FIRED (Web Audio tone)`);
+            return true;
+        }
     }
 
     // FALLBACK: HTMLAudioElement mp3
@@ -3973,7 +4017,7 @@ function _playNotifSound(label) {
         const pp = audio.play();
         if (pp && typeof pp.then === "function") {
             pp.then(() => {
-                console.log(`[DoseBuddy] ${label}: mp3 playback started`);
+                console.log(`[DoseBuddy Audio] ${label === "Reminder audio" ? "REMINDER" : "MISSED"} SOUND FIRED (mp3 fallback)`);
                 audioUnlocked     = true;
                 activeReminderAudio = audio;
             }).catch(err => {
@@ -4047,25 +4091,18 @@ function triggerDoseNotification(med, dateStr, displayTime) {
     // ── Always show in-app toast as a visible fallback ───────────────────
     showToast(`Reminder: ${med.name} (${med.dosage}) at ${displayTime}`, "info", 8000);
 
-    // ── Browser Notification (if permission granted) ─────────────────────
-    if ("Notification" in window && Notification.permission === "granted") {
-        try {
-            const notification = new Notification("DoseBuddy Reminder", {
-                body: `Time to take ${med.name} (${med.dosage})`,
-                icon: "https://cdn-icons-png.flaticon.com/512/2966/2966327.png",
-                tag: key,          // browser deduplication by OS
-                requireInteraction: false,
-            });
-
-            notification.onclick = () => {
-                window.focus();
-                switchView("dashboard-view");
-                stopReminderAudio();
-            };
-        } catch (e) {
-            console.warn("[DoseBuddy] Notification construction failed:", e.message);
+    // ── System notification via Service Worker (no new Notification()) ─────────
+    showDoseBuddySystemNotification("DoseBuddy Reminder", {
+        body:  `Time to take ${med.name} (${med.dosage})`,
+        icon:  "/favicon.ico",
+        tag:   key,
+        data:  { url: self?.location?.origin || "/" },
+        requireInteraction: false,
+    }).then(result => {
+        if (!result.ok) {
+            console.log(`[DoseBuddy Notifications] System notification skipped: ${result.reason}`);
         }
-    }
+    });
 
     // ── Sound ─────────────────────────────────────────────────────────────
     playReminderSound();
@@ -4304,6 +4341,15 @@ function _handleMissedDoseCheck(med, dateStr, timeStr) {
             `Missed dose: ${med.name}`,
             `Scheduled at ${timeStr} — not taken.`
         );
+
+        // System notification via Service Worker
+        showDoseBuddySystemNotification(`Missed dose: ${med.name}`, {
+            body:  `Your scheduled dose at ${timeStr} was not marked as taken.`,
+            tag:   missedAlertKey,
+            data:  { url: window.location.origin },
+        }).then(r => {
+            if (!r.ok) console.log(`[DoseBuddy Notifications] Missed system notification skipped: ${r.reason}`);
+        });
 
         // Sound
         playMissedDoseAlert();
@@ -6618,6 +6664,16 @@ function openNotifPrefsModal() {
     // Refresh the live permission status row each time the modal opens
     updateNotifPermissionStatus();
 
+    // Update sound status text
+    const soundStatusEl = document.getElementById("notif-sound-status-text");
+    if (soundStatusEl) {
+        if (_audioCtx && _audioCtx.state === "running") {
+            soundStatusEl.textContent = "✓ Sounds enabled — reminder alerts will play";
+        } else {
+            soundStatusEl.textContent = "Tap to unlock reminder alert sounds in this browser";
+        }
+    }
+
     openModal("modal-notif");
 }
 
@@ -6656,6 +6712,71 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     });
 
+    // "Enable Reminder Sounds" button — unlocks audio on mobile/desktop
+    document.getElementById("notif-enable-sound-btn")?.addEventListener("click", async () => {
+        const resultEl = document.getElementById("notif-sound-enable-result");
+        const statusEl = document.getElementById("notif-sound-status-text");
+        const btn      = document.getElementById("notif-enable-sound-btn");
+        function showResult(msg, color) {
+            if (!resultEl) return;
+            resultEl.textContent = msg; resultEl.style.color = color; resultEl.style.display = "block";
+            setTimeout(() => { if (resultEl) resultEl.style.display = "none"; }, 6000);
+        }
+        if (btn) { btn.disabled = true; btn.textContent = "Unlocking…"; }
+        try {
+            await primeAudioElement();
+            // Play a very short test tone to confirm
+            const toneOk = _playAlertTone();
+            const mp3El  = document.getElementById("notify-sound");
+            let mp3Ok = false;
+            if (!toneOk && mp3El && audioUnlocked) {
+                mp3El.currentTime = 0; mp3El.volume = 0.4;
+                await mp3El.play().then(() => { mp3El.pause(); mp3El.currentTime = 0; mp3Ok = true; }).catch(() => {});
+            }
+            const anyOk = toneOk || mp3Ok;
+            if (anyOk) {
+                showResult("✓ Reminder sounds enabled!", "var(--success, #16a34a)");
+                if (statusEl) statusEl.textContent = "✓ Sounds enabled — you will hear reminder alerts";
+            } else {
+                showResult("⚠ Sound unlock attempted. If no sound plays during reminders, try tapping Enable Sound again.", "var(--warning, #d97706)");
+            }
+        } catch (e) {
+            showResult(`❌ Error: ${e.message}`, "var(--error, #e53e3e)");
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = "Enable Sound"; }
+        }
+    });
+
+    // "Test Reminder Sound" button — plays the alert tone directly (no Notification API)
+    document.getElementById("notif-test-sound-btn")?.addEventListener("click", async () => {
+        const resultEl = document.getElementById("notif-test-sound-result");
+        const btn      = document.getElementById("notif-test-sound-btn");
+        function showResult(msg, color) {
+            if (!resultEl) return;
+            resultEl.textContent = msg; resultEl.style.color = color; resultEl.style.display = "block";
+            setTimeout(() => { if (resultEl) resultEl.style.display = "none"; }, 5000);
+        }
+        const prefs = loadFromLS(NOTIF_PREFS_KEY, { "sound-alerts": true });
+        if (prefs["sound-alerts"] === false) {
+            showResult("⚠ Sound Alerts are turned OFF in preferences. Enable them above.", "var(--warning, #d97706)");
+            return;
+        }
+        if (btn) { btn.disabled = true; }
+        try {
+            await primeAudioElement(); // ensure unlocked on this gesture
+            const played = _playNotifSound("Test sound");
+            if (played) {
+                showResult("✓ Test sound played!", "var(--success, #16a34a)");
+            } else {
+                showResult("⚠ Sound is locked. Tap Enable Sound first, then try again.", "var(--warning, #d97706)");
+            }
+        } catch (e) {
+            showResult(`❌ Error: ${e.message}`, "var(--error, #e53e3e)");
+        } finally {
+            if (btn) { btn.disabled = false; }
+        }
+    });
+
     // "Send Test Notification" button
     document.getElementById("notif-test-btn")?.addEventListener("click", async () => {        const resultEl = document.getElementById("notif-test-result");
         const btn      = document.getElementById("notif-test-btn");
@@ -6682,20 +6803,20 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         if (btn) { btn.disabled = true; btn.textContent = "Sending…"; }
-        try {
-            const n = new Notification("DoseBuddy Test ✓", {
-                body: "Notifications are working! You will receive your dose reminders.",
-                icon: "/favicon.ico",
-                tag:  "dosebuddy-test-" + Date.now(),
-            });
-            n.onerror = () => showResult("❌ Notification failed to display.", "var(--error, #e53e3e)");
-            showResult("✓ Test notification sent! Check your browser notifications.", "var(--success, #16a34a)");
-            if (typeof playReminderSound === "function") playReminderSound();
-        } catch (e) {
+        showDoseBuddySystemNotification("DoseBuddy Test ✓", {
+            body: "Notifications are working! You will receive your dose reminders.",
+            tag:  "dosebuddy-test-" + Date.now(),
+        }).then(result => {
+            if (result.ok) {
+                showResult("✓ Test notification sent! Check your browser notifications.", "var(--success, #16a34a)");
+            } else {
+                showResult(`⚠ System notification unavailable (${result.reason}). In-app notifications still work.`, "var(--warning, #d97706)");
+            }
+        }).catch(e => {
             showResult(`❌ Error: ${e.message}`, "var(--error, #e53e3e)");
-        } finally {
+        }).finally(() => {
             if (btn) { btn.disabled = false; btn.textContent = "Send Test"; }
-        }
+        });
     });
 
     // ── Dev-only "Test Missed Dose Alert" button ──────────────────────────
