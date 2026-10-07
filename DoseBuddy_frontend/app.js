@@ -4269,6 +4269,35 @@ window.testMissedDoseSound = function() {
 
 console.log("=== TEST AVAILABLE ===");
 console.log("Run: testMissedDoseSound() in console to test MP3 sound");
+console.log("Run: testSchedulerDebug() to check notification scheduling system");
+
+// Debug function to verify scheduler state - called from browser console during testing
+window.testSchedulerDebug = function() {
+    console.log("=== SCHEDULER DEBUG INFO ===");
+    console.log("Current user:", !!currentUser ? `${currentUser.id} (${currentUser.name})` : "null");
+    console.log("Medications cache:", medsCache ? `${medsCache.length} items` : "null/undefined");
+    console.log("Active dose timers:", Object.keys(_doseTimers).length);
+    console.log("Timer keys:", Object.keys(_doseTimers));
+    console.log("Last scheduled date:", _lastScheduledDate || "(never)");
+    console.log("Fired reminder keys count:", firedReminderKeys.size);
+    console.log("Fired missed alert keys count:", firedMissedAlertKeys.size);
+    
+    if (medsCache && medsCache.length > 0) {
+        console.log("=== MEDICATIONS DETAIL ===");
+        medsCache.forEach((med, i) => {
+            console.log(`${i+1}. ${med.name} (ID: ${med.id})`);
+            console.log(`   Times: ${med.times ? med.times.map(t => t.timeOfDay).join(', ') : 'none'}`);
+            console.log(`   Active today: ${isMedicationActiveToday ? isMedicationActiveToday(med, new Date().toISOString().split('T')[0]) : 'unknown'}`);
+        });
+    }
+    
+    return {
+        hasUser: !!currentUser,
+        medsCount: medsCache ? medsCache.length : 0,
+        timerCount: Object.keys(_doseTimers).length,
+        timerKeys: Object.keys(_doseTimers)
+    };
+};
 
 function playMissedDoseAlert() {
     console.log("[DoseBuddy Audio] playMissedDoseAlert called");
