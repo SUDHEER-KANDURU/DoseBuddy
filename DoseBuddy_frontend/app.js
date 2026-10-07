@@ -2271,7 +2271,9 @@ async function renderDashboard() {
         updateMissedDoseNotifications(meds, todayStr);
         // Single scheduling call — scheduleMedicineReminders is the sole
         // source of truth for dose-time timeouts.
+        console.log(`[DoseBuddy DEBUG] About to call scheduleMedicineReminders() with ${meds.length} medications`);
         scheduleMedicineReminders();
+        console.log(`[DoseBuddy DEBUG] scheduleMedicineReminders() call completed`);
 
         // Fire-and-forget: this is a write-side-effect (marks past doses missed
         // on the server).  It does NOT need to complete before the dashboard
