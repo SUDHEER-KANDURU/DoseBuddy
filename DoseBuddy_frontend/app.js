@@ -1432,7 +1432,13 @@ function completeLoginFromResponse(user) {
 
     // Restart the checkReminders safety-net interval if it was cleared on logout.
     if (!_reminderIntervalId) {
-        _reminderIntervalId = setInterval(checkReminders, 30000);
+        console.log(`[DoseBuddy DEBUG] Starting checkReminders interval every 30 seconds`);
+        _reminderIntervalId = setInterval(() => {
+            console.log(`[DoseBuddy DEBUG] checkReminders interval tick`);
+            checkReminders();
+        }, 30000);
+    } else {
+        console.log(`[DoseBuddy DEBUG] checkReminders interval already running`);
     }
 
     if ("Notification" in window && Notification.permission === "default") {
@@ -2272,8 +2278,17 @@ async function renderDashboard() {
         // Single scheduling call — scheduleMedicineReminders is the sole
         // source of truth for dose-time timeouts.
         console.log(`[DoseBuddy DEBUG] About to call scheduleMedicineReminders() with ${meds.length} medications`);
-        scheduleMedicineReminders();
-        console.log(`[DoseBuddy DEBUG] scheduleMedicineReminders() call completed`);
+        console.log(`[DoseBuddy DEBUG] typeof scheduleMedicineReminders:`, typeof scheduleMedicineReminders);
+        console.log(`[DoseBuddy DEBUG] currentUser exists:`, !!currentUser);
+        console.log(`[DoseBuddy DEBUG] medsCache exists:`, !!medsCache);
+        
+        try {
+            scheduleMedicineReminders();
+            console.log(`[DoseBuddy DEBUG] scheduleMedicineReminders() call completed successfully`);
+        } catch (error) {
+            console.error(`[DoseBuddy DEBUG] scheduleMedicineReminders() call FAILED:`, error);
+            console.error(`[DoseBuddy DEBUG] Error stack:`, error.stack);
+        }
 
         // Fire-and-forget: this is a write-side-effect (marks past doses missed
         // on the server).  It does NOT need to complete before the dashboard
@@ -4450,9 +4465,8 @@ function _handleMissedDoseCheck(med, dateStr, timeStr) {
 }
 
 // ── SECONDARY: 30-second safety-net ─────────────────────────────────────────
-// Catches doses whose exact timers were lost (page refresh, browser tab
-// throttling, clock drift).  Does NOT drive the primary schedule — that is
-// done by scheduleMedicineReminders() above.
+// This is now the PRIMARY system since the complex scheduler is failing.
+// Checks every 30s for doses that should be marked as missed and updates dashboard.
 function checkReminders() {
     if (!currentUser) return;
     if (!medsCache || medsCache.length === 0) return;
@@ -4468,13 +4482,16 @@ function checkReminders() {
 
     const nowMs      = now.getTime();
     const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    let processedCount = 0;
+
+    console.log(`[DoseBuddy CheckReminders] Checking at ${now.toLocaleTimeString()}`);
 
     for (const med of medsCache) {
         if (!isMedicationActiveToday(med, todayStr)) continue;
-        if (!Array.isArray(med.times))               continue;
+        if (!Array.isArray(med.times)) continue;
 
         for (const timeObj of med.times) {
-            const rawTime    = timeObj.timeOfDay || "";
+            const rawTime = timeObj.timeOfDay || "";
             const displayTime = rawTime.substring(0, 5);
             if (!displayTime || displayTime.length < 5) continue;
 
@@ -4483,25 +4500,64 @@ function checkReminders() {
 
             const doseMinutes = hh * 60 + mm;
             const diff = nowMinutes - doseMinutes; // >0 = past, <0 = future
+            
+            console.log(`[DoseBuddy CheckReminders] ${med.name} at ${displayTime}: ${diff} minutes late`);
 
-            // Safety-net reminder: catches page-loads that missed the exact window
-            // (diff 0–4 min). firedReminderKeys prevents double-fire.
-            if (diff >= 0 && diff <= 4) {
-                triggerDoseNotification(med, todayStr, displayTime);
-            }
-
-            // Safety-net missed: catches missed-dose timeouts lost to tab throttling
+            // Check if dose should be marked as missed (>1 minute late)
             if (diff > MISSED_GRACE_MIN) {
                 const status = getDoseStatus(currentUser.id, med.id, todayStr, displayTime);
-                if (status !== "TAKEN" && status !== "MISSED") {
+                console.log(`[DoseBuddy CheckReminders] ${med.name} status: ${status}`);
+                
+                if (status === "PENDING") {
                     const missedAlertKey = `missed-${currentUser.id}-${med.id}-${todayStr}-${displayTime}`;
                     if (!firedMissedAlertKeys.has(missedAlertKey)) {
-                        console.log(`[DoseBuddy Scheduler] SAFETY-NET MISSED: med="${med.name}" diff=${diff}min`);
-                        _handleMissedDoseCheck(med, todayStr, displayTime);
+                        firedMissedAlertKeys.add(missedAlertKey);
+                        
+                        console.log(`[DoseBuddy CheckReminders] PROCESSING MISSED: ${med.name} (${diff} min late)`);
+                        
+                        // Mark as missed immediately
+                        markDoseMissed(currentUser.id, med.id, todayStr, displayTime).then(() => {
+                            console.log(`[DoseBuddy CheckReminders] Server marked ${med.name} as MISSED`);
+                            
+                            // Update local logs array
+                            const existing = logs.find(l => 
+                                (l.medicationId === med.id || l.medId === med.id) &&
+                                l.date === todayStr && l.time === displayTime
+                            );
+                            if (existing) {
+                                existing.status = "MISSED";
+                            } else {
+                                logs.push({ medicationId: med.id, date: todayStr, time: displayTime, status: "MISSED" });
+                            }
+                            
+                            // Add in-app notification
+                            addNotification(
+                                "missed",
+                                `Missed dose: ${med.name}`,
+                                `Scheduled at ${displayTime} — not taken`
+                            );
+                            console.log(`[DoseBuddy CheckReminders] Added missed notification for ${med.name}`);
+                            
+                            // Update dashboard status cell immediately
+                            _updateDashboardStatusCell(med.id, displayTime, "MISSED");
+                            console.log(`[DoseBuddy CheckReminders] Updated dashboard cell to MISSED`);
+                            
+                            // Refresh notification badge
+                            refreshNotifBadge();
+                            
+                        }).catch(err => {
+                            console.error(`[DoseBuddy CheckReminders] Failed to mark missed:`, err);
+                        });
+                        
+                        processedCount++;
                     }
                 }
             }
         }
+    }
+    
+    if (processedCount > 0) {
+        console.log(`[DoseBuddy CheckReminders] Processed ${processedCount} missed doses`);
     }
 }
 
