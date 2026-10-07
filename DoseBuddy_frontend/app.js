@@ -4098,6 +4098,41 @@ function playReminderSound() {
 // Missed-dose alert sound (fires at PENDING → MISSED transition, ~5 min late)
 // Distinct entry point so the two events are never confused, even though they
 // share the same asset + player.
+// Add a simple test function you can call from browser console
+window.testMissedDoseSound = function() {
+    console.log("=== TESTING MISSED DOSE SOUND ===");
+    console.log("1. Testing playMissedDoseAlert() directly...");
+    
+    const result = playMissedDoseAlert();
+    
+    setTimeout(() => {
+        console.log("2. Testing direct mp3 play...");
+        const audio = document.getElementById("notify-sound");
+        if (audio) {
+            console.log("Audio element found:", audio);
+            console.log("Audio src:", audio.src);
+            console.log("Audio readyState:", audio.readyState);
+            audio.volume = 1.0;
+            audio.currentTime = 0;
+            const playPromise = audio.play();
+            if (playPromise) {
+                playPromise.then(() => {
+                    console.log("✅ DIRECT AUDIO PLAY WORKED!");
+                }).catch(err => {
+                    console.error("❌ DIRECT AUDIO PLAY FAILED:", err);
+                });
+            }
+        } else {
+            console.error("❌ No audio element found with id 'notify-sound'");
+        }
+    }, 1000);
+    
+    return result;
+};
+
+console.log("=== TEST AVAILABLE ===");
+console.log("Run: testMissedDoseSound() in console to test the sound");
+
 function playMissedDoseAlert() {
     console.log("[DoseBuddy Audio] playMissedDoseAlert called");
     
