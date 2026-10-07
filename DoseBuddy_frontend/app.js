@@ -4025,27 +4025,43 @@ function primeAudioElement() {
 // Called by playReminderSound() and playMissedDoseAlert().
 // Tries Web Audio tone first (most reliable from setTimeout); falls back to mp3.
 function _playNotifSound(label) {
+    console.log(`[DoseBuddy Audio] _playNotifSound called with label: "${label}"`);
+    
     const prefs = loadFromLS(NOTIF_PREFS_KEY, { "sound-alerts": true });
+    console.log(`[DoseBuddy Audio] Sound preferences:`, prefs);
+    
     if (prefs["sound-alerts"] === false) {
-        console.log(`[DoseBuddy] ${label}: sound alerts disabled`);
+        console.log(`[DoseBuddy Audio] ${label}: sound alerts disabled in preferences`);
         return false;
     }
 
-    console.log(`[DoseBuddy] ${label}: attempting playback (audioReady=${_audioReady} audioUnlocked=${audioUnlocked})`);
+    console.log(`[DoseBuddy Audio] ${label}: attempting playback (audioReady=${_audioReady} audioUnlocked=${audioUnlocked})`);
 
     // PRIMARY: Web Audio tone — re-check state in case it changed since unlock
     if (_audioCtx && _audioCtx.state === "running") {
         _audioReady = true; // keep flag in sync
+        console.log(`[DoseBuddy Audio] Attempting Web Audio tone...`);
         if (_playAlertTone()) {
             console.log(`[DoseBuddy Audio] ${label === "Reminder audio" ? "REMINDER" : "MISSED"} SOUND FIRED (Web Audio tone)`);
             return true;
+        } else {
+            console.log(`[DoseBuddy Audio] Web Audio tone failed, trying mp3 fallback`);
         }
+    } else {
+        console.log(`[DoseBuddy Audio] AudioContext not running, state: ${_audioCtx ? _audioCtx.state : 'null'}, trying mp3 fallback`);
     }
 
     // FALLBACK: HTMLAudioElement mp3
+    console.log(`[DoseBuddy Audio] Trying HTMLAudioElement mp3 fallback`);
     const audio = document.getElementById("notify-sound");
-    if (!audio) { console.warn(`[DoseBuddy] ${label}: no audio element`); return false; }
-    if (audio.error) { console.warn(`[DoseBuddy] ${label}: audio element error ${audio.error.code}`); return false; }
+    if (!audio) { 
+        console.warn(`[DoseBuddy Audio] ${label}: no audio element found with id 'notify-sound'`); 
+        return false; 
+    }
+    if (audio.error) { 
+        console.warn(`[DoseBuddy Audio] ${label}: audio element error ${audio.error.code}`); 
+        return false; 
+    }
 
     try {
         stopReminderAudio();
@@ -4083,7 +4099,37 @@ function playReminderSound() {
 // Distinct entry point so the two events are never confused, even though they
 // share the same asset + player.
 function playMissedDoseAlert() {
-    return _playNotifSound("Missed-dose audio");
+    console.log("[DoseBuddy Audio] playMissedDoseAlert called");
+    
+    // Try the complex system first
+    const result = _playNotifSound("Missed-dose audio");
+    console.log("[DoseBuddy Audio] _playNotifSound result:", result);
+    
+    // If that failed, try a simple direct approach
+    if (!result) {
+        console.log("[DoseBuddy Audio] Complex system failed, trying direct mp3 play");
+        try {
+            const audio = document.getElementById("notify-sound");
+            if (audio) {
+                audio.currentTime = 0;
+                audio.volume = 1.0;
+                audio.muted = false;
+                const playPromise = audio.play();
+                if (playPromise) {
+                    playPromise.then(() => {
+                        console.log("[DoseBuddy Audio] DIRECT MP3 MISSED SOUND PLAYED SUCCESSFULLY");
+                    }).catch(err => {
+                        console.error("[DoseBuddy Audio] Direct mp3 play failed:", err);
+                    });
+                }
+                return true;
+            }
+        } catch (e) {
+            console.error("[DoseBuddy Audio] Direct play error:", e);
+        }
+    }
+    
+    return result;
 }
 
 function triggerDoseNotification(med, dateStr, displayTime) {
@@ -4518,6 +4564,10 @@ function checkReminders() {
                         firedMissedAlertKeys.add(missedAlertKey);
                         
                         console.log(`[DoseBuddy CheckReminders] PROCESSING MISSED: ${med.name} (${diff} min late)`);
+                        
+                        // **PLAY MISSED DOSE SOUND IMMEDIATELY**
+                        console.log(`[DoseBuddy CheckReminders] Playing missed dose sound for ${med.name}`);
+                        playMissedDoseAlert();
                         
                         // Mark as missed immediately
                         markDoseMissed(currentUser.id, med.id, todayStr, displayTime).then(() => {
