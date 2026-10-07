@@ -135,13 +135,18 @@ async function authFetch(url, options = {}) {
                 retryController.abort();
             }, timeoutMs);
             
-            response = await fetch(url, { 
-                cache: "no-store", 
-                ...options, 
-                headers: retryHeaders, 
-                signal: retryController.signal 
-            });
-            clearTimeout(retryTimeoutId);
+            try {
+                response = await fetch(url, { 
+                    cache: "no-store", 
+                    ...options, 
+                    headers: retryHeaders, 
+                    signal: retryController.signal 
+                });
+                clearTimeout(retryTimeoutId);
+            } catch (retryError) {
+                clearTimeout(retryTimeoutId);
+                throw retryError;
+            }
             
             const totalTime = performance.now() - startTime;
             console.log(`[AuthFetch] Retry response in ${(performance.now() - retryStartTime).toFixed(2)}ms, total: ${totalTime.toFixed(2)}ms`);
@@ -2021,10 +2026,6 @@ function setupMedicineForm() {
                 submitBtn.textContent = submitBtn.textContent === "Saving..." ? "Save Medicine" : submitBtn.textContent;
                 submitBtn.disabled = false;
             }
-        }
-            console.error(err);
-            errorText.textContent = "Error connecting to server.";
-            showToast("Error connecting to server.", "error");
         }
     });
 }

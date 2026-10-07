@@ -77,8 +77,7 @@ async function getDbConnection(env: Env) {
     acquireTimeout: 5000,         // 5 second acquire timeout
     timeout: 10000,               // 10 second query timeout
     connectionLimit: 10,          // Connection pool limit
-    queueLimit: 0,                // No queue limit
-    acquireTimeout: 60000,        // 60 second acquire timeout for pool
+    queueLimit: 0,                // No queue limit - fail fast when pool exhausted
     multipleStatements: false     // Security: disable multiple statements
   })) as any;
 }
