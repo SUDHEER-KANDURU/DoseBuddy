@@ -4238,37 +4238,39 @@ function cancelTimersForMedication(medId) { _cancelDoseTimersForMed(medId); }
 // window (clearScheduledTimeouts is called before we get here via renderDash).
 function scheduleMedicineReminders() {
     console.log(`[DoseBuddy Scheduler DEBUG] scheduleMedicineReminders called`);
-    console.log(`[DoseBuddy Scheduler DEBUG] currentUser:`, !!currentUser);
-    console.log(`[DoseBuddy Scheduler DEBUG] medsCache:`, medsCache ? medsCache.length + ' items' : 'null/undefined');
     
-    if (!currentUser || !medsCache || medsCache.length === 0) {
-        console.log(`[DoseBuddy Scheduler DEBUG] EARLY EXIT - currentUser: ${!!currentUser}, medsCache: ${medsCache ? medsCache.length : 'null'}`);
-        return;
-    }
+    try {
+        console.log(`[DoseBuddy Scheduler DEBUG] currentUser:`, !!currentUser);
+        console.log(`[DoseBuddy Scheduler DEBUG] medsCache:`, medsCache ? medsCache.length + ' items' : 'null/undefined');
+        
+        if (!currentUser || !medsCache || medsCache.length === 0) {
+            console.log(`[DoseBuddy Scheduler DEBUG] EARLY EXIT - currentUser: ${!!currentUser}, medsCache: ${medsCache ? medsCache.length : 'null'}`);
+            return;
+        }
 
-    const now   = new Date();
-    const today = [
-        now.getFullYear(),
-        String(now.getMonth() + 1).padStart(2, "0"),
-        String(now.getDate()).padStart(2, "0")
-    ].join("-");
-    
-    console.log(`[DoseBuddy Scheduler DEBUG] today: ${today}, now: ${now.getHours()}:${now.getMinutes()}:${now.getSeconds()}`);
+        const now   = new Date();
+        const today = [
+            now.getFullYear(),
+            String(now.getMonth() + 1).padStart(2, "0"),
+            String(now.getDate()).padStart(2, "0")
+        ].join("-");
+        
+        console.log(`[DoseBuddy Scheduler DEBUG] today: ${today}, now: ${now.getHours()}:${now.getMinutes()}:${now.getSeconds()}`);
 
-    // Day-rollover: clear dedup keys once per new calendar day
-    if (_lastScheduledDate !== "" && _lastScheduledDate !== today) {
-        firedReminderKeys.clear();
-        firedMissedAlertKeys.clear();
+        // Day-rollover: clear dedup keys once per new calendar day
+        if (_lastScheduledDate !== "" && _lastScheduledDate !== today) {
+            firedReminderKeys.clear();
+            firedMissedAlertKeys.clear();
+            _clearDoseTimers();
+            console.log("[DoseBuddy Scheduler] New calendar day — cleared dedup keys and timers.");
+        }
+        _lastScheduledDate = today;
+
+        // Cancel any pre-existing timers for all meds (they will be rescheduled)
         _clearDoseTimers();
-        console.log("[DoseBuddy Scheduler] New calendar day — cleared dedup keys and timers.");
-    }
-    _lastScheduledDate = today;
 
-    // Cancel any pre-existing timers for all meds (they will be rescheduled)
-    _clearDoseTimers();
-
-    const nowMs    = now.getTime();
-    let scheduled  = 0;
+        const nowMs    = now.getTime();
+        let scheduled  = 0;
 
     for (const med of medsCache) {
         console.log(`[DoseBuddy Scheduler DEBUG] Processing med: ${med.name}, id: ${med.id}`);
@@ -4360,6 +4362,11 @@ function scheduleMedicineReminders() {
         }
     }
     console.log(`[DoseBuddy Scheduler] Scheduled ${scheduled} reminder(s) + ${Object.keys(_doseTimers).length} missed-dose check(s) for ${today}.`);
+    
+    } catch (error) {
+        console.error(`[DoseBuddy Scheduler DEBUG] FATAL ERROR in scheduleMedicineReminders:`, error);
+        console.error(`[DoseBuddy Scheduler DEBUG] Stack:`, error.stack);
+    }
 }
 
 // ── Missed-dose handler (called by exact timeout OR catch-up on page load) ──
