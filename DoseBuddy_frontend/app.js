@@ -2082,6 +2082,7 @@ async function renderDashboard() {
         logs = todayLogs;
 
         const meds = (medsRes.status === "fulfilled" && Array.isArray(medsRes.value)) ? medsRes.value : [];
+        console.log(`[DoseBuddy DEBUG] renderDashboard: fetched ${meds.length} medications:`, meds);
         medsCache = meds;
         medsCacheDate = todayStr;
 
@@ -4049,6 +4050,7 @@ function playMissedDoseAlert() {
 
 function triggerDoseNotification(med, dateStr, displayTime) {
     console.log(`[DoseBuddy] triggerDoseNotification — med:"${med?.name}" time:${displayTime} date:${dateStr} user:${currentUser?.id}`);
+    console.log(`[DoseBuddy DEBUG] triggerDoseNotification called at ${new Date().toLocaleTimeString()}`);
 
     if (!currentUser) {
         console.log("[DoseBuddy] REMINDER SKIPPED (no currentUser)");
@@ -4184,7 +4186,7 @@ function _updateDashboardStatusCell(medId, timeStr, newStatus) {
 //              the tab was hidden/backgrounded.
 //
 // Grace period before a dose is considered missed:
-const MISSED_GRACE_MIN = 5;   // minutes
+const MISSED_GRACE_MIN = 1;   // minutes - changed to 1 minute grace period
 
 // Per-dose timer registry — keyed by "medId-date-time"
 // Value: { reminderId, missedId } — TimeoutID values
@@ -4219,7 +4221,14 @@ function cancelTimersForMedication(medId) { _cancelDoseTimersForMed(medId); }
 // cleanup.  Does NOT clear timers for past doses that are still in the grace
 // window (clearScheduledTimeouts is called before we get here via renderDash).
 function scheduleMedicineReminders() {
-    if (!currentUser || !medsCache || medsCache.length === 0) return;
+    console.log(`[DoseBuddy Scheduler DEBUG] scheduleMedicineReminders called`);
+    console.log(`[DoseBuddy Scheduler DEBUG] currentUser:`, !!currentUser);
+    console.log(`[DoseBuddy Scheduler DEBUG] medsCache:`, medsCache ? medsCache.length + ' items' : 'null/undefined');
+    
+    if (!currentUser || !medsCache || medsCache.length === 0) {
+        console.log(`[DoseBuddy Scheduler DEBUG] EARLY EXIT - currentUser: ${!!currentUser}, medsCache: ${medsCache ? medsCache.length : 'null'}`);
+        return;
+    }
 
     const now   = new Date();
     const today = [
@@ -4227,6 +4236,8 @@ function scheduleMedicineReminders() {
         String(now.getMonth() + 1).padStart(2, "0"),
         String(now.getDate()).padStart(2, "0")
     ].join("-");
+    
+    console.log(`[DoseBuddy Scheduler DEBUG] today: ${today}, now: ${now.getHours()}:${now.getMinutes()}:${now.getSeconds()}`);
 
     // Day-rollover: clear dedup keys once per new calendar day
     if (_lastScheduledDate !== "" && _lastScheduledDate !== today) {
@@ -4244,16 +4255,39 @@ function scheduleMedicineReminders() {
     let scheduled  = 0;
 
     for (const med of medsCache) {
-        if (!isMedicationActiveToday(med, today)) continue;
-        if (!Array.isArray(med.times))            continue;
+        console.log(`[DoseBuddy Scheduler DEBUG] Processing med: ${med.name}, id: ${med.id}`);
+        
+        if (!isMedicationActiveToday(med, today)) {
+            console.log(`[DoseBuddy Scheduler SKIP] medicine="${med.name}" reason="not active today"`);
+            continue;
+        }
+        
+        if (!Array.isArray(med.times)) {
+            console.log(`[DoseBuddy Scheduler SKIP] medicine="${med.name}" reason="times not array" times:`, med.times);
+            continue;
+        }
+        
+        console.log(`[DoseBuddy Scheduler DEBUG] med="${med.name}" has ${med.times.length} times:`, med.times);
 
         for (const timeObj of med.times) {
             const rawTime    = timeObj.timeOfDay || "";
             const timeStr    = rawTime.substring(0, 5);
-            if (!timeStr || timeStr.length < 5)  continue;
+            
+            console.log(`[DoseBuddy Scheduler DEBUG] rawTime: "${rawTime}", timeStr: "${timeStr}"`);
+            
+            if (!timeStr || timeStr.length < 5) {
+                console.log(`[DoseBuddy Scheduler SKIP] medicine="${med.name}" time="${timeStr}" reason="invalid time format"`);
+                continue;
+            }
 
             const [hh, mm] = timeStr.split(":").map(Number);
-            if (isNaN(hh) || isNaN(mm))          continue;
+            if (isNaN(hh) || isNaN(mm)) {
+                console.log(`[DoseBuddy Scheduler SKIP] medicine="${med.name}" time="${timeStr}" reason="parsed time is NaN" hh=${hh} mm=${mm}`);
+                continue;
+            }
+            
+            const status = getDoseStatus(currentUser.id, med.id, today, timeStr);
+            console.log(`[DoseBuddy Scheduler DEBUG] med="${med.name}" time=${timeStr} status="${status}"`);
 
             // Build the exact local wall-clock Date for this dose
             const doseAt = new Date(now);
@@ -4264,6 +4298,8 @@ function scheduleMedicineReminders() {
 
             // ── Reminder timeout ────────────────────────────────────────
             const reminderDelay = doseMs - nowMs;
+            console.log(`[DoseBuddy Scheduler DEBUG] med="${med.name}" time=${timeStr} reminderDelay=${reminderDelay}ms (${Math.round(reminderDelay/1000)}s)`);
+            
             let reminderId = null;
             if (reminderDelay > 0) {
                 const capturedMed  = med;
@@ -4274,6 +4310,7 @@ function scheduleMedicineReminders() {
                     triggerDoseNotification(capturedMed, capturedDate, capturedTime);
                 }, reminderDelay);
                 scheduled++;
+                console.log(`[DoseBuddy Scheduler DEBUG] Scheduled reminder timer for ${med.name} at ${timeStr}`);
             } else if (reminderDelay > -MISSED_GRACE_MIN * 60 * 1000) {
                 // Dose time just passed (within grace window) and we missed the
                 // exact timeout (page load, tab was hidden). Fire now as a catch-up.
@@ -4283,6 +4320,8 @@ function scheduleMedicineReminders() {
 
             // ── Missed-dose timeout ─────────────────────────────────────
             const missedDelay = missedMs - nowMs;
+            console.log(`[DoseBuddy Scheduler DEBUG] med="${med.name}" time=${timeStr} missedDelay=${missedDelay}ms (${Math.round(missedDelay/1000)}s)`);
+            
             let missedId = null;
             if (missedDelay > 0) {
                 const capturedMed  = med;
@@ -4292,8 +4331,10 @@ function scheduleMedicineReminders() {
                     console.log(`[DoseBuddy Scheduler] MISSED CHECK FIRED — med="${capturedMed.name}" scheduled=${capturedTime} grace=${MISSED_GRACE_MIN}min actual=${new Date().toLocaleTimeString()}`);
                     _handleMissedDoseCheck(capturedMed, capturedDate, capturedTime);
                 }, missedDelay);
+                console.log(`[DoseBuddy Scheduler DEBUG] Scheduled missed check timer for ${med.name} at ${timeStr}`);
             } else {
                 // Missed window already passed on this page load — run check now
+                console.log(`[DoseBuddy Scheduler DEBUG] Missed window passed, running immediate check for ${med.name} at ${timeStr}`);
                 _handleMissedDoseCheck(med, today, timeStr);
             }
 
@@ -4310,19 +4351,29 @@ function scheduleMedicineReminders() {
 // 2. Only marks MISSED if status is still PENDING.
 // 3. Fires exactly once per dose per session via firedMissedAlertKeys.
 function _handleMissedDoseCheck(med, dateStr, timeStr) {
+    console.log(`[DoseBuddy Scheduler] _handleMissedDoseCheck called for med="${med.name}" time=${timeStr} at ${new Date().toLocaleTimeString()}`);
     if (!currentUser) return;
 
     const status = getDoseStatus(currentUser.id, med.id, dateStr, timeStr);
     console.log(`[DoseBuddy Scheduler] MISSED CHECK — med="${med.name}" time=${timeStr} status=${status}`);
 
-    if (status === "TAKEN" || status === "MISSED") return; // already handled
+    if (status === "TAKEN" || status === "MISSED") {
+        console.log(`[DoseBuddy Scheduler] MISSED CHECK SKIPPED — med="${med.name}" already ${status}`);
+        return; // already handled
+    }
 
     const missedAlertKey = `missed-${currentUser.id}-${med.id}-${dateStr}-${timeStr}`;
-    if (firedMissedAlertKeys.has(missedAlertKey)) return; // deduped
+    if (firedMissedAlertKeys.has(missedAlertKey)) {
+        console.log(`[DoseBuddy Scheduler] MISSED CHECK SKIPPED — already fired for ${missedAlertKey}`);
+        return; // deduped
+    }
     firedMissedAlertKeys.add(missedAlertKey);
+
+    console.log(`[DoseBuddy Scheduler] Processing missed dose for med="${med.name}" time=${timeStr}`);
 
     // Mark on server + update in memory
     markDoseMissed(currentUser.id, med.id, dateStr, timeStr).then(() => {
+        console.log(`[DoseBuddy Scheduler] markDoseMissed succeeded for med="${med.name}"`);
         invalidateDataCache("/logs/today/", "/logs/summary/", "/logs/adherence/", "/streaks/");
 
         const existing = logs.find(
@@ -4331,33 +4382,43 @@ function _handleMissedDoseCheck(med, dateStr, timeStr) {
         );
         if (!existing) {
             logs.push({ medicationId: med.id, date: dateStr, time: timeStr, status: "MISSED" });
+            console.log(`[DoseBuddy Scheduler] Added missed log entry for med="${med.name}"`);
         } else {
             existing.status = "MISSED";
+            console.log(`[DoseBuddy Scheduler] Updated existing log entry to MISSED for med="${med.name}"`);
         }
 
-        // In-app notification (persisted to localStorage)
+        // 1. In-app notification (persisted to localStorage)
+        console.log(`[DoseBuddy Scheduler] Adding in-app notification for missed dose: ${med.name}`);
         addNotification(
             "missed",
             `Missed dose: ${med.name}`,
             `Scheduled at ${timeStr} — not taken.`
         );
 
-        // System notification via Service Worker
+        // 2. System notification via Service Worker
+        console.log(`[DoseBuddy Scheduler] Sending system notification for missed dose: ${med.name}`);
         showDoseBuddySystemNotification(`Missed dose: ${med.name}`, {
             body:  `Your scheduled dose at ${timeStr} was not marked as taken.`,
             tag:   missedAlertKey,
             data:  { url: window.location.origin },
         }).then(r => {
-            if (!r.ok) console.log(`[DoseBuddy Notifications] Missed system notification skipped: ${r.reason}`);
+            if (r.ok) {
+                console.log(`[DoseBuddy Notifications] System notification sent successfully for ${med.name}`);
+            } else {
+                console.log(`[DoseBuddy Notifications] System notification failed: ${r.reason} for ${med.name}`);
+            }
         });
 
-        // Sound
+        // 3. Sound
+        console.log(`[DoseBuddy Scheduler] Playing missed dose alert sound for ${med.name}`);
         playMissedDoseAlert();
 
         console.log(`[DoseBuddy Scheduler] MISSED ALERT fired — med="${med.name}" key=${missedAlertKey}`);
 
         // Re-render dashboard so "Due now" → "Missed" appears
         setTimeout(() => {
+            console.log(`[DoseBuddy Scheduler] Re-rendering dashboard after missed dose transition`);
             renderDashboard().catch(e => console.warn("[DoseBuddy Scheduler] post-missed render:", e));
         }, 1500);
     }).catch(err => {
