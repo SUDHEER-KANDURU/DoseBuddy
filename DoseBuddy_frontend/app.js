@@ -4614,11 +4614,13 @@ function scheduleMedicineReminders() {
                 // exact timeout (page load, tab was hidden). Fire now as a catch-up.
                 console.log(`[FEAT-001 Scheduler] ⚡ REMINDER CATCH-UP — med="${med.name}" time=${timeStr} delta=${Math.round(-reminderDelay/1000)}s late`);
                 triggerDoseNotification(med, today, timeStr);
+            } else {
+                console.log(`[FEAT-001 Scheduler] ⏭️  SKIP reminder for ${med.name} at ${timeStr} (too far past: ${Math.round(-reminderDelay/1000)}s ago)`);
             }
 
             // ── Missed-dose timeout ─────────────────────────────────────
             const missedDelay = missedMs - nowMs;
-            console.log(`[DoseBuddy Scheduler DEBUG] med="${med.name}" time=${timeStr} missedDelay=${missedDelay}ms (${Math.round(missedDelay/1000)}s)`);
+            console.log(`[FEAT-001 Scheduler] - missedDelay: ${missedDelay}ms (${Math.round(missedDelay/1000)}s)`);
             
             let missedId = null;
             if (missedDelay > 0) {
@@ -4626,26 +4628,48 @@ function scheduleMedicineReminders() {
                 const capturedDate = today;
                 const capturedTime = timeStr;
                 missedId = setTimeout(() => {
-                    console.log(`[DoseBuddy Scheduler] MISSED CHECK FIRED — med="${capturedMed.name}" scheduled=${capturedTime} grace=${MISSED_GRACE_MIN}min actual=${new Date().toLocaleTimeString()}`);
+                    console.log(`[FEAT-001 Scheduler] ⏰ MISSED CHECK FIRED — med="${capturedMed.name}" scheduled=${capturedTime} grace=${MISSED_GRACE_MIN}min actual=${new Date().toLocaleTimeString()}`);
                     _handleMissedDoseCheck(capturedMed, capturedDate, capturedTime);
                 }, missedDelay);
-                console.log(`[DoseBuddy Scheduler DEBUG] Scheduled missed check timer for ${med.name} at ${timeStr}`);
+                console.log(`[FEAT-001 Scheduler] ✓ Scheduled missed check timer ${missedId} for ${med.name} at ${timeStr} (in ${Math.round(missedDelay/1000)}s)`);
             } else {
                 // Missed window already passed on this page load — run check now
-                console.log(`[DoseBuddy Scheduler DEBUG] Missed window passed, running immediate check for ${med.name} at ${timeStr}`);
+                console.log(`[FEAT-001 Scheduler] ⚡ Missed window passed, running immediate check for ${med.name} at ${timeStr}`);
                 _handleMissedDoseCheck(med, today, timeStr);
             }
 
             _doseTimers[timerKey] = { reminderId, missedId };
-
-            console.log(`[DoseBuddy Scheduler] med="${med.name}" dose=${timeStr} | reminderIn=${reminderDelay > 0 ? Math.round(reminderDelay/1000)+'s' : 'catch-up'} | missedIn=${missedDelay > 0 ? Math.round(missedDelay/1000)+'s' : 'immediate'}`);
+            
+            console.log(`[FEAT-001 Scheduler] ✓ Registered timer entry: ${timerKey}`);
+            console.log(`[FEAT-001 Scheduler] med="${med.name}" dose=${timeStr} | reminderIn=${reminderDelay > 0 ? Math.round(reminderDelay/1000)+'s' : 'catch-up'} | missedIn=${missedDelay > 0 ? Math.round(missedDelay/1000)+'s' : 'immediate'}`);
         }
     }
-    console.log(`[DoseBuddy Scheduler] Scheduled ${scheduled} reminder(s) + ${Object.keys(_doseTimers).length} missed-dose check(s) for ${today}.`);
+    
+    const totalTimers = Object.keys(_doseTimers).length;
+    console.log(`[FEAT-001 Scheduler] ═══ SCHEDULING COMPLETE ═══`);
+    console.log(`[FEAT-001 Scheduler] Summary:`);
+    console.log(`[FEAT-001 Scheduler] - Processed: ${processed}/${medsCache.length} medications`);
+    console.log(`[FEAT-001 Scheduler] - Skipped: ${skipped} medications`);
+    console.log(`[FEAT-001 Scheduler] - Future reminders scheduled: ${scheduled}`);
+    console.log(`[FEAT-001 Scheduler] - Total timer entries created: ${totalTimers}`);
+    console.log(`[FEAT-001 Scheduler] - Active timer keys: [${Object.keys(_doseTimers).join(', ')}]`);
+    console.log(`[FEAT-001 Scheduler] - Date: ${today}`);
+    
+    // Verify timers were created correctly
+    if (processed > skipped && totalTimers === 0) {
+        console.error(`[FEAT-001 Scheduler] ❌ ERROR: No timers created despite processing ${processed - skipped} active medications!`);
+    } else if (totalTimers > 0) {
+        console.log(`[FEAT-001 Scheduler] ✅ SUCCESS: Timer system is active with ${totalTimers} entries`);
+    }
     
     } catch (error) {
-        console.error(`[DoseBuddy Scheduler DEBUG] FATAL ERROR in scheduleMedicineReminders:`, error);
-        console.error(`[DoseBuddy Scheduler DEBUG] Stack:`, error.stack);
+        console.error(`[FEAT-001 Scheduler] ❌ FATAL ERROR in scheduleMedicineReminders:`, error);
+        console.error(`[FEAT-001 Scheduler] Stack:`, error.stack);
+        console.error(`[FEAT-001 Scheduler] Context dump:`);
+        console.error(`[FEAT-001 Scheduler] - currentUser exists: ${!!currentUser}`);
+        console.error(`[FEAT-001 Scheduler] - medsCache exists: ${!!medsCache}`);
+        console.error(`[FEAT-001 Scheduler] - medsCache length: ${medsCache ? medsCache.length : 'N/A'}`);
+        console.error(`[FEAT-001 Scheduler] - _doseTimers count: ${Object.keys(_doseTimers).length}`);
     }
 }
 
