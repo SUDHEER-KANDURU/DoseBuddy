@@ -2289,6 +2289,10 @@ async function renderDashboard() {
             console.error(`[DoseBuddy DEBUG] scheduleMedicineReminders() call FAILED:`, error);
             console.error(`[DoseBuddy DEBUG] Error stack:`, error.stack);
         }
+        
+        // Also run checkReminders immediately to catch any existing missed doses
+        console.log(`[DoseBuddy DEBUG] Running immediate checkReminders after dashboard load`);
+        checkReminders();
 
         // Fire-and-forget: this is a write-side-effect (marks past doses missed
         // on the server).  It does NOT need to complete before the dashboard
