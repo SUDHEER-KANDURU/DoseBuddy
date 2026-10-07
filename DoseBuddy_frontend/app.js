@@ -436,8 +436,8 @@ async function logMissedDoseActivities(meds, todayStr) {
     }
 }
 
-let scheduledTimeouts  = [];   // reminder-fire timeouts — cleared on reschedule
-let activeMissTimeouts = [];   // 5-min miss-window timers — NOT cleared on reschedule
+// Removed: let scheduledTimeouts  = [];   // old system replaced by _doseTimers
+let activeMissTimeouts = [];   // legacy - to be removed
 let activeReminderAudio = null;
 let audioUnlocked = false; // tracks whether browser autoplay has been unblocked
 
@@ -2018,14 +2018,31 @@ function updateGreeting() {
 //  @returns {boolean}
 // ─────────────────────────────────────────────────────────────────────────────
 function isMedicationActiveToday(med, todayStr) {
-    if (!med) return false;
+    if (!med) {
+        console.log(`[DoseBuddy DEBUG] isMedicationActiveToday: med is null/undefined`);
+        return false;
+    }
     const start = med.startDate || "";
     const end   = med.endDate   || "";
+    console.log(`[DoseBuddy DEBUG] isMedicationActiveToday: med="${med.name}" today="${todayStr}" start="${start}" end="${end}"`);
+    
     // Missing dates → treat as active (backward-compat with older records)
-    if (!start && !end) return true;
+    if (!start && !end) {
+        console.log(`[DoseBuddy DEBUG] isMedicationActiveToday: med="${med.name}" - no start/end dates, treating as active`);
+        return true;
+    }
+    
     // String comparison works for ISO "YYYY-MM-DD" format
-    if (start && start > todayStr) return false; // hasn't started yet
-    if (end   && end   < todayStr) return false; // already expired
+    if (start && start > todayStr) {
+        console.log(`[DoseBuddy DEBUG] isMedicationActiveToday: med="${med.name}" - not started yet (${start} > ${todayStr})`);
+        return false; // hasn't started yet
+    }
+    if (end   && end   < todayStr) {
+        console.log(`[DoseBuddy DEBUG] isMedicationActiveToday: med="${med.name}" - expired (${end} < ${todayStr})`);
+        return false; // already expired
+    }
+    
+    console.log(`[DoseBuddy DEBUG] isMedicationActiveToday: med="${med.name}" - ACTIVE for today`);
     return true;
 }
 
@@ -4111,11 +4128,8 @@ function triggerDoseNotification(med, dateStr, displayTime) {
 }
 
 function clearScheduledTimeouts() {
-    scheduledTimeouts.forEach((id) => clearTimeout(id));
-    scheduledTimeouts = [];
-    // activeMissTimeouts are intentionally NOT cleared here — a reschedule
-    // (e.g. user marks a dose taken) must not cancel an already-running
-    // 5-minute miss-window for a different dose that was reminded earlier.
+    // Legacy function - now delegates to the new _clearDoseTimers system
+    _clearDoseTimers();
 }
 
 // Called only on logout and on hard reset — clears the miss-window timers too.
