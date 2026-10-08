@@ -668,7 +668,7 @@ document.addEventListener("DOMContentLoaded", () => {
         showAuthView();
         setThemeToggleVisible(false);
     }
-    _reminderIntervalId = setInterval(checkReminders, 30000);
+    _reminderIntervalId = setInterval(checkReminders, 15000);
 
     // ── Proactive token refresh ────────────────────────────────────────────
     // Every 60 seconds, check whether the access token is within 60 seconds
@@ -1552,11 +1552,11 @@ function completeLoginFromResponse(user) {
 
     // Restart the checkReminders safety-net interval if it was cleared on logout.
     if (!_reminderIntervalId) {
-        console.log(`[DoseBuddy DEBUG] Starting checkReminders interval every 30 seconds`);
+        console.log(`[DoseBuddy DEBUG] Starting checkReminders interval every 15 seconds`);
         _reminderIntervalId = setInterval(() => {
             console.log(`[DoseBuddy DEBUG] checkReminders interval tick`);
             checkReminders();
-        }, 30000);
+        }, 15000);
     } else {
         console.log(`[DoseBuddy DEBUG] checkReminders interval already running`);
     }
@@ -4297,7 +4297,49 @@ function _playNotifSound(label) {
 
 // Scheduled medicine reminder sound (fires at the dose time via setTimeout)
 function playReminderSound() {
-    return _playNotifSound("Reminder audio");
+    console.log("[DoseBuddy Audio] playReminderSound called - using MP3 directly");
+    
+    const prefs = loadFromLS(NOTIF_PREFS_KEY, { "sound-alerts": true });
+    if (prefs["sound-alerts"] === false) {
+        console.log("[DoseBuddy Audio] REMINDER SOUND SKIPPED (sound alerts disabled)");
+        return false;
+    }
+    
+    try {
+        const audio = document.getElementById("notify-sound");
+        if (!audio) {
+            console.warn("[DoseBuddy Audio] No notify-sound element found");
+            return false;
+        }
+        
+        // Stop any currently playing audio
+        stopReminderAudio();
+        
+        audio.currentTime = 0;
+        audio.volume = 0.8; // Slightly lower volume for reminders
+        audio.muted = false;
+        audio.loop = false;
+        
+        const playPromise = audio.play();
+        if (playPromise) {
+            playPromise.then(() => {
+                console.log("[DoseBuddy Audio] ✓ REMINDER SOUND PLAYED (notify-sound.mp3)");
+                activeReminderAudio = audio;
+                audioUnlocked = true;
+            }).catch(err => {
+                console.error("[DoseBuddy Audio] Reminder sound play failed:", err.name, err.message);
+                audioUnlocked = false;
+            });
+        } else {
+            console.log("[DoseBuddy Audio] ✓ REMINDER SOUND PLAYED (notify-sound.mp3, legacy)");
+            activeReminderAudio = audio;
+            audioUnlocked = true;
+        }
+        return true;
+    } catch (e) {
+        console.error("[DoseBuddy Audio] Reminder sound error:", e.message);
+        return false;
+    }
 }
 
 // Missed-dose alert sound (fires at PENDING → MISSED transition, ~5 min late)
@@ -4359,42 +4401,50 @@ window.testSchedulerDebug = function() {
 };
 
 function playMissedDoseAlert() {
-    console.log("[DoseBuddy Audio] playMissedDoseAlert called");
+    console.log("[DoseBuddy Audio] playMissedDoseAlert called - using MP3 directly");
     
-    // FOR MISSED DOSES: Always use the MP3 file, not the Web Audio tone
-    console.log("[DoseBuddy Audio] Using direct mp3 for missed dose alert");
+    const prefs = loadFromLS(NOTIF_PREFS_KEY, { "sound-alerts": true });
+    if (prefs["sound-alerts"] === false) {
+        console.log("[DoseBuddy Audio] MISSED DOSE SOUND SKIPPED (sound alerts disabled)");
+        return false;
+    }
     
     try {
         const audio = document.getElementById("notify-sound");
-        if (audio) {
-            console.log("[DoseBuddy Audio] Found notify-sound element, src:", audio.src);
-            
-            // Stop any currently playing audio
-            audio.pause();
-            audio.currentTime = 0;
-            audio.volume = 1.0;
-            audio.muted = false;
-            
-            const playPromise = audio.play();
-            if (playPromise) {
-                playPromise.then(() => {
-                    console.log("[DoseBuddy Audio] MISSED DOSE MP3 SOUND PLAYED SUCCESSFULLY");
-                }).catch(err => {
-                    console.error("[DoseBuddy Audio] MP3 play failed:", err);
-                    // Fallback to Web Audio tone if mp3 fails
-                    console.log("[DoseBuddy Audio] Falling back to Web Audio tone");
-                    _playNotifSound("Missed-dose audio");
-                });
-            }
-            return true;
-        } else {
-            console.error("[DoseBuddy Audio] No notify-sound element found, falling back to Web Audio");
-            return _playNotifSound("Missed-dose audio");
+        if (!audio) {
+            console.error("[DoseBuddy Audio] No notify-sound element found for missed dose alert");
+            return false;
         }
+        
+        console.log("[DoseBuddy Audio] Found notify-sound element, src:", audio.src);
+        
+        // Stop any currently playing audio
+        stopReminderAudio();
+        
+        audio.currentTime = 0;
+        audio.volume = 1.0; // Full volume for missed dose alerts
+        audio.muted = false;
+        audio.loop = false;
+        
+        const playPromise = audio.play();
+        if (playPromise) {
+            playPromise.then(() => {
+                console.log("[DoseBuddy Audio] ✓ MISSED DOSE SOUND PLAYED (notify-sound.mp3)");
+                activeReminderAudio = audio;
+                audioUnlocked = true;
+            }).catch(err => {
+                console.error("[DoseBuddy Audio] Missed dose sound play failed:", err.name, err.message);
+                audioUnlocked = false;
+            });
+        } else {
+            console.log("[DoseBuddy Audio] ✓ MISSED DOSE SOUND PLAYED (notify-sound.mp3, legacy)");
+            activeReminderAudio = audio;
+            audioUnlocked = true;
+        }
+        return true;
     } catch (e) {
-        console.error("[DoseBuddy Audio] Error playing mp3:", e);
-        // Fallback to Web Audio tone
-        return _playNotifSound("Missed-dose audio");
+        console.error("[DoseBuddy Audio] Missed dose sound error:", e.message);
+        return false;
     }
 }
 
@@ -4866,9 +4916,11 @@ function _handleMissedDoseCheck(med, dateStr, timeStr) {
     });
 }
 
-// ── SECONDARY: 30-second safety-net ─────────────────────────────────────────
-// This is now the PRIMARY system since the complex scheduler is failing.
-// Checks every 30s for doses that should be marked as missed and updates dashboard.
+// ── SECONDARY: 15-second safety-net ─────────────────────────────────────────
+// This safety net serves two purposes:
+// 1. Catch missed doses (PENDING -> MISSED after grace period) 
+// 2. Catch dose-time reminders if the primary scheduler fails (backup within 1min of dose time)
+// Checks every 15s for better responsiveness based on user feedback.
 function checkReminders() {
     if (!currentUser) return;
     if (!medsCache || medsCache.length === 0) return;
@@ -4904,6 +4956,20 @@ function checkReminders() {
             const diff = nowMinutes - doseMinutes; // >0 = past, <0 = future
             
             console.log(`[DoseBuddy CheckReminders] ${med.name} at ${displayTime}: ${diff} minutes late`);
+
+            // NEW: Check if this is dose time (within 1 minute) and primary scheduler might have missed it
+            if (diff >= 0 && diff < 1) {
+                const status = getDoseStatus(currentUser.id, med.id, todayStr, displayTime);
+                const reminderKey = `${currentUser.id}-${med.id}-${todayStr}-${displayTime}`;
+                
+                if (status === "PENDING" && !firedReminderKeys.has(reminderKey)) {
+                    console.log(`[DoseBuddy CheckReminders] ⚡ BACKUP REMINDER: ${med.name} at ${displayTime} (primary scheduler may have missed it)`);
+                    
+                    // Fire the dose reminder as backup
+                    triggerDoseNotification(med, todayStr, displayTime);
+                    processedCount++;
+                }
+            }
 
             // Check if dose should be marked as missed (>=1 minute late)
             if (diff >= MISSED_GRACE_MIN) {
@@ -4943,6 +5009,22 @@ function checkReminders() {
                                 `Scheduled at ${displayTime} — not taken`
                             );
                             console.log(`[DoseBuddy CheckReminders] Added missed notification for ${med.name}`);
+                            
+                            // **ADD BROWSER NOTIFICATION (WAS MISSING!)**
+                            console.log(`[DoseBuddy CheckReminders] Sending browser notification for missed dose: ${med.name}`);
+                            showDoseBuddySystemNotification(`Missed dose: ${med.name}`, {
+                                body: `Your scheduled dose at ${displayTime} was not marked as taken.`,
+                                tag: missedAlertKey,
+                                data: { url: window.location.origin },
+                            }).then(r => {
+                                if (r.ok) {
+                                    console.log(`[DoseBuddy CheckReminders] ✓ Browser notification sent successfully via ${r.method} for ${med.name}`);
+                                } else {
+                                    console.log(`[DoseBuddy CheckReminders] Browser notification failed: ${r.reason} for ${med.name}`);
+                                }
+                            }).catch(err => {
+                                console.error("[DoseBuddy CheckReminders] Browser notification error:", err);
+                            });
                             
                             // Update dashboard status cell immediately
                             _updateDashboardStatusCell(med.id, displayTime, "MISSED");
