@@ -261,57 +261,116 @@ function registerServiceWorker() {
     navigator.serviceWorker.register("./sw.js", { scope: "./" })
         .then(reg => {
             _swRegistration = reg;
-            console.log("[DoseBuddy SW] Registered. Scope:", reg.scope);
+            console.log("[DoseBuddy SW] Registered successfully. Scope:", reg.scope);
+            console.log("[DoseBuddy SW] Registration state:", reg.active ? "active" : "pending");
+            
             // Keep our reference up-to-date if the SW updates itself
             reg.addEventListener("updatefound", () => {
+                console.log("[DoseBuddy SW] Service Worker update found");
                 _swRegistration = reg;
             });
         })
         .catch(err => {
-            console.warn("[DoseBuddy SW] Registration failed:", err.message);
+            console.error("[DoseBuddy SW] Registration failed:", err.message, err);
+            console.log("[DoseBuddy SW] Notifications will use fallback method");
         });
 
     // Also pick up an existing registration from a previous page load
     navigator.serviceWorker.ready.then(reg => {
-        if (!_swRegistration) _swRegistration = reg;
-    }).catch(() => {});
+        if (!_swRegistration) {
+            _swRegistration = reg;
+            console.log("[DoseBuddy SW] Picked up existing registration:", reg.scope);
+        }
+    }).catch(err => {
+        console.error("[DoseBuddy SW] Failed to get ready registration:", err.message);
+    });
 }
 
 /**
  * Show a system (browser) notification using the Service Worker.
- * Falls back gracefully — NEVER throws.
- * NEVER uses `new Notification()` — that constructor is forbidden on mobile.
+ * Falls back to direct 'new Notification()' if service worker fails.
+ * Provides comprehensive error logging and user feedback.
  *
  * @param {string} title
  * @param {Object} options  — body, icon, tag, data, badge, etc.
  * @returns {Promise<{ok:boolean, reason?:string}>}
  */
 async function showDoseBuddySystemNotification(title, options = {}) {
+    console.log("[DoseBuddy Notifications] Attempting to show system notification:", title);
+    
     try {
         if (!("Notification" in window)) {
+            console.warn("[DoseBuddy Notifications] Notification API not supported in this browser");
             return { ok: false, reason: "unsupported" };
         }
+        
+        if (Notification.permission === "denied") {
+            console.warn("[DoseBuddy Notifications] Notification permission denied by user");
+            return { ok: false, reason: "permission-denied" };
+        }
+        
         if (Notification.permission !== "granted") {
+            console.warn("[DoseBuddy Notifications] Notification permission not granted. Current state:", Notification.permission);
             return { ok: false, reason: "permission-not-granted" };
         }
-        if (!("serviceWorker" in navigator)) {
-            return { ok: false, reason: "sw-unsupported" };
+
+        // Try Service Worker method first
+        if ("serviceWorker" in navigator) {
+            try {
+                // Use cached registration or fall back to the ready promise
+                const reg = _swRegistration || await navigator.serviceWorker.ready;
+                if (reg && typeof reg.showNotification === "function") {
+                    console.log("[DoseBuddy Notifications] Using Service Worker registration:", reg.scope);
+                    
+                    await reg.showNotification(title, {
+                        icon:  "/favicon.ico",
+                        badge: "/favicon.ico",
+                        ...options,
+                    });
+                    
+                    console.log("[DoseBuddy Notifications] ✓ Service Worker notification sent successfully");
+                    return { ok: true, method: "service-worker" };
+                } else {
+                    console.warn("[DoseBuddy Notifications] Service Worker registration invalid or missing showNotification method");
+                }
+            } catch (swError) {
+                console.error("[DoseBuddy Notifications] Service Worker notification failed:", swError.message);
+                console.log("[DoseBuddy Notifications] Falling back to direct Notification API");
+            }
+        } else {
+            console.log("[DoseBuddy Notifications] Service Worker not supported, using direct Notification API");
         }
 
-        // Use cached registration or fall back to the ready promise
-        const reg = _swRegistration || await navigator.serviceWorker.ready;
-        if (!reg || typeof reg.showNotification !== "function") {
-            return { ok: false, reason: "sw-no-showNotification" };
+        // Fallback: Direct Notification API
+        try {
+            console.log("[DoseBuddy Notifications] Using fallback: direct 'new Notification()'");
+            
+            const notification = new Notification(title, {
+                icon: "/favicon.ico",
+                badge: "/favicon.ico",
+                ...options,
+            });
+            
+            console.log("[DoseBuddy Notifications] ✓ Direct notification created successfully");
+            
+            // Handle notification events
+            notification.onshow = () => console.log("[DoseBuddy Notifications] Direct notification shown");
+            notification.onerror = (err) => console.error("[DoseBuddy Notifications] Direct notification error:", err);
+            notification.onclick = () => {
+                console.log("[DoseBuddy Notifications] Direct notification clicked");
+                window.focus();
+                notification.close();
+            };
+            
+            return { ok: true, method: "direct" };
+            
+        } catch (directError) {
+            console.error("[DoseBuddy Notifications] Direct notification failed:", directError.message);
+            return { ok: false, reason: "direct-notification-failed", error: directError };
         }
-
-        await reg.showNotification(title, {
-            icon:  "/favicon.ico",
-            badge: "/favicon.ico",
-            ...options,
-        });
-        return { ok: true };
+        
     } catch (err) {
-        console.warn("[DoseBuddy Notifications] System notification failed:", err.message);
+        console.error("[DoseBuddy Notifications] System notification completely failed:", err.message, err);
         return { ok: false, reason: "error", error: err };
     }
 }
@@ -4384,7 +4443,7 @@ function triggerDoseNotification(med, dateStr, displayTime) {
     // ── Always show in-app toast as a visible fallback ───────────────────
     showToast(`Reminder: ${med.name} (${med.dosage}) at ${displayTime}`, "info", 8000);
 
-    // ── System notification via Service Worker (no new Notification()) ─────────
+    // ── System notification via Service Worker with fallback ─────────────────────
     showDoseBuddySystemNotification("DoseBuddy Reminder", {
         body:  `Time to take ${med.name} (${med.dosage})`,
         icon:  "/favicon.ico",
@@ -4392,9 +4451,25 @@ function triggerDoseNotification(med, dateStr, displayTime) {
         data:  { url: self?.location?.origin || "/" },
         requireInteraction: false,
     }).then(result => {
-        if (!result.ok) {
-            console.log(`[DoseBuddy Notifications] System notification skipped: ${result.reason}`);
+        if (result.ok) {
+            console.log(`[DoseBuddy Notifications] ✓ Browser notification sent successfully via ${result.method}`);
+        } else {
+            console.log(`[DoseBuddy Notifications] Browser notification failed: ${result.reason}`);
+            
+            // Provide user feedback for notification failures
+            if (result.reason === "permission-denied") {
+                console.log("[DoseBuddy Notifications] Showing permission denied guidance to user");
+                showToast("Browser notifications are blocked. Please enable them in browser settings for dose reminders.", "warning", 10000);
+            } else if (result.reason === "permission-not-granted") {
+                console.log("[DoseBuddy Notifications] Permission not granted - showing guidance");
+                // Don't auto-request here - user should use notification settings modal
+            } else if (result.reason === "unsupported") {
+                console.log("[DoseBuddy Notifications] Browser doesn't support notifications");
+                showToast("Your browser doesn't support notifications. You'll receive in-app reminders only.", "info", 8000);
+            }
         }
+    }).catch(err => {
+        console.error("[DoseBuddy Notifications] Unexpected notification error:", err);
     });
 
     // ── Sound ─────────────────────────────────────────────────────────────
@@ -4752,7 +4827,7 @@ function _handleMissedDoseCheck(med, dateStr, timeStr) {
             `Scheduled at ${timeStr} — not taken.`
         );
 
-        // 2. System notification via Service Worker
+        // 2. System notification via Service Worker with fallback
         console.log(`[DoseBuddy Scheduler] Sending system notification for missed dose: ${med.name}`);
         showDoseBuddySystemNotification(`Missed dose: ${med.name}`, {
             body:  `Your scheduled dose at ${timeStr} was not marked as taken.`,
@@ -4760,10 +4835,19 @@ function _handleMissedDoseCheck(med, dateStr, timeStr) {
             data:  { url: window.location.origin },
         }).then(r => {
             if (r.ok) {
-                console.log(`[DoseBuddy Notifications] System notification sent successfully for ${med.name}`);
+                console.log(`[DoseBuddy Notifications] ✓ Missed dose notification sent successfully via ${r.method} for ${med.name}`);
             } else {
-                console.log(`[DoseBuddy Notifications] System notification failed: ${r.reason} for ${med.name}`);
+                console.log(`[DoseBuddy Notifications] Missed dose notification failed: ${r.reason} for ${med.name}`);
+                
+                // Provide user feedback for missed dose notification failures
+                if (r.reason === "permission-denied") {
+                    showToast("Browser notifications are blocked. Please enable them to receive missed dose alerts.", "warning", 8000);
+                } else if (r.reason === "unsupported") {
+                    console.log("[DoseBuddy Notifications] Browser notifications not supported for missed dose alerts");
+                }
             }
+        }).catch(err => {
+            console.error("[DoseBuddy Notifications] Unexpected missed dose notification error:", err);
         });
 
         // 3. Sound
@@ -7270,12 +7354,18 @@ document.addEventListener("DOMContentLoaded", () => {
             tag:  "dosebuddy-test-" + Date.now(),
         }).then(result => {
             if (result.ok) {
-                showResult("✓ Test notification sent! Check your browser notifications.", "var(--success, #16a34a)");
+                showResult(`✓ Test notification sent successfully via ${result.method}! Check your browser notifications.`, "var(--success, #16a34a)");
+            } else if (result.reason === "permission-denied") {
+                showResult("❌ Notifications are blocked. Please enable them in your browser settings.", "var(--error, #e53e3e)");
+            } else if (result.reason === "permission-not-granted") {
+                showResult("⚠ Permission not granted. Click 'Enable Notifications' button first.", "var(--warning, #d97706)");
+            } else if (result.reason === "unsupported") {
+                showResult("⚠ Your browser doesn't support notifications. In-app reminders will still work.", "var(--warning, #d97706)");
             } else {
-                showResult(`⚠ System notification unavailable (${result.reason}). In-app notifications still work.`, "var(--warning, #d97706)");
+                showResult(`⚠ Browser notifications unavailable (${result.reason}). In-app notifications still work.`, "var(--warning, #d97706)");
             }
         }).catch(e => {
-            showResult(`❌ Error: ${e.message}`, "var(--error, #e53e3e)");
+            showResult(`❌ Unexpected error: ${e.message}`, "var(--error, #e53e3e)");
         }).finally(() => {
             if (btn) { btn.disabled = false; btn.textContent = "Send Test"; }
         });
