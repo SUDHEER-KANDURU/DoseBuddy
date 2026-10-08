@@ -4821,8 +4821,8 @@ function checkReminders() {
             
             console.log(`[DoseBuddy CheckReminders] ${med.name} at ${displayTime}: ${diff} minutes late`);
 
-            // Check if dose should be marked as missed (>1 minute late)
-            if (diff > MISSED_GRACE_MIN) {
+            // Check if dose should be marked as missed (>=1 minute late)
+            if (diff >= MISSED_GRACE_MIN) {
                 const status = getDoseStatus(currentUser.id, med.id, todayStr, displayTime);
                 console.log(`[DoseBuddy CheckReminders] ${med.name} status: ${status}`);
                 
