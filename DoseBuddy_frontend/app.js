@@ -10000,68 +10000,7 @@ const URGENT_SYMPTOMS = [
     "throat swelling", "overdose", "took too much", "double dose"
 ];
 
-function setupAiHandlers() {
-    const chatInput = document.getElementById("ai-chat-input");
-    const chatSend = document.getElementById("ai-chat-send");
-    const newConversationBtn = document.getElementById("new-conversation-btn");
-    const starterPrompts = document.querySelectorAll(".ai-starter-prompt");
 
-    // Load existing conversations
-    loadAiConversations();
-
-    // Auto-resize chat input
-    if (chatInput) {
-        chatInput.addEventListener("input", () => {
-            chatInput.style.height = "auto";
-            chatInput.style.height = Math.min(chatInput.scrollHeight, 120) + "px";
-            updateSendButton();
-        });
-
-        chatInput.addEventListener("keydown", (e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                if (!aiConversationState.isProcessing && chatInput.value.trim()) {
-                    sendAiMessage();
-                }
-            }
-        });
-    }
-
-    // Send button handler  
-    if (chatSend) {
-        chatSend.addEventListener("click", () => {
-            if (!aiConversationState.isProcessing && chatInput && chatInput.value.trim()) {
-                sendAiMessage();
-            }
-        });
-    }
-
-    // New conversation handler
-    if (newConversationBtn) {
-        newConversationBtn.addEventListener("click", startNewConversation);
-    }
-
-    // Starter prompt handlers
-    starterPrompts.forEach(prompt => {
-        prompt.addEventListener("click", () => {
-            const promptText = prompt.dataset.prompt;
-            if (promptText && chatInput) {
-                chatInput.value = promptText;
-                chatInput.style.height = "auto";
-                chatInput.style.height = Math.min(chatInput.scrollHeight, 120) + "px";
-                updateSendButton();
-                sendAiMessage();
-            }
-        });
-    });
-
-    // Initialize conversation state
-    if (!aiConversationState.currentConversationId) {
-        startNewConversation();
-    }
-
-    updateSendButton();
-}
 
 function startNewConversation() {
     aiConversationState.currentConversationId = `conv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -10079,72 +10018,7 @@ function startNewConversation() {
     updateChatInterface();
 }
 
-async function sendAiMessage() {
-    const chatInput = document.getElementById("ai-chat-input");
-    const messageText = chatInput?.value.trim();
-    
-    if (!messageText || aiConversationState.isProcessing) return;
 
-    // Clear input and update UI
-    if (chatInput) {
-        chatInput.value = "";
-        chatInput.style.height = "auto";
-    }
-
-    // Check for urgent symptoms first
-    if (containsUrgentSymptoms(messageText)) {
-        displayUrgentWarning(messageText);
-        updateSendButton();
-        return;
-    }
-
-    // Add user message to chat
-    addMessageToChat("user", messageText);
-    
-    // Set processing state
-    aiConversationState.isProcessing = true;
-    updateSendButton();
-    showTypingIndicator();
-
-    try {
-        // Call the unified AI API
-        const response = await authFetch(`${API_BASE}/ai/chat`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                message: messageText,
-                conversationId: aiConversationState.currentConversationId,
-                conversationState: aiConversationState.conversationState
-            })
-        });
-
-        if (!response.ok) {
-            throw new Error(`AI service error: ${response.status}`);
-        }
-
-        const result = await response.json();
-        
-        if (!result.success) {
-            throw new Error(result.error || "AI service failed");
-        }
-
-        // Update conversation state
-        aiConversationState.conversationState = result.conversationState || {};
-        
-        // Process different response types
-        await processAiResponse(result);
-
-    } catch (error) {
-        console.error("AI chat error:", error);
-        addMessageToChat("assistant", "I'm sorry, I'm having trouble connecting right now. Please try again in a moment.", "error");
-        showToast("AI service temporarily unavailable. Please try again.", "warning", 4000);
-    } finally {
-        hideTypingIndicator();
-        aiConversationState.isProcessing = false;
-        updateSendButton();
-        saveAiConversations();
-    }
-}
 
 function containsUrgentSymptoms(text) {
     const lowerText = text.toLowerCase();
