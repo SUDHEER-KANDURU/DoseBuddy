@@ -3,6 +3,7 @@ package com.example.dosebuddy.config;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.Environment;
 
 /**
  * Validates that required credentials are present at startup.
@@ -15,9 +16,14 @@ public class StartupValidationConfig {
     public String validateCredentials(
             @Value("${spring.datasource.password:}") String dbPassword,
             @Value("${spring.datasource.username:root}") String dbUsername,
-            @Value("${jwt.secret:}") String jwtSecret) {
+            @Value("${spring.datasource.url:}") String dbUrl,
+            @Value("${jwt.secret:}") String jwtSecret,
+            Environment env) {
 
-        if (dbPassword == null || dbPassword.isBlank()) {
+        // Skip database password validation for H2 (test profile) and when URL contains h2
+        boolean isH2Database = dbUrl.contains(":h2:") || java.util.Arrays.asList(env.getActiveProfiles()).contains("test");
+        
+        if (!isH2Database && (dbPassword == null || dbPassword.isBlank())) {
             throw new IllegalStateException("""
                     
                     ╔══════════════════════════════════════════════════════════════╗
@@ -47,7 +53,11 @@ public class StartupValidationConfig {
                     "[DoseBuddy] JWT_SECRET must be at least 32 characters for HS256.");
         }
 
-        System.out.println("[DoseBuddy] DB credentials loaded for user: " + dbUsername);
+        if (isH2Database) {
+            System.out.println("[DoseBuddy] Using H2 in-memory database for testing");
+        } else {
+            System.out.println("[DoseBuddy] DB credentials loaded for user: " + dbUsername);
+        }
         System.out.println("[DoseBuddy] JWT secret validated (" + jwtSecret.length() + " chars).");
         return "credentials-validated";
     }
