@@ -4230,63 +4230,37 @@ function primeAudioElement() {
 // Called by playReminderSound() and playMissedDoseAlert().
 // Tries Web Audio tone first (most reliable from setTimeout); falls back to mp3.
 function _playNotifSound(label) {
-    console.log(`[DoseBuddy Audio] _playNotifSound called with label: "${label}"`);
-    
+    // Simplified MP3-only implementation - no Web Audio confusion
     const prefs = loadFromLS(NOTIF_PREFS_KEY, { "sound-alerts": true });
-    console.log(`[DoseBuddy Audio] Sound preferences:`, prefs);
-    
     if (prefs["sound-alerts"] === false) {
         console.log(`[DoseBuddy Audio] ${label}: sound alerts disabled in preferences`);
         return false;
     }
 
-    console.log(`[DoseBuddy Audio] ${label}: attempting playback (audioReady=${_audioReady} audioUnlocked=${audioUnlocked})`);
-
-    // PRIMARY: Web Audio tone — re-check state in case it changed since unlock
-    if (_audioCtx && _audioCtx.state === "running") {
-        _audioReady = true; // keep flag in sync
-        console.log(`[DoseBuddy Audio] Attempting Web Audio tone...`);
-        if (_playAlertTone()) {
-            console.log(`[DoseBuddy Audio] ${label === "Reminder audio" ? "REMINDER" : "MISSED"} SOUND FIRED (Web Audio tone)`);
-            return true;
-        } else {
-            console.log(`[DoseBuddy Audio] Web Audio tone failed, trying mp3 fallback`);
-        }
-    } else {
-        console.log(`[DoseBuddy Audio] AudioContext not running, state: ${_audioCtx ? _audioCtx.state : 'null'}, trying mp3 fallback`);
-    }
-
-    // FALLBACK: HTMLAudioElement mp3
-    console.log(`[DoseBuddy Audio] Trying HTMLAudioElement mp3 fallback`);
+    console.log(`[DoseBuddy Audio] ${label}: playing MP3 sound`);
+    
     const audio = document.getElementById("notify-sound");
     if (!audio) { 
         console.warn(`[DoseBuddy Audio] ${label}: no audio element found with id 'notify-sound'`); 
-        return false; 
-    }
-    if (audio.error) { 
-        console.warn(`[DoseBuddy Audio] ${label}: audio element error ${audio.error.code}`); 
         return false; 
     }
 
     try {
         stopReminderAudio();
         audio.currentTime = 0;
-        audio.volume = 1;
+        audio.volume = 0.8;
         audio.muted  = false;
-        audio.loop   = false;
-        const pp = audio.play();
-        if (pp && typeof pp.then === "function") {
-            pp.then(() => {
-                console.log(`[DoseBuddy Audio] ${label === "Reminder audio" ? "REMINDER" : "MISSED"} SOUND FIRED (mp3 fallback)`);
-                audioUnlocked     = true;
-                activeReminderAudio = audio;
-            }).catch(err => {
-                console.warn(`[DoseBuddy] ${label}: mp3 blocked — ${err.name}: ${err.message}`);
-                audioUnlocked = false;
-            });
-        } else {
-            activeReminderAudio = audio;
-            audioUnlocked = true;
+        
+        const playPromise = audio.play();
+        if (playPromise) {
+            playPromise
+                .then(() => {
+                    console.log(`[DoseBuddy Audio] ${label} MP3 played successfully`);
+                    activeReminderAudio = audio;
+                })
+                .catch(err => {
+                    console.warn(`[DoseBuddy Audio] ${label} MP3 play failed:`, err.message);
+                });
         }
         return true;
     } catch (e) {

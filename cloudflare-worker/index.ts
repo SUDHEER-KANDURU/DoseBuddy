@@ -10,6 +10,16 @@ export interface Env {
   GEMINI_MODEL?: string;
 }
 
+interface ScheduledEvent {
+  scheduledTime: number;
+  cron: string;
+}
+
+interface ExecutionContext {
+  waitUntil(promise: Promise<any>): void;
+  passThroughOnException(): void;
+}
+
 type Json = Record<string, any>;
 type User = Json & { id: number; email: string; password_hash: string; role: string; patient_email?: string | null };
 
@@ -2324,6 +2334,88 @@ export default {
       if (path.includes('/medications/add') || path.includes('/logs/mark')) {
         console.log(`[Worker] ${request.method} ${path} - Completed in ${duration}ms`);
       }
+    }
+  },
+
+  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+    console.log("[DoseBuddy Cron] Starting missed-dose processing");
+    
+    try {
+      const now = new Date();
+      const gracePeriodMinutes = 1; // 1-minute grace period as per requirements
+      const cutoffTime = new Date(now.getTime() - gracePeriodMinutes * 60 * 1000);
+      
+      // Query for pending doses that are past their grace period
+      const [rows] = await query<any[]>(
+        env,
+        `SELECT 
+          m.id as medication_id,
+          u.id as user_id,
+          mt.time_of_day,
+          m.name as medication_name,
+          m.dosage,
+          CURDATE() as date_str,
+          TIME_FORMAT(mt.time_of_day, '%H:%i') as time_str
+        FROM medications m
+        JOIN medication_times mt ON m.id = mt.medication_id  
+        JOIN users u ON m.user_id = u.id
+        WHERE m.active = 1
+        AND CONCAT(CURDATE(), ' ', mt.time_of_day) <= ?
+        AND NOT EXISTS (
+          SELECT 1 FROM intake_logs il 
+          WHERE il.medication_id = m.id 
+          AND il.marker_user_id = u.id
+          AND il.date = CURDATE()
+          AND TIME_FORMAT(il.time, '%H:%i') = TIME_FORMAT(mt.time_of_day, '%H:%i')
+        )`,
+        [cutoffTime.toISOString().slice(0, 19).replace('T', ' ')]
+      );
+
+      let processedCount = 0;
+      
+      for (const dose of rows) {
+        try {
+          // Mark dose as missed atomically
+          const [insertResult] = await query<{ insertId: number }>(
+            env,
+            `INSERT INTO intake_logs 
+            (marker_user_id, medication_id, date, time, status, scheduled_time, missed_time, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 'MISSED', CONCAT(?, ' ', ?), NOW(), NOW(), NOW())`,
+            [
+              dose.user_id,
+              dose.medication_id, 
+              dose.date_str,
+              dose.time_str,
+              dose.date_str,
+              dose.time_str
+            ]
+          );
+
+          // Log activity
+          await query(
+            env,
+            `INSERT INTO activities 
+            (user_id, type, message, related_entity_type, related_entity_id, created_at)
+            VALUES (?, 'DOSE_MISSED', ?, 'INTAKE_LOG', ?, NOW())`,
+            [
+              dose.user_id,
+              `Missed ${dose.medication_name} (${dose.dosage}) scheduled for ${dose.time_str}`,
+              insertResult.insertId
+            ]
+          );
+
+          processedCount++;
+          console.log(`[DoseBuddy Cron] Marked missed: ${dose.medication_name} for user ${dose.user_id} at ${dose.time_str}`);
+          
+        } catch (error) {
+          console.error(`[DoseBuddy Cron] Failed to process dose for user ${dose.user_id}:`, error);
+        }
+      }
+      
+      console.log(`[DoseBuddy Cron] Processed ${processedCount} missed doses`);
+      
+    } catch (error) {
+      console.error("[DoseBuddy Cron] Scheduled function error:", error);
     }
   }
 };
