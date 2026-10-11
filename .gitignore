@@ -9,3 +9,5 @@ worker-configuration.d.ts
 # Agent internal task artifacts
 .agents/
 
+# Git worktrees
+.worktrees/
