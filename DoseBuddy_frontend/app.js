@@ -9546,3 +9546,847 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+function addMessageToChat(sender, content, messageType = "default", timestamp = null) {
+    const chatMessages = document.getElementById("ai-chat-messages");
+    if (!chatMessages) return;
+
+    const messageTime = timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const isUser = sender === "user";
+    
+    const messageElement = document.createElement("div");
+    messageElement.className = `ai-message-pair ${isUser ? 'user-message' : 'assistant-message'} ${messageType}`;
+    
+    if (isUser) {
+        messageElement.innerHTML = `
+            <div class="ai-message-bubble user-bubble">
+                <div class="ai-message-content">${formatMessageText(content)}</div>
+                <div class="ai-message-time">${messageTime}</div>
+            </div>
+            <div class="ai-message-avatar user-avatar">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"/>
+                </svg>
+            </div>
+        `;
+    } else {
+        messageElement.innerHTML = `
+            <div class="ai-message-avatar assistant-avatar">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/>
+                </svg>
+            </div>
+            <div class="ai-message-bubble assistant-bubble ${messageType}">
+                <div class="ai-message-content">${content}</div>
+                <div class="ai-message-time">${messageTime}</div>
+            </div>
+        `;
+    }
+
+    chatMessages.appendChild(messageElement);
+    
+    // Set up interactive elements
+    setupMessageInteractions(messageElement);
+    
+    // Store message in history
+    aiConversationState.messageHistory.push({
+        sender,
+        content,
+        messageType,
+        timestamp: new Date().toISOString()
+    });
+    
+    scrollChatToBottom();
+}
+
+function setupMessageInteractions(messageElement) {
+    // Single select options
+    messageElement.querySelectorAll(".ai-option-btn").forEach(btn => {
+        btn.addEventListener("click", async () => {
+            const value = btn.dataset.value;
+            const selectedText = btn.querySelector(".ai-option-text").textContent;
+            
+            // Disable all options in this interface
+            messageElement.querySelectorAll(".ai-option-btn").forEach(b => b.disabled = true);
+            btn.classList.add("selected");
+            
+            // Send the selected value as user message
+            addMessageToChat("user", selectedText);
+            await sendFollowupResponse(value);
+        });
+    });
+
+    // Multi-select checkboxes
+    const multiSelect = messageElement.querySelector(".ai-multi-select");
+    if (multiSelect) {
+        const checkboxes = multiSelect.querySelectorAll(".ai-checkbox");
+        const submitBtn = multiSelect.querySelector(".ai-submit-btn");
+        
+        checkboxes.forEach(checkbox => {
+            checkbox.addEventListener("change", () => {
+                const selectedCount = multiSelect.querySelectorAll(".ai-checkbox:checked").length;
+                submitBtn.disabled = selectedCount === 0;
+            });
+        });
+        
+        submitBtn.addEventListener("click", async () => {
+            const selectedValues = Array.from(multiSelect.querySelectorAll(".ai-checkbox:checked"))
+                .map(cb => ({
+                    id: cb.dataset.id,
+                    value: cb.dataset.value,
+                    text: cb.closest(".ai-checkbox-item").querySelector(".ai-option-text").textContent
+                }));
+            
+            const selectedTexts = selectedValues.map(sv => sv.text).join(", ");
+            addMessageToChat("user", selectedTexts);
+            
+            submitBtn.disabled = true;
+            await sendFollowupResponse(selectedValues);
+        });
+    }
+
+    // Text input
+    const textInput = messageElement.querySelector(".ai-text-area");
+    if (textInput) {
+        const submitBtn = messageElement.querySelector(".ai-submit-btn");
+        const charCount = messageElement.querySelector(".ai-char-count");
+        
+        textInput.addEventListener("input", () => {
+            const length = textInput.value.length;
+            const maxLength = textInput.maxLength;
+            charCount.textContent = `${length}/${maxLength}`;
+            submitBtn.disabled = length === 0 || length > maxLength;
+        });
+        
+        textInput.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" && !e.shiftKey && !submitBtn.disabled) {
+                e.preventDefault();
+                submitBtn.click();
+            }
+        });
+        
+        submitBtn.addEventListener("click", async () => {
+            const value = textInput.value.trim();
+            if (!value) return;
+            
+            addMessageToChat("user", value);
+            textInput.disabled = true;
+            submitBtn.disabled = true;
+            await sendFollowupResponse(value);
+        });
+    }
+
+    // Temperature input
+    const tempInterface = messageElement.querySelector(".ai-temperature-input");
+    if (tempInterface) {
+        const tempNumber = tempInterface.querySelector(".ai-temp-number");
+        const unitBtns = tempInterface.querySelectorAll(".ai-temp-unit-btn");
+        const submitBtn = tempInterface.querySelector(".ai-submit-btn");
+        
+        let selectedUnit = tempInterface.querySelector(".ai-temp-unit-btn.active")?.dataset.unit || "°F";
+        
+        unitBtns.forEach(btn => {
+            btn.addEventListener("click", () => {
+                unitBtns.forEach(b => b.classList.remove("active"));
+                btn.classList.add("active");
+                selectedUnit = btn.dataset.unit;
+                updateSubmitButton();
+            });
+        });
+        
+        tempNumber.addEventListener("input", updateSubmitButton);
+        
+        function updateSubmitButton() {
+            submitBtn.disabled = !tempNumber.value || isNaN(tempNumber.value);
+        }
+        
+        submitBtn.addEventListener("click", async () => {
+            const value = `${tempNumber.value}${selectedUnit}`;
+            addMessageToChat("user", `My temperature is ${value}`);
+            
+            tempNumber.disabled = true;
+            submitBtn.disabled = true;
+            await sendFollowupResponse({ temperature: tempNumber.value, unit: selectedUnit });
+        });
+    }
+
+    // Duration input
+    const durationInterface = messageElement.querySelector(".ai-duration-input");
+    if (durationInterface) {
+        const durationNumber = durationInterface.querySelector(".ai-duration-number");
+        const durationSelect = durationInterface.querySelector(".ai-duration-select");
+        const presetBtns = durationInterface.querySelectorAll(".ai-duration-preset");
+        const submitBtn = durationInterface.querySelector(".ai-submit-btn");
+        
+        durationNumber.addEventListener("input", () => {
+            submitBtn.disabled = !durationNumber.value || parseInt(durationNumber.value) <= 0;
+        });
+        
+        presetBtns.forEach(btn => {
+            btn.addEventListener("click", () => {
+                durationNumber.value = btn.dataset.value;
+                durationSelect.value = btn.dataset.unit;
+                submitBtn.disabled = false;
+            });
+        });
+        
+        submitBtn.addEventListener("click", async () => {
+            const value = durationNumber.value;
+            const unit = durationSelect.value;
+            const displayText = `${value} ${unit}`;
+            
+            addMessageToChat("user", `It has been ${displayText}`);
+            
+            durationNumber.disabled = true;
+            durationSelect.disabled = true;
+            submitBtn.disabled = true;
+            await sendFollowupResponse({ duration: value, unit: unit });
+        });
+    }
+
+    // Severity input
+    const severityInterface = messageElement.querySelector(".ai-severity-input");
+    if (severityInterface) {
+        const slider = severityInterface.querySelector(".ai-severity-slider");
+        const numberDisplay = severityInterface.querySelector(".ai-severity-number");
+        const submitBtn = severityInterface.querySelector(".ai-submit-btn");
+        
+        slider.addEventListener("input", () => {
+            const value = slider.value;
+            numberDisplay.textContent = value;
+            submitBtn.disabled = false;
+            
+            // Update severity description highlighting
+            severityInterface.querySelectorAll(".ai-severity-desc").forEach(desc => desc.classList.remove("active"));
+            if (value <= 3) severityInterface.querySelector(".ai-severity-desc.mild").classList.add("active");
+            else if (value <= 6) severityInterface.querySelector(".ai-severity-desc.moderate").classList.add("active");
+            else severityInterface.querySelector(".ai-severity-desc.severe").classList.add("active");
+        });
+        
+        submitBtn.addEventListener("click", async () => {
+            const value = slider.value;
+            let severityText = "moderate";
+            if (value <= 3) severityText = "mild";
+            else if (value >= 7) severityText = "severe";
+            
+            addMessageToChat("user", `The severity is ${value}/10 (${severityText})`);
+            
+            slider.disabled = true;
+            submitBtn.disabled = true;
+            await sendFollowupResponse({ severity: value, severityText });
+        });
+    }
+
+    // Medicine selection
+    messageElement.querySelectorAll(".ai-medicine-btn").forEach(btn => {
+        btn.addEventListener("click", async () => {
+            const value = btn.dataset.value;
+            const medicineName = btn.querySelector(".ai-medicine-name").textContent;
+            
+            messageElement.querySelectorAll(".ai-medicine-btn").forEach(b => b.disabled = true);
+            btn.classList.add("selected");
+            
+            addMessageToChat("user", `Tell me about ${medicineName}`);
+            await sendFollowupResponse(value);
+        });
+    });
+}
+
+async function sendFollowupResponse(value) {
+    aiConversationState.isProcessing = true;
+    updateSendButton();
+    showTypingIndicator();
+
+    try {
+        const response = await authFetch(`${API_BASE}/ai/chat`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                message: typeof value === "string" ? value : JSON.stringify(value),
+                conversationId: aiConversationState.currentConversationId,
+                conversationState: aiConversationState.conversationState
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`AI service error: ${response.status}`);
+        }
+
+        const result = await response.json();
+        
+        if (!result.success) {
+            throw new Error(result.error || "AI service failed");
+        }
+
+        aiConversationState.conversationState = result.conversationState || {};
+        await processAiResponse(result);
+
+    } catch (error) {
+        console.error("AI followup error:", error);
+        addMessageToChat("assistant", "I'm sorry, I encountered an error processing your response. Please try again.", "error");
+    } finally {
+        hideTypingIndicator();
+        aiConversationState.isProcessing = false;
+        updateSendButton();
+        saveAiConversations();
+    }
+}
+
+function showTypingIndicator() {
+    const chatMessages = document.getElementById("ai-chat-messages");
+    if (!chatMessages) return;
+
+    // Remove existing typing indicator
+    const existing = chatMessages.querySelector(".ai-typing-indicator");
+    if (existing) existing.remove();
+
+    const indicator = document.createElement("div");
+    indicator.className = "ai-typing-indicator";
+    indicator.innerHTML = `
+        <div class="ai-message-avatar assistant-avatar">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/>
+            </svg>
+        </div>
+        <div class="ai-typing-bubble">
+            <div class="ai-typing-dots">
+                <span></span>
+                <span></span>
+                <span></span>
+            </div>
+        </div>
+    `;
+
+    chatMessages.appendChild(indicator);
+    scrollChatToBottom();
+}
+
+function hideTypingIndicator() {
+    const indicator = document.querySelector(".ai-typing-indicator");
+    if (indicator) indicator.remove();
+}
+
+function updateChatInterface() {
+    const chatMessages = document.getElementById("ai-chat-messages");
+    if (chatMessages) {
+        // Show welcome message if no conversation history
+        const welcome = chatMessages.querySelector(".ai-welcome-message");
+        const hasMessages = aiConversationState.messageHistory.length > 0;
+        if (welcome) welcome.style.display = hasMessages ? "none" : "flex";
+    }
+}
+
+function loadAiConversations() {
+    try {
+        const stored = localStorage.getItem(AI_CONVERSATION_STORAGE_KEY);
+        if (stored) {
+            const conversations = JSON.parse(stored);
+            // Load the most recent conversation
+            if (conversations.length > 0) {
+                const latest = conversations[conversations.length - 1];
+                aiConversationState.currentConversationId = latest.id;
+                aiConversationState.conversationState = latest.conversationState || {};
+                aiConversationState.messageHistory = latest.messageHistory || [];
+                
+                // Restore messages in UI
+                restoreMessagesToChat();
+            }
+        }
+    } catch (error) {
+        console.error("Failed to load AI conversations:", error);
+    }
+}
+
+function saveAiConversations() {
+    try {
+        let conversations = [];
+        const stored = localStorage.getItem(AI_CONVERSATION_STORAGE_KEY);
+        if (stored) conversations = JSON.parse(stored);
+        
+        // Find and update existing conversation or add new one
+        const existingIndex = conversations.findIndex(c => c.id === aiConversationState.currentConversationId);
+        const conversationData = {
+            id: aiConversationState.currentConversationId,
+            conversationState: aiConversationState.conversationState,
+            messageHistory: aiConversationState.messageHistory,
+            lastUpdated: new Date().toISOString()
+        };
+        
+        if (existingIndex >= 0) {
+            conversations[existingIndex] = conversationData;
+        } else {
+            conversations.push(conversationData);
+        }
+        
+        // Keep only last 5 conversations
+        if (conversations.length > 5) {
+            conversations = conversations.slice(-5);
+        }
+        
+        localStorage.setItem(AI_CONVERSATION_STORAGE_KEY, JSON.stringify(conversations));
+    } catch (error) {
+        console.error("Failed to save AI conversations:", error);
+    }
+}
+
+function restoreMessagesToChat() {
+    const chatMessages = document.getElementById("ai-chat-messages");
+    if (!chatMessages || !aiConversationState.messageHistory.length) return;
+    
+    // Clear existing messages except welcome
+    const existingMessages = chatMessages.querySelectorAll(".ai-message-pair, .ai-typing-indicator");
+    existingMessages.forEach(msg => msg.remove());
+    
+    // Restore messages
+    aiConversationState.messageHistory.forEach(msg => {
+        const timestamp = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        addMessageToChat(msg.sender, msg.content, msg.messageType, timestamp);
+    });
+    
+    updateChatInterface();
+}
+
+function updateSendButton() {
+    const chatSend = document.getElementById("ai-chat-send");
+    const chatInput = document.getElementById("ai-chat-input");
+    if (chatSend && chatInput) {
+        chatSend.disabled = !chatInput.value.trim() || aiConversationState.isProcessing;
+        if (aiConversationState.isProcessing) {
+            chatSend.innerHTML = `
+                <svg class="ai-spinner" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="18" height="18">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"/>
+                </svg>
+            `;
+        } else {
+            chatSend.innerHTML = `
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="18" height="18">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"/>
+                </svg>
+            `;
+        }
+    }
+}
+
+function scrollChatToBottom() {
+    const chatMessages = document.getElementById("ai-chat-messages");
+    if (chatMessages) {
+        setTimeout(() => {
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }, 100);
+    }
+}
+
+function formatMessageText(text) {
+    return text
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*(.*?)\*/g, '<em>$1</em>')
+        .replace(/\n/g, '<br>')
+        .replace(/•\s/g, '• ');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// AI ASSISTANT FEATURES (FEAT-003 Implementation)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+let aiConversationState = {
+    currentConversationId: null,
+    conversationHistory: [],
+    conversationState: {},
+    isProcessing: false,
+    messageHistory: []
+};
+
+// Store conversation persistence data
+const AI_CONVERSATION_STORAGE_KEY = "dosebuddy_ai_conversations";
+const URGENT_SYMPTOMS = [
+    "chest pain", "difficulty breathing", "can't breathe", "trouble breathing",
+    "severe headache", "worst headache", "sudden headache", "facial drooping",
+    "face drooping", "speech slurred", "can't speak", "weakness one side",
+    "numbness one side", "paralysis", "severe allergic reaction", "anaphylaxis", 
+    "throat swelling", "overdose", "took too much", "double dose"
+];
+
+function setupAiHandlers() {
+    const chatInput = document.getElementById("ai-chat-input");
+    const chatSend = document.getElementById("ai-chat-send");
+    const newConversationBtn = document.getElementById("new-conversation-btn");
+    const starterPrompts = document.querySelectorAll(".ai-starter-prompt");
+
+    // Load existing conversations
+    loadAiConversations();
+
+    // Auto-resize chat input
+    if (chatInput) {
+        chatInput.addEventListener("input", () => {
+            chatInput.style.height = "auto";
+            chatInput.style.height = Math.min(chatInput.scrollHeight, 120) + "px";
+            updateSendButton();
+        });
+
+        chatInput.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                if (!aiConversationState.isProcessing && chatInput.value.trim()) {
+                    sendAiMessage();
+                }
+            }
+        });
+    }
+
+    // Send button handler  
+    if (chatSend) {
+        chatSend.addEventListener("click", () => {
+            if (!aiConversationState.isProcessing && chatInput && chatInput.value.trim()) {
+                sendAiMessage();
+            }
+        });
+    }
+
+    // New conversation handler
+    if (newConversationBtn) {
+        newConversationBtn.addEventListener("click", startNewConversation);
+    }
+
+    // Starter prompt handlers
+    starterPrompts.forEach(prompt => {
+        prompt.addEventListener("click", () => {
+            const promptText = prompt.dataset.prompt;
+            if (promptText && chatInput) {
+                chatInput.value = promptText;
+                chatInput.style.height = "auto";
+                chatInput.style.height = Math.min(chatInput.scrollHeight, 120) + "px";
+                updateSendButton();
+                sendAiMessage();
+            }
+        });
+    });
+
+    // Initialize conversation state
+    if (!aiConversationState.currentConversationId) {
+        startNewConversation();
+    }
+
+    updateSendButton();
+}
+
+function startNewConversation() {
+    aiConversationState.currentConversationId = `conv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    aiConversationState.conversationState = {};
+    aiConversationState.messageHistory = [];
+    
+    const chatMessages = document.getElementById("ai-chat-messages");
+    if (chatMessages) {
+        // Clear existing messages except welcome
+        const existingMessages = chatMessages.querySelectorAll(".ai-message-pair, .ai-typing-indicator");
+        existingMessages.forEach(msg => msg.remove());
+    }
+
+    saveAiConversations();
+    updateChatInterface();
+}
+
+async function sendAiMessage() {
+    const chatInput = document.getElementById("ai-chat-input");
+    const messageText = chatInput?.value.trim();
+    
+    if (!messageText || aiConversationState.isProcessing) return;
+
+    // Clear input and update UI
+    if (chatInput) {
+        chatInput.value = "";
+        chatInput.style.height = "auto";
+    }
+
+    // Check for urgent symptoms first
+    if (containsUrgentSymptoms(messageText)) {
+        displayUrgentWarning(messageText);
+        updateSendButton();
+        return;
+    }
+
+    // Add user message to chat
+    addMessageToChat("user", messageText);
+    
+    // Set processing state
+    aiConversationState.isProcessing = true;
+    updateSendButton();
+    showTypingIndicator();
+
+    try {
+        // Call the unified AI API
+        const response = await authFetch(`${API_BASE}/ai/chat`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                message: messageText,
+                conversationId: aiConversationState.currentConversationId,
+                conversationState: aiConversationState.conversationState
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`AI service error: ${response.status}`);
+        }
+
+        const result = await response.json();
+        
+        if (!result.success) {
+            throw new Error(result.error || "AI service failed");
+        }
+
+        // Update conversation state
+        aiConversationState.conversationState = result.conversationState || {};
+        
+        // Process different response types
+        await processAiResponse(result);
+
+    } catch (error) {
+        console.error("AI chat error:", error);
+        addMessageToChat("assistant", "I'm sorry, I'm having trouble connecting right now. Please try again in a moment.", "error");
+        showToast("AI service temporarily unavailable. Please try again.", "warning", 4000);
+    } finally {
+        hideTypingIndicator();
+        aiConversationState.isProcessing = false;
+        updateSendButton();
+        saveAiConversations();
+    }
+}
+
+function containsUrgentSymptoms(text) {
+    const lowerText = text.toLowerCase();
+    return URGENT_SYMPTOMS.some(symptom => lowerText.includes(symptom));
+}
+
+function displayUrgentWarning(originalMessage) {
+    addMessageToChat("user", originalMessage);
+    
+    const warningHtml = `
+        <div class="ai-urgent-warning">
+            <div class="ai-urgent-icon">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/>
+                </svg>
+            </div>
+            <div class="ai-urgent-content">
+                <h4>⚠️ Urgent Medical Attention Needed</h4>
+                <p>Based on your symptoms, you should seek immediate medical care.</p>
+                
+                <div class="ai-emergency-actions">
+                    <div class="ai-emergency-action">
+                        <strong>🚨 If this is a medical emergency:</strong>
+                        <ul>
+                            <li>Call your local emergency number (911, 112, etc.)</li>
+                            <li>Go to the nearest emergency room</li>
+                            <li>Contact your healthcare provider immediately</li>
+                        </ul>
+                    </div>
+                </div>
+                
+                <div class="ai-urgent-disclaimer">
+                    DoseBuddy cannot provide emergency medical assistance. Please seek professional help right away.
+                </div>
+            </div>
+        </div>
+    `;
+    
+    addMessageToChat("assistant", warningHtml, "urgent");
+    scrollChatToBottom();
+}
+
+async function processAiResponse(result) {
+    const { type, message, questionType, options, requiresInput, inputConfig, intent } = result;
+    
+    // Add message timestamp
+    const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    
+    if (type === "QUESTION") {
+        // Progressive questioning with specialized inputs
+        await handleProgressiveQuestion(result, timestamp);
+    } else if (type === "URGENT_WARNING") {
+        // Already handled in displayUrgentWarning
+        addMessageToChat("assistant", message, "urgent", timestamp);
+    } else {
+        // Regular response
+        addMessageToChat("assistant", message, "response", timestamp);
+    }
+    
+    scrollChatToBottom();
+}
+
+async function handleProgressiveQuestion(result, timestamp) {
+    const { message, questionType, options, inputConfig } = result;
+    
+    let messageHtml = `<div class="ai-message-text">${formatMessageText(message)}</div>`;
+    
+    if (questionType === "SINGLE_SELECT" && options) {
+        messageHtml += createSingleSelectInterface(options);
+    } else if (questionType === "MULTI_SELECT" && options) {
+        messageHtml += createMultiSelectInterface(options);
+    } else if (questionType === "TEXT_INPUT") {
+        messageHtml += createTextInputInterface(inputConfig);
+    } else if (questionType === "TEMPERATURE_INPUT") {
+        messageHtml += createTemperatureInputInterface(inputConfig);
+    } else if (questionType === "DURATION_INPUT") {
+        messageHtml += createDurationInputInterface(inputConfig);
+    } else if (questionType === "SEVERITY_INPUT") {
+        messageHtml += createSeverityInputInterface(inputConfig);
+    } else if (questionType === "MEDICINE_SELECTION") {
+        messageHtml += createMedicineSelectionInterface(options);
+    }
+    
+    addMessageToChat("assistant", messageHtml, "question", timestamp);
+}
+
+function createSingleSelectInterface(options) {
+    return `
+        <div class="ai-question-interface ai-single-select">
+            <div class="ai-options-list">
+                ${options.map(option => `
+                    <button class="ai-option-btn" data-value="${escapeHtml(option.value || option.id)}" data-id="${escapeHtml(option.id)}">
+                        <span class="ai-option-text">${escapeHtml(option.text)}</span>
+                        ${option.description ? `<span class="ai-option-desc">${escapeHtml(option.description)}</span>` : ''}
+                    </button>
+                `).join('')}
+            </div>
+        </div>
+    `;
+}
+
+function createMultiSelectInterface(options) {
+    return `
+        <div class="ai-question-interface ai-multi-select">
+            <div class="ai-checkbox-list">
+                ${options.map(option => `
+                    <label class="ai-checkbox-item">
+                        <input type="checkbox" class="ai-checkbox" data-value="${escapeHtml(option.value || option.id)}" data-id="${escapeHtml(option.id)}">
+                        <span class="ai-checkbox-custom"></span>
+                        <div class="ai-checkbox-content">
+                            <span class="ai-option-text">${escapeHtml(option.text)}</span>
+                            ${option.description ? `<span class="ai-option-desc">${escapeHtml(option.description)}</span>` : ''}
+                        </div>
+                    </label>
+                `).join('')}
+            </div>
+            <button class="ai-submit-btn" disabled>Continue</button>
+        </div>
+    `;
+}
+
+function createTextInputInterface(config = {}) {
+    const placeholder = config?.placeholder || "Enter your answer...";
+    const maxLength = config?.maxLength || 500;
+    
+    return `
+        <div class="ai-question-interface ai-text-input">
+            <div class="ai-input-group">
+                <textarea 
+                    class="ai-text-area" 
+                    placeholder="${escapeHtml(placeholder)}" 
+                    maxlength="${maxLength}"
+                    rows="3"></textarea>
+                <div class="ai-input-footer">
+                    <span class="ai-char-count">0/${maxLength}</span>
+                    <button class="ai-submit-btn" disabled>Send</button>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function createTemperatureInputInterface(config = {}) {
+    const defaultUnit = config?.defaultUnit || "°F";
+    
+    return `
+        <div class="ai-question-interface ai-temperature-input">
+            <div class="ai-temp-input-group">
+                <div class="ai-temp-value-input">
+                    <input type="number" class="ai-temp-number" placeholder="98.6" step="0.1" min="70" max="120">
+                </div>
+                <div class="ai-temp-unit-selector">
+                    <button class="ai-temp-unit-btn ${defaultUnit === '°F' ? 'active' : ''}" data-unit="°F">°F</button>
+                    <button class="ai-temp-unit-btn ${defaultUnit === '°C' ? 'active' : ''}" data-unit="°C">°C</button>
+                </div>
+            </div>
+            <div class="ai-temp-ranges">
+                <div class="ai-temp-range normal">Normal: 97-99°F (36-37°C)</div>
+                <div class="ai-temp-range fever">Fever: 100.4°F+ (38°C+)</div>
+            </div>
+            <button class="ai-submit-btn" disabled>Continue</button>
+        </div>
+    `;
+}
+
+function createDurationInputInterface(config = {}) {
+    return `
+        <div class="ai-question-interface ai-duration-input">
+            <div class="ai-duration-group">
+                <div class="ai-duration-value">
+                    <input type="number" class="ai-duration-number" placeholder="1" min="1" max="999">
+                </div>
+                <div class="ai-duration-unit">
+                    <select class="ai-duration-select">
+                        <option value="minutes">Minutes</option>
+                        <option value="hours">Hours</option>
+                        <option value="days">Days</option>
+                        <option value="weeks">Weeks</option>
+                        <option value="months">Months</option>
+                    </select>
+                </div>
+            </div>
+            <div class="ai-duration-presets">
+                <button class="ai-duration-preset" data-value="30" data-unit="minutes">30 min</button>
+                <button class="ai-duration-preset" data-value="1" data-unit="hours">1 hour</button>
+                <button class="ai-duration-preset" data-value="1" data-unit="days">1 day</button>
+                <button class="ai-duration-preset" data-value="1" data-unit="weeks">1 week</button>
+            </div>
+            <button class="ai-submit-btn" disabled>Continue</button>
+        </div>
+    `;
+}
+
+function createSeverityInputInterface(config = {}) {
+    return `
+        <div class="ai-question-interface ai-severity-input">
+            <div class="ai-severity-scale">
+                <div class="ai-severity-labels">
+                    <span class="ai-severity-label-min">Mild</span>
+                    <span class="ai-severity-label-max">Severe</span>
+                </div>
+                <div class="ai-severity-slider-container">
+                    <input type="range" class="ai-severity-slider" min="1" max="10" value="5" step="1">
+                    <div class="ai-severity-markers">
+                        ${Array.from({ length: 10 }, (_, i) => `<div class="ai-severity-marker" data-value="${i + 1}"></div>`).join('')}
+                    </div>
+                </div>
+                <div class="ai-severity-value">
+                    <span class="ai-severity-number">5</span> / 10
+                </div>
+            </div>
+            <div class="ai-severity-descriptions">
+                <div class="ai-severity-desc mild">1-3: Mild discomfort, manageable</div>
+                <div class="ai-severity-desc moderate">4-6: Moderate, affecting daily activities</div>
+                <div class="ai-severity-desc severe">7-10: Severe, very difficult to manage</div>
+            </div>
+            <button class="ai-submit-btn" disabled>Continue</button>
+        </div>
+    `;
+}
+
+function createMedicineSelectionInterface(options) {
+    return `
+        <div class="ai-question-interface ai-medicine-selection">
+            <div class="ai-medicine-list">
+                ${options.map(option => `
+                    <button class="ai-medicine-btn" data-value="${escapeHtml(option.value)}" data-id="${escapeHtml(option.id)}">
+                        <div class="ai-medicine-icon">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/>
+                            </svg>
+                        </div>
+                        <span class="ai-medicine-name">${escapeHtml(option.text)}</span>
+                    </button>
+                `).join('')}
+            </div>
+        </div>
+    `;
+}
+
