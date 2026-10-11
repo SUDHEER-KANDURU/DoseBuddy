@@ -900,6 +900,492 @@ async function parsePrescriptionBatchWithAi(
   return mergeExtractedResults(individualResults);
 }
 
+// ── Unified AI Assistant Functions ──────────────────────────────────────
+
+// Urgent symptom patterns for safety detection
+const URGENT_PATTERNS = [
+  /\b(chest pain|difficulty breathing|can't breathe|trouble breathing)\b/i,
+  /\b(severe headache|worst headache|sudden headache)\b/i,
+  /\b(facial drooping|face drooping|speech slurred|can't speak)\b/i,
+  /\b(weakness|numbness|paralysis)\b.*\b(one side|left side|right side)\b/i,
+  /\b(severe allergic reaction|anaphylaxis|throat swelling)\b/i,
+  /\b(overdose|took too much|double dose)\b/i,
+  /\b(high fever)\b.*\b(stiff neck|confusion|rash)\b/i
+];
+
+function containsUrgentSymptoms(message: string): boolean {
+  return URGENT_PATTERNS.some(pattern => pattern.test(message));
+}
+
+function createUrgentWarningResponse(message: string, conversationId: string, conversationState: any): any {
+  const warningMessage = "⚠️ **URGENT MEDICAL ATTENTION NEEDED**\n\n" +
+    "Based on your symptoms, you should seek immediate medical care or contact emergency services.\n\n" +
+    "🚨 **If this is a medical emergency:**\n" +
+    "• Call your local emergency number (911, 112, etc.)\n" +
+    "• Go to the nearest emergency room\n" +
+    "• Contact your healthcare provider immediately\n\n" +
+    "DoseBuddy cannot provide emergency medical assistance. Please seek professional help right away.";
+
+  return {
+    messageType: "URGENT_WARNING",
+    intent: "EMERGENCY",
+    conversationId,
+    conversationState,
+    message: warningMessage,
+    requiresAction: true,
+    actionType: "EMERGENCY_GUIDANCE"
+  };
+}
+
+function detectIntent(message: string, userMedications: any[]): string {
+  const lowerMessage = message.toLowerCase();
+
+  // Check for medication-related queries
+  if (/.*\b(medicine|medication|drug|pill|tablet)\b.*\b(info|information|about|what|tell)\b.*/.test(lowerMessage) ||
+      /.*\bwhat.*(is|does)\b.*\b(medicine|medication|drug)\b.*/.test(lowerMessage)) {
+    return "MEDICINE_INFO";
+  }
+
+  // Check for symptom reports
+  if (/.*\b(feel|feeling|have|experiencing|symptom)\b.*(pain|ache|sick|nausea|dizzy|fever|headache|stomach)\b.*/.test(lowerMessage) ||
+      /.*\b(pain|ache|sick|nausea|dizzy|fever|headache|stomach)\b.*/.test(lowerMessage)) {
+    return "SYMPTOM_CHECK";
+  }
+
+  // Check for side effect concerns
+  if (/.*\b(side effect|adverse|reaction)\b.*/.test(lowerMessage) ||
+      /.*\b(cause|caused by|from taking|after taking)\b.*\b(medicine|medication|drug)\b.*/.test(lowerMessage)) {
+    return "SIDE_EFFECT";
+  }
+
+  // Check for interaction queries
+  if (/.*\b(interact|interaction|together|combine|mix)\b.*\b(medicine|medication|drug)\b.*/.test(lowerMessage) ||
+      /.*\bcan.*take.*(with|together)\b.*/.test(lowerMessage)) {
+    return "INTERACTION";
+  }
+
+  // Check for schedule/dosage questions
+  if (/.*\b(schedule|when|time|dose|dosage|how often|missed|miss)\b.*\b(take|taking)\b.*/.test(lowerMessage) ||
+      /.*\b(today|tomorrow|morning|evening)\b.*\b(medicine|medication)\b.*/.test(lowerMessage)) {
+    return "SCHEDULE";
+  }
+
+  // Check for prescription questions
+  if (/.*\b(prescription|prescribed|doctor said|instructions)\b.*/.test(lowerMessage)) {
+    return "PRESCRIPTION";
+  }
+
+  return "GENERAL";
+}
+
+function extractMedicineName(message: string, userMedications: any[]): string | null {
+  // First check if message contains any of user's current medications
+  for (const med of userMedications) {
+    const medName = med.name || "";
+    if (medName && message.toLowerCase().includes(medName.toLowerCase())) {
+      return medName;
+    }
+  }
+
+  // Extract medicine name from natural language
+  const patterns = [
+    /\babout\s+([\w\s]+?)\s*[.?!]?$/i,
+    /\bwhat\s+is\s+([\w\s]+?)\s*[.?!]?$/i,
+    /\btell\s+me\s+about\s+([\w\s]+?)\s*[.?!]?$/i,
+    /\binformation\s+on\s+([\w\s]+?)\s*[.?!]?$/i
+  ];
+
+  for (const pattern of patterns) {
+    const match = message.match(pattern);
+    if (match) {
+      return match[1].trim();
+    }
+  }
+
+  return null;
+}
+
+function extractSymptom(message: string): string | null {
+  const symptomKeywords = ["headache", "fever", "nausea", "pain", "ache", "dizzy", "sick", "stomach"];
+  
+  for (const symptom of symptomKeywords) {
+    if (message.toLowerCase().includes(symptom)) {
+      return symptom;
+    }
+  }
+  
+  return null;
+}
+
+function createOption(id: string, text: string, description: string = ""): any {
+  const option: any = { id, text };
+  if (description) {
+    option.description = description;
+  }
+  return option;
+}
+
+function getActivityType(intent: string): string {
+  switch (intent) {
+    case "MEDICINE_INFO": return "AI_MEDICINE_INFO";
+    case "SYMPTOM_CHECK": return "SYMPTOM_CHECK";
+    case "SIDE_EFFECT": return "AI_SIDE_EFFECT_CHECK";
+    case "INTERACTION": return "AI_INTERACTION_CHECK";
+    case "PRESCRIPTION": return "AI_PRESCRIPTION_HELP";
+    case "SCHEDULE": return "AI_SCHEDULE_INQUIRY";
+    default: return "AI_HEALTH_ASSISTANCE";
+  }
+}
+
+async function processMedicineInfoIntent(env: Env, message: string, conversationId: string, conversationState: any, userMedications: any[]): Promise<any> {
+  const response: any = {
+    intent: "MEDICINE_INFO",
+    conversationId
+  };
+
+  const medicineName = extractMedicineName(message, userMedications);
+  
+  if (medicineName === null && userMedications.length > 0) {
+    // Ask user to select from their medications
+    response.messageType = "QUESTION";
+    response.message = "I can help you learn about medicines. Which medicine would you like to know about?";
+    response.questionType = "MEDICINE_SELECTION";
+    
+    const questions = userMedications.map(med => ({
+      id: med.id?.toString() || "unknown",
+      text: `${med.name} (${med.dosage || "N/A"})`,
+      value: med.name
+    }));
+    
+    questions.push({
+      id: "custom",
+      text: "Other medicine not in my list",
+      value: "custom"
+    });
+    
+    response.questions = questions;
+    response.conversationState = conversationState;
+    return response;
+  }
+  
+  if (medicineName === null) {
+    // Ask for medicine name
+    response.messageType = "QUESTION";
+    response.message = "What medicine would you like to learn about?";
+    response.questionType = "TEXT_INPUT";
+    response.placeholder = "Enter medicine name...";
+    response.conversationState = conversationState;
+    return response;
+  }
+  
+  // Provide medicine information using existing callAi function
+  const prompt = `Provide concise medication information, uses, common side effects, and safety guidance for: ${medicineName}`;
+  const aiResponse = await callAi(env, prompt);
+  const medicineInfo = await aiResponse.text();
+  
+  response.messageType = "RESPONSE";
+  response.message = medicineInfo;
+  response.medicineName = medicineName;
+  conversationState.completed = true;
+  response.conversationState = conversationState;
+  
+  return response;
+}
+
+async function processSymptomCheckIntent(env: Env, message: string, conversationId: string, conversationState: any, userMedications: any[]): Promise<any> {
+  const response: any = {
+    intent: "SYMPTOM_CHECK",
+    conversationId
+  };
+
+  const currentQuestion = conversationState.currentQuestion;
+  
+  if (!currentQuestion) {
+    // First interaction - ask about symptom severity
+    const symptom = extractSymptom(message);
+    conversationState.reportedSymptom = symptom || message;
+    conversationState.currentQuestion = "severity";
+    
+    response.messageType = "QUESTION";
+    response.message = `I understand you're experiencing ${symptom || "symptoms"}. How would you describe the severity?`;
+    response.questionType = "SINGLE_SELECT";
+    
+    response.questions = [
+      createOption("mild", "Mild", "Noticeable but manageable"),
+      createOption("moderate", "Moderate", "Interfering with normal activities"),
+      createOption("severe", "Severe", "Difficult to continue normal activities"),
+      createOption("very-severe", "Very severe", "Extremely intense"),
+      createOption("custom", "Describe it differently", "")
+    ];
+    
+    response.conversationState = conversationState;
+    return response;
+  }
+  
+  if (currentQuestion === "severity") {
+    conversationState.severity = message;
+    conversationState.currentQuestion = "duration";
+    
+    response.messageType = "QUESTION";
+    response.message = "When did this start?";
+    response.questionType = "SINGLE_SELECT";
+    
+    response.questions = [
+      createOption("today", "Started today", ""),
+      createOption("1-2-days", "1-2 days ago", ""),
+      createOption("3-7-days", "3-7 days ago", ""),
+      createOption("week-plus", "More than a week ago", ""),
+      createOption("not-sure", "I'm not sure", ""),
+      createOption("custom", "Other timeframe", "")
+    ];
+    
+    response.conversationState = conversationState;
+    return response;
+  }
+  
+  if (currentQuestion === "duration") {
+    conversationState.duration = message;
+    
+    // Check if user has medications that might be relevant
+    if (userMedications.length > 0) {
+      conversationState.currentQuestion = "medication-timing";
+      
+      response.messageType = "QUESTION";
+      response.message = "I see you take medications. Did this symptom start before or after you began taking any medicine?";
+      response.questionType = "SINGLE_SELECT";
+      
+      response.questions = [
+        createOption("before", "Before I started any medicine", ""),
+        createOption("after-dose", "Soon after taking a dose", ""),
+        createOption("hours-after", "Several hours after taking medicine", ""),
+        createOption("independent", "It happens even when I don't take medicine", ""),
+        createOption("not-sure", "I'm not sure about the timing", ""),
+        createOption("custom", "Let me explain the timing", "")
+      ];
+      
+      response.conversationState = conversationState;
+      return response;
+    }
+  }
+  
+  // Generate final symptom analysis
+  return await generateSymptomAnalysis(env, conversationState, conversationId, userMedications);
+}
+
+async function generateSymptomAnalysis(env: Env, conversationState: any, conversationId: string, userMedications: any[]): Promise<any> {
+  const response: any = {
+    intent: "SYMPTOM_CHECK",
+    conversationId,
+    messageType: "RESPONSE"
+  };
+  
+  const reportedSymptom = conversationState.reportedSymptom || "";
+  const severity = conversationState.severity || "";
+  const duration = conversationState.duration || "";
+  const medicationTiming = conversationState.medicationTiming || "";
+  
+  // Build context for AI analysis
+  let contextBuilder = `Patient reports: ${reportedSymptom}\n`;
+  if (severity) contextBuilder += `Severity: ${severity}\n`;
+  if (duration) contextBuilder += `Duration: ${duration}\n`;
+  if (medicationTiming) contextBuilder += `Timing relative to medications: ${medicationTiming}\n`;
+  
+  if (userMedications.length > 0) {
+    contextBuilder += "Current medications: ";
+    const medNames = userMedications.map(med => `${med.name} ${med.dosage || ""}`);
+    contextBuilder += medNames.join(", ") + "\n";
+  }
+  
+  const aiResponse = await callAi(env, `Give safe, non-diagnostic guidance for these symptoms: ${contextBuilder}`);
+  const analysis = await aiResponse.text();
+  
+  response.message = analysis;
+  conversationState.completed = true;
+  response.conversationState = conversationState;
+  
+  return response;
+}
+
+async function processSideEffectIntent(env: Env, message: string, conversationId: string, conversationState: any, userMedications: any[]): Promise<any> {
+  const response: any = {
+    intent: "SIDE_EFFECT",
+    conversationId
+  };
+
+  const currentQuestion = conversationState.currentQuestion;
+  
+  if (!currentQuestion && userMedications.length > 0) {
+    conversationState.currentQuestion = "which-medicine";
+    
+    response.messageType = "QUESTION";
+    response.message = "Which medicine do you think might be causing this?";
+    response.questionType = "SINGLE_SELECT";
+    
+    const questions = userMedications.map(med => 
+      createOption(med.id?.toString() || "unknown", `${med.name} (${med.dosage || "N/A"})`, "")
+    );
+    questions.push(createOption("not-sure", "I'm not sure which one", ""));
+    questions.push(createOption("all", "It could be any of them", ""));
+    
+    response.questions = questions;
+    response.conversationState = conversationState;
+    return response;
+  }
+  
+  // Continue with side effect analysis
+  const analysis = "Based on your description, this could potentially be related to your medication. " +
+    "However, I cannot definitively determine if this is a side effect. " +
+    "Please contact your healthcare provider or pharmacist to discuss this concern. " +
+    "If symptoms are severe or worsening, seek medical attention promptly.";
+  
+  response.messageType = "RESPONSE";
+  response.message = analysis;
+  conversationState.completed = true;
+  response.conversationState = conversationState;
+  
+  return response;
+}
+
+async function processInteractionIntent(env: Env, message: string, conversationId: string, conversationState: any, userMedications: any[]): Promise<any> {
+  const response: any = {
+    intent: "INTERACTION",
+    conversationId,
+    messageType: "RESPONSE"
+  };
+
+  let analysis = "For medication interaction questions, I recommend consulting with your pharmacist " +
+    "or healthcare provider who can check your complete medication list against reliable " +
+    "drug interaction databases. They can provide personalized advice based on your " +
+    "specific medications, dosages, and health conditions.";
+  
+  if (userMedications.length > 0) {
+    analysis = `I see you're currently taking ${userMedications.length} medication(s). ${analysis}`;
+  }
+  
+  response.message = analysis;
+  conversationState.completed = true;
+  response.conversationState = conversationState;
+  
+  return response;
+}
+
+async function processScheduleIntent(env: Env, message: string, conversationId: string, conversationState: any, userMedications: any[]): Promise<any> {
+  const response: any = {
+    intent: "SCHEDULE",
+    conversationId,
+    messageType: "RESPONSE"
+  };
+
+  if (userMedications.length === 0) {
+    response.message = "You don't have any medicines scheduled in DoseBuddy yet. " +
+      "You can add them using the 'Add Medicine' section to get personalized scheduling help.";
+  } else {
+    let scheduleInfo = "Here are your current medications in DoseBuddy:\n\n";
+    
+    for (const med of userMedications) {
+      scheduleInfo += `• **${med.name}** (${med.dosage || "N/A"})\n`;
+      if (med.times && Array.isArray(med.times)) {
+        const timesList = med.times.map((t: any) => t.timeOfDay).filter(Boolean);
+        if (timesList.length > 0) {
+          scheduleInfo += `  Times: ${timesList.join(", ")}\n`;
+        }
+      }
+      if (med.instructions) {
+        scheduleInfo += `  Instructions: ${med.instructions}\n`;
+      }
+      scheduleInfo += "\n";
+    }
+    
+    scheduleInfo += "For questions about missed doses or timing changes, please consult your healthcare provider.";
+    response.message = scheduleInfo;
+  }
+  
+  conversationState.completed = true;
+  response.conversationState = conversationState;
+  return response;
+}
+
+async function processPrescriptionIntent(env: Env, message: string, conversationId: string, conversationState: any): Promise<any> {
+  const response: any = {
+    intent: "PRESCRIPTION",
+    conversationId,
+    messageType: "RESPONSE"
+  };
+
+  const analysis = "For prescription-related questions, I recommend:\n\n" +
+    "• Contact your prescribing healthcare provider for clarification\n" +
+    "• Speak with your pharmacist about dosage or administration questions\n" +
+    "• Use DoseBuddy's prescription upload feature to help organize your medications\n\n" +
+    "Always follow the instructions provided by your healthcare provider and pharmacist.";
+  
+  response.message = analysis;
+  conversationState.completed = true;
+  response.conversationState = conversationState;
+  
+  return response;
+}
+
+async function processGeneralHealthIntent(env: Env, message: string, conversationId: string, conversationState: any): Promise<any> {
+  const response: any = {
+    intent: "GENERAL",
+    conversationId,
+    messageType: "RESPONSE"
+  };
+
+  const analysis = "I'm here to help with medicine information, symptom questions, and medication management. " +
+    "For general health questions, please consult with qualified healthcare professionals. " +
+    "Is there something specific about your medications or symptoms I can help you with?";
+  
+  response.message = analysis;
+  conversationState.completed = true;
+  response.conversationState = conversationState;
+  
+  return response;
+}
+
+async function processUnifiedChat(env: Env, message: string, conversationId: string, conversationState: any, user: any, userMedications: any[]): Promise<any> {
+  // Initialize conversation state if not provided
+  if (!conversationState || typeof conversationState !== "object") {
+    conversationState = {};
+  }
+  
+  // Safety check for urgent symptoms
+  if (containsUrgentSymptoms(message)) {
+    return createUrgentWarningResponse(message, conversationId, conversationState);
+  }
+  
+  // Detect intent if not already determined
+  let currentIntent = conversationState.currentIntent;
+  if (!currentIntent) {
+    currentIntent = detectIntent(message, userMedications);
+    conversationState.currentIntent = currentIntent;
+  }
+  
+  // Process based on intent
+  switch (currentIntent) {
+    case "MEDICINE_INFO":
+      return await processMedicineInfoIntent(env, message, conversationId, conversationState, userMedications);
+      
+    case "SYMPTOM_CHECK":
+      return await processSymptomCheckIntent(env, message, conversationId, conversationState, userMedications);
+      
+    case "SIDE_EFFECT":
+      return await processSideEffectIntent(env, message, conversationId, conversationState, userMedications);
+      
+    case "INTERACTION":
+      return await processInteractionIntent(env, message, conversationId, conversationState, userMedications);
+      
+    case "SCHEDULE":
+      return await processScheduleIntent(env, message, conversationId, conversationState, userMedications);
+      
+    case "PRESCRIPTION":
+      return await processPrescriptionIntent(env, message, conversationId, conversationState);
+      
+    default:
+      return await processGeneralHealthIntent(env, message, conversationId, conversationState);
+  }
+}
+
 async function callAi(env: Env, prompt: string): Promise<Response> {
   // 1. Try Gemini models if GEMINI_API_KEY is configured
   if (env.GEMINI_API_KEY) {
@@ -1127,6 +1613,47 @@ export default {
           }
         }
         return await callAi(env, `Give safe, non-diagnostic guidance for these symptoms: ${symptoms}`);
+      }
+
+      if (path === "/api/ai/chat" && request.method === "POST") {
+        const { body: b } = await requestBody(request);
+        const message = String(b.message ?? "").trim();
+        const conversationId = String(b.conversationId ?? "");
+        const conversationState = b.conversationState || {};
+        
+        if (!message) {
+          return json({ success: false, error: "Message is required" }, 400);
+        }
+
+        try {
+          // Get user's current medications for context
+          const today = new Date().toISOString().split("T")[0];
+          const [userMedications] = await query<Json[]>(
+            env,
+            "SELECT m.*,JSON_ARRAYAGG(JSON_OBJECT('id',mt.id,'timeOfDay',TIME_FORMAT(mt.time_of_day,'%H:%i:%s'))) times FROM medications m LEFT JOIN medication_times mt ON mt.medication_id=m.id WHERE m.user_id=? AND m.start_date<=? AND m.end_date>=? GROUP BY m.id",
+            [actor.id, today, today]
+          );
+
+          const chatResponse = await processUnifiedChat(env, message, conversationId, conversationState, actor, userMedications);
+          
+          // Log activity based on intent
+          const intent = chatResponse.intent || "GENERAL";
+          const activityType = getActivityType(intent);
+          try {
+            await query(env, "INSERT INTO activities (user_id,type,message,created_at) VALUES (?,?,?,NOW())", [
+              actor.id,
+              activityType,
+              `AI Chat: ${message.length > 100 ? message.substring(0, 100) + "..." : message}`
+            ]);
+          } catch {
+            // Activity logging failure is non-fatal
+          }
+          
+          return json({ success: true, ...chatResponse });
+        } catch (error: any) {
+          console.error("[AI Chat] Processing error:", error);
+          return json({ success: false, error: "AI service temporarily unavailable. Please try again later." });
+        }
       }
 
       if ((path === "/api/prescription/upload" || path === "/api/prescriptions/upload" || path === "/api/prescription/upload/") && request.method === "POST") {
