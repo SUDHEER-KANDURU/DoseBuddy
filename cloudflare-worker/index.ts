@@ -1,5 +1,8 @@
 import { createConnection } from "mysql2/promise";
 import bcrypt from "bcryptjs";
+import { buildPushPayload, type PushSubscription, type VapidKeys } from "@block65/webcrypto-web-push";
+import { doseReminderAllowed, missedNotificationEligible, scheduleDate, scheduleInstant } from "./scheduler-time";
+import { isVapidKeyPairValid } from "./vapid-validation";
 
 export interface Env {
   HYPERDRIVE: Hyperdrive;
@@ -11,6 +14,8 @@ export interface Env {
   VAPID_PUBLIC_KEY?: string;
   VAPID_PRIVATE_KEY?: string;
   VAPID_EMAIL?: string;
+  VAPID_SUBJECT?: string;
+  DOSE_SCHEDULER: DurableObjectNamespace;
 }
 
 interface ScheduledEvent {
@@ -378,120 +383,49 @@ function bufferToBase64(buffer: ArrayBuffer): string {
 }
 
 // ── Web Push Notification Functions ─────────────────────────────────────────
-async function generateVapidJWT(env: Env, audience: string): Promise<string> {
-  if (!env.VAPID_PRIVATE_KEY || !env.VAPID_EMAIL) {
-    throw new Error("VAPID credentials not configured");
-  }
-
-  const header = { alg: "ES256", typ: "JWT" };
-  const payload = {
-    aud: audience,
-    exp: Math.floor(Date.now() / 1000) + 3600, // 1 hour expiry
-    sub: `mailto:${env.VAPID_EMAIL}`
-  };
-
-  const headerB64 = btoa(JSON.stringify(header)).replace(/[+/]/g, c => c === '+' ? '-' : '_').replace(/=/g, '');
-  const payloadB64 = btoa(JSON.stringify(payload)).replace(/[+/]/g, c => c === '+' ? '-' : '_').replace(/=/g, '');
-  const message = `${headerB64}.${payloadB64}`;
-
-  // Import VAPID private key
-  const privateKeyBuffer = Uint8Array.from(atob(env.VAPID_PRIVATE_KEY), c => c.charCodeAt(0));
-  const cryptoKey = await crypto.subtle.importKey(
-    "pkcs8",
-    privateKeyBuffer,
-    { name: "ECDSA", namedCurve: "P-256" },
-    false,
-    ["sign"]
-  );
-
-  // Sign the JWT
-  const signature = await crypto.subtle.sign(
-    { name: "ECDSA", hash: "SHA-256" },
-    cryptoKey,
-    new TextEncoder().encode(message)
-  );
-
-  const signatureB64 = btoa(String.fromCharCode(...new Uint8Array(signature)))
-    .replace(/[+/]/g, c => c === '+' ? '-' : '_').replace(/=/g, '');
-
-  return `${message}.${signatureB64}`;
+async function validateVapidConfiguration(env: Env): Promise<boolean> {
+  if (!env.VAPID_PUBLIC_KEY || !env.VAPID_PRIVATE_KEY || !(env.VAPID_SUBJECT || env.VAPID_EMAIL)) return false;
+  return isVapidKeyPairValid(env.VAPID_PUBLIC_KEY, env.VAPID_PRIVATE_KEY);
 }
 
-async function sendWebPushNotification(env: Env, subscription: any, payload: any): Promise<boolean> {
+async function recordPushAttempt(env: Env, info: { eventId: string; userId: number; subscriptionId: number; status: number | null; outcome: string; deliveryLatencyMs: number; processingLagMs: number; retryCount: number; eventCreatedAt: number | null; scheduledAt: number | null; errorCategory?: string }): Promise<void> {
   try {
-    const { endpoint, keys } = subscription;
-    
-    // Generate VAPID JWT for the push service
-    const url = new URL(endpoint);
-    const audience = `${url.protocol}//${url.host}`;
-    const vapidJWT = await generateVapidJWT(env, audience);
-
-    // Encrypt payload (simplified implementation)
-    const payloadStr = JSON.stringify(payload);
-    
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/octet-stream",
-        "Authorization": `vapid t=${vapidJWT}, k=${env.VAPID_PUBLIC_KEY}`,
-        "TTL": "86400"
-      },
-      body: payloadStr
-    });
-
-    if (response.ok) {
-      console.log("[Web Push] Notification sent successfully");
-      return true;
-    } else {
-      console.warn(`[Web Push] Failed to send notification: ${response.status}`);
-      return false;
-    }
+    await query(env,
+      "INSERT INTO push_delivery_attempts (event_id,user_id,subscription_id,event_created_at,scheduled_at,attempted_at,provider_status,outcome,processing_lag_ms,delivery_latency_ms,retry_count,error_category) VALUES (?,?,?,FROM_UNIXTIME(?/1000),FROM_UNIXTIME(?/1000),NOW(3),?,?,?,?,?,?)",
+      [info.eventId, info.userId, info.subscriptionId, info.eventCreatedAt, info.scheduledAt, info.status, info.outcome, info.processingLagMs, info.deliveryLatencyMs, info.retryCount, info.errorCategory || null]);
   } catch (error) {
-    console.error("[Web Push] Error sending notification:", error);
-    return false;
+    console.error(JSON.stringify({ event: "push_attempt_log_failed", category: error instanceof Error ? error.name : "unknown" }));
   }
 }
 
-async function sendMissedDoseNotification(env: Env, userId: number, medicationName: string, dosage: string, scheduledTime: string): Promise<void> {
+async function sendWebPushNotification(env: Env, subscription: any, payload: any, trace?: { eventId: string; userId: number; subscriptionId: number; retryCount: number; eventCreatedAt: number | null; scheduledAt: number | null }): Promise<boolean> {
+  const startedAt = Date.now();
   try {
-    // Get user's push subscriptions
-    const [subscriptions] = await query<any[]>(
-      env,
-      "SELECT * FROM push_subscriptions WHERE user_id = ? AND active = 1",
-      [userId]
-    );
-
-    const payload = {
-      title: "DoseBuddy - Missed Dose",
-      body: `You missed your ${medicationName} (${dosage}) scheduled for ${scheduledTime}`,
-      icon: "/favicon.ico",
-      badge: "/favicon.ico",
-      tag: "missed-dose",
-      data: {
-        type: "missed-dose",
-        userId,
-        medicationName,
-        scheduledTime,
-        url: "/"
-      }
+    if (!await validateVapidConfiguration(env)) throw new Error("VAPID configuration is missing or invalid");
+    const vapid: VapidKeys = {
+      subject: env.VAPID_SUBJECT || (env.VAPID_EMAIL ? `mailto:${env.VAPID_EMAIL}` : undefined),
+      publicKey: env.VAPID_PUBLIC_KEY,
+      privateKey: env.VAPID_PRIVATE_KEY
     };
-
-    let successCount = 0;
-    for (const sub of subscriptions) {
-      try {
-        const subscription = JSON.parse(sub.subscription_data);
-        const sent = await sendWebPushNotification(env, subscription, payload);
-        if (sent) successCount++;
-      } catch (error) {
-        console.error(`[Web Push] Failed to send to subscription ${sub.id}:`, error);
-        // Mark subscription as inactive if it fails
-        await query(env, "UPDATE push_subscriptions SET active = 0 WHERE id = ?", [sub.id]);
-      }
+    const request = await buildPushPayload(payload, subscription as PushSubscription, vapid);
+    const response = await fetch(subscription.endpoint, request);
+    console.log(JSON.stringify({
+      event: "web_push_attempt",
+      endpointHost: new URL(subscription.endpoint).host,
+      status: response.status,
+      accepted: response.status >= 200 && response.status < 300,
+      subscriptionExpired: response.status === 404 || response.status === 410
+    }));
+    if (response.status === 404 || response.status === 410) {
+      await query(env, "UPDATE push_subscriptions SET active=0,updated_at=NOW() WHERE endpoint=?", [subscription.endpoint]);
     }
-
-    console.log(`[Web Push] Sent ${successCount}/${subscriptions.length} notifications for missed dose`);
+    if (trace) await recordPushAttempt(env, { ...trace, status: response.status, outcome: response.status >= 200 && response.status < 300 ? "provider_accepted" : (response.status === 404 || response.status === 410 ? "subscription_expired" : "provider_rejected"), deliveryLatencyMs: Date.now() - startedAt, processingLagMs: trace.scheduledAt === null ? 0 : Math.max(0, startedAt - trace.scheduledAt) });
+    if (response.status === 404 || response.status === 410) return false;
+    return response.ok;
   } catch (error) {
-    console.error("[Web Push] Error in sendMissedDoseNotification:", error);
+    console.error(JSON.stringify({ event: "web_push_error", category: error instanceof Error ? error.name : "unknown" }));
+    if (trace) await recordPushAttempt(env, { ...trace, status: null, outcome: "request_error", deliveryLatencyMs: Date.now() - startedAt, processingLagMs: trace.scheduledAt === null ? 0 : Math.max(0, startedAt - trace.scheduledAt), errorCategory: error instanceof Error ? error.name : "unknown" });
+    return false;
   }
 }
 
@@ -1896,6 +1830,20 @@ export default {
             "INSERT INTO activities (user_id,type,message,related_entity_type,related_entity_id,created_at) VALUES (?,?,?,?,?,NOW())",
             [actor.id, "MEDICINE_ADDED", `Added new medication: ${b.name} (${b.dosage})`, "MEDICATION", r.insertId]
           );
+          const schedulerId = env.DOSE_SCHEDULER.idFromName(String(actor.id));
+          const schedulerResponse = await env.DOSE_SCHEDULER.get(schedulerId).fetch("https://dose-scheduler/schedule", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              userId: actor.id,
+              medicationId: r.insertId,
+              startDate: b.startDate,
+              endDate: b.endDate,
+              times: Array.isArray(b.times) ? b.times : [],
+              timeZone: typeof b.timeZone === "string" ? b.timeZone : "UTC"
+            })
+          });
+          if (!schedulerResponse.ok) console.error(JSON.stringify({ event: "dose_schedule_enqueue_failed", medicationId: r.insertId, status: schedulerResponse.status }));
           return plain("Medication added");
         } finally {
           if (db) {
@@ -1944,6 +1892,9 @@ export default {
           const [rows] = await query<Json[]>(db, "SELECT * FROM medications WHERE id=?", [del[1]]);
           if (!rows[0]) return new Response(null, { status: 404, headers: cors });
           if (Number(rows[0].user_id) !== actor.id) return plain("Access denied", 403);
+          const scheduler = env.DOSE_SCHEDULER.get(env.DOSE_SCHEDULER.idFromName(String(actor.id)));
+          const cancelled = await scheduler.fetch("https://dose-scheduler/cancel", { method: "POST", body: JSON.stringify({ medicationId: Number(del[1]) }) });
+          if (!cancelled.ok) console.error(JSON.stringify({ event: "dose_schedule_cancel_failed", medicationId: Number(del[1]), status: cancelled.status }));
           await query(db, "DELETE FROM intake_logs WHERE medication_id=?", [del[1]]);
           await query(db, "DELETE FROM medication_times WHERE medication_id=?", [del[1]]);
           await query(db, "DELETE FROM medications WHERE id=?", [del[1]]);
@@ -2034,9 +1985,12 @@ export default {
 
         const status = String(b.status || "TAKEN").toUpperCase();
         let db: any = null;
+        let transactionOpen = false;
         try {
           db = await getDbConnection(env);
-          const [medRows] = await query<Json[]>(db, "SELECT * FROM medications WHERE id=? LIMIT 1", [b.medicationId]);
+          await db.beginTransaction();
+          transactionOpen = true;
+          const [medRows] = await query<Json[]>(db, "SELECT * FROM medications WHERE id=? LIMIT 1 FOR UPDATE", [b.medicationId]);
           const med = medRows[0];
           if (!med) return json({ message: "Medication not found" }, 400);
           const owner = await getUser(db, Number(med.user_id));
@@ -2076,9 +2030,14 @@ export default {
             [actor.id, status === "TAKEN" ? "DOSE_TAKEN" : "DOSE_MISSED", activityMsg, "INTAKE_LOG", logId]
           );
 
+          await db.commit();
+          transactionOpen = false;
           return json({ success: true, logId });
         } finally {
-          if (db) await db.end();
+          if (db) {
+            if (transactionOpen) { try { await db.rollback(); } catch { /* connection may already be closed */ } }
+            await db.end();
+          }
         }
       }
 
@@ -2115,9 +2074,16 @@ export default {
       if (path === "/api/push/subscribe" && request.method === "POST") {
         const { body: b } = await requestBody(request);
         if (!b.subscription) return json({ message: "Missing subscription data" }, 400);
+        let endpoint: URL;
+        try { endpoint = new URL(String(b.subscription.endpoint || "")); }
+        catch { return json({ message: "Invalid push endpoint" }, 400); }
+        if (endpoint.protocol !== "https:" || typeof b.subscription.keys?.p256dh !== "string" || typeof b.subscription.keys?.auth !== "string") {
+          return json({ message: "Invalid push subscription" }, 400);
+        }
 
         try {
-          // Clean up any existing subscriptions for this user first
+          // One browser endpoint must belong to one account at a time.
+          await query(env, "UPDATE push_subscriptions SET active=0,updated_at=NOW() WHERE endpoint=?", [b.subscription.endpoint]);
           await query(
             env,
             "DELETE FROM push_subscriptions WHERE user_id = ? AND endpoint = ?",
@@ -2136,6 +2102,40 @@ export default {
           console.error("[Push Subscribe] Error:", error);
           return json({ message: "Failed to register push subscription" }, 500);
         }
+      }
+
+      if (path === "/api/push/test" && request.method === "POST") {
+        const [subscriptions] = await query<Json[]>(env,
+          "SELECT id,subscription_data FROM push_subscriptions WHERE user_id=? AND active=1", [actor.id]);
+        if (!subscriptions.length) return json({ message: "No active push subscription" }, 409);
+        const eventId = "test-" + crypto.randomUUID();
+        let accepted = 0;
+        for (const row of subscriptions) {
+          try {
+            const ok = await sendWebPushNotification(env, JSON.parse(row.subscription_data), {
+              title: "DoseBuddy push test",
+              body: "The push service accepted a test. Check this device's notification center.",
+              tag: eventId,
+              data: { type: "push-test", eventId, url: "/" }
+            }, { eventId, userId: actor.id, subscriptionId: Number(row.id), retryCount: 0, eventCreatedAt: Date.now(), scheduledAt: null });
+            if (ok) accepted++;
+          } catch (error) {
+            console.error(JSON.stringify({ event: "push_test_failed", subscriptionId: row.id, category: error instanceof Error ? error.name : "unknown" }));
+          }
+        }
+        console.log(JSON.stringify({ event: "push_test_complete", userId: actor.id, eventId, attempts: subscriptions.length, providerAccepted: accepted }));
+        return json({ attempted: subscriptions.length, providerAccepted: accepted, outcome: accepted ? "provider_accepted" : "provider_rejected" }, accepted ? 200 : 502);
+      }
+
+      if (path === "/api/push/status" && request.method === "GET") {
+        const [rows] = await query<Json[]>(env,
+          "SELECT COUNT(*) AS activeCount,MAX(updated_at) AS lastRegisteredAt FROM push_subscriptions WHERE user_id=? AND active=1", [actor.id]);
+        return json({
+          registered: Number(rows[0]?.activeCount || 0) > 0,
+          activeSubscriptions: Number(rows[0]?.activeCount || 0),
+          lastRegisteredAt: rows[0]?.lastRegisteredAt || null,
+          vapidConfigured: await validateVapidConfiguration(env)
+        });
       }
 
       if (path === "/api/push/unsubscribe" && request.method === "POST") {
@@ -2165,10 +2165,21 @@ export default {
       }
 
       if (path === "/api/push/vapid-key" && request.method === "GET") {
-        if (!env.VAPID_PUBLIC_KEY) {
-          return json({ message: "VAPID not configured" }, 500);
+        if (!await validateVapidConfiguration(env)) {
+          return json({ message: "Web Push is not configured correctly" }, 503);
         }
         return json({ publicKey: env.VAPID_PUBLIC_KEY });
+      }
+
+      if (path === "/api/notifications/timezone" && request.method === "POST") {
+        const { body: b } = await requestBody(request);
+        const timeZone = String(b.timeZone || "");
+        try { new Intl.DateTimeFormat("en", { timeZone }); }
+        catch { return json({ message: "Invalid time zone" }, 400); }
+        const stub = env.DOSE_SCHEDULER.get(env.DOSE_SCHEDULER.idFromName(String(actor.id)));
+        return await stub.fetch("https://dose-scheduler/timezone", {
+          method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ userId: actor.id, timeZone })
+        });
       }
 
       const logsHistory = path.match(/^\/api\/logs\/history\/(\d+)$/);
@@ -2538,96 +2549,91 @@ export default {
   },
 
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
-    console.log("[DoseBuddy Cron] Starting missed-dose processing");
-    
     try {
-      const now = new Date();
-      const gracePeriodMinutes = 1; // 1-minute grace period as per requirements
-      const cutoffTime = new Date(now.getTime() - gracePeriodMinutes * 60 * 1000);
-      
-      // Query for pending doses that are past their grace period
-      const [rows] = await query<any[]>(
-        env,
-        `SELECT 
-          m.id as medication_id,
-          u.id as user_id,
-          u.name as user_name,
-          mt.time_of_day,
-          m.name as medication_name,
-          m.dosage,
-          CURDATE() as date_str,
-          TIME_FORMAT(mt.time_of_day, '%H:%i') as time_str
-        FROM medications m
-        JOIN medication_times mt ON m.id = mt.medication_id  
-        JOIN users u ON m.user_id = u.id
-        WHERE m.active = 1
-        AND CONCAT(CURDATE(), ' ', mt.time_of_day) <= ?
-        AND NOT EXISTS (
-          SELECT 1 FROM intake_logs il 
-          WHERE il.medication_id = m.id 
-          AND il.marker_user_id = u.id
-          AND il.date = CURDATE()
-          AND TIME_FORMAT(il.time, '%H:%i') = TIME_FORMAT(mt.time_of_day, '%H:%i')
-        )`,
-        [cutoffTime.toISOString().slice(0, 19).replace('T', ' ')]
-      );
-
-      let processedCount = 0;
-      
-      for (const dose of rows) {
-        try {
-          // Mark dose as missed atomically
-          const [insertResult] = await query<{ insertId: number }>(
-            env,
-            `INSERT INTO intake_logs 
-            (marker_user_id, medication_id, date, time, status, scheduled_time, missed_time, created_at, updated_at)
-            VALUES (?, ?, ?, ?, 'MISSED', CONCAT(?, ' ', ?), NOW(), NOW(), NOW())`,
-            [
-              dose.user_id,
-              dose.medication_id, 
-              dose.date_str,
-              dose.time_str,
-              dose.date_str,
-              dose.time_str
-            ]
-          );
-
-          // Log activity
-          await query(
-            env,
-            `INSERT INTO activities 
-            (user_id, type, message, related_entity_type, related_entity_id, created_at)
-            VALUES (?, 'DOSE_MISSED', ?, 'INTAKE_LOG', ?, NOW())`,
-            [
-              dose.user_id,
-              `Missed ${dose.medication_name} (${dose.dosage}) scheduled for ${dose.time_str}`,
-              insertResult.insertId
-            ]
-          );
-
-          // Send Web Push notification
-          ctx.waitUntil(
-            sendMissedDoseNotification(
-              env, 
-              dose.user_id, 
-              dose.medication_name, 
-              dose.dosage, 
-              dose.time_str
-            )
-          );
-
-          processedCount++;
-          console.log(`[DoseBuddy Cron] Marked missed: ${dose.medication_name} for user ${dose.user_id} at ${dose.time_str}`);
-          
-        } catch (error) {
-          console.error(`[DoseBuddy Cron] Failed to process dose for user ${dose.user_id}:`, error);
-        }
+      const [users] = await query<Json[]>(env, "SELECT DISTINCT user_id FROM medications WHERE active=1");
+      for (const row of users) {
+        const userId = Number(row.user_id);
+        const stub = env.DOSE_SCHEDULER.get(env.DOSE_SCHEDULER.idFromName(String(userId)));
+        ctx.waitUntil(stub.fetch("https://dose-scheduler/reconcile", { method: "POST", body: "{}" }).then(response => {
+          if (!response.ok) console.error(JSON.stringify({ event: "dose_reconcile_failed", userId, status: response.status }));
+        }));
       }
-      
-      console.log(`[DoseBuddy Cron] Processed ${processedCount} missed doses`);
-      
+      console.log(JSON.stringify({ event: "dose_reconciliation_started", users: users.length, scheduledTime: event.scheduledTime }));
     } catch (error) {
-      console.error("[DoseBuddy Cron] Scheduled function error:", error);
+      console.error(JSON.stringify({ event: "dose_reconciliation_error", category: error instanceof Error ? error.name : "unknown" }));
     }
+    return;
+
+
   }
 };
+
+type DoseJob = { userId:number; medicationId:number; date:string; time:string; tz:string; at:number; scheduledAt:number; eventCreatedAt:number; kind:"reminder"|"missed"; retry:number };
+export class DoseScheduler {
+  constructor(private state:DurableObjectState, private env:Env) {}
+  async fetch(request:Request):Promise<Response> {
+    const path=new URL(request.url).pathname; const b=await request.json().catch(()=>({})) as any;
+    if(path==="/schedule"&&request.method==="POST"){
+      const uid=Number(b.userId),mid=Number(b.medicationId),tz=String(b.timeZone||"UTC");
+      try{new Intl.DateTimeFormat("en",{timeZone:tz});}catch{return json({message:"Invalid time zone"},400);}
+      if(!Number.isInteger(uid)||!Number.isInteger(mid)||!Array.isArray(b.times))return json({message:"Invalid schedule"},400);
+      await this.state.storage.put("uid",uid);await this.state.storage.put("tz",tz);
+      await this.addJobs(uid,mid,b.startDate,b.endDate,b.times,tz);await this.arm();return json({success:true});
+    }
+    if(path==="/timezone"&&request.method==="POST"){
+      const tz=String(b.timeZone||"");try{new Intl.DateTimeFormat("en",{timeZone:tz});}catch{return json({message:"Invalid time zone"},400);}
+      await this.state.storage.put("uid",Number(b.userId));await this.state.storage.put("tz",tz);await this.reconcile();await this.arm();return json({success:true});
+    }
+    if(path==="/cancel"&&request.method==="POST"){
+      const jobs=await this.state.storage.list<DoseJob>({prefix:"job:"});
+      for(const [key,job] of jobs)if(job.medicationId===Number(b.medicationId))await this.state.storage.delete(key);
+      await this.arm();return json({success:true});
+    }
+    if(path==="/reconcile"&&request.method==="POST"){await this.reconcile();await this.arm();return json({success:true});}
+    return json({message:"Not found"},404);
+  }
+  async alarm():Promise<void>{
+    const all=await this.state.storage.list<DoseJob>({prefix:"job:"});const due=[...all.entries()].filter(x=>x[1].at<=Date.now()).sort((a,b)=>a[1].at-b[1].at);
+    for(const [key,job] of due){try{if(job.kind==="reminder")await this.remind(job);else await this.miss(job);await this.state.storage.delete(key);}catch(e){const tries=job.retry+1;if(tries>=8){console.error(JSON.stringify({event:"dose_job_failed",occurrence:this.occurrence(job),kind:job.kind,retries:tries,errorCategory:e instanceof Error?e.name:"unknown"}));await this.state.storage.put("failed:"+this.occurrence(job)+":"+job.kind,true);await this.state.storage.delete(key);}else{const retry={...job,retry:tries,at:Date.now()+Math.min(900000,15000*2**(tries-1))};await this.state.storage.put(key,retry);}}}
+    await this.reconcile();await this.arm();
+  }
+  private occurrence(j:DoseJob):string{return j.medicationId+":"+j.date+":"+j.time.slice(0,5);}
+  private async putJob(j:DoseJob):Promise<void>{const eventId=this.occurrence(j)+":"+j.kind;if(await this.state.storage.get("done:"+eventId)||await this.state.storage.get("failed:"+eventId))return;const key="job:"+this.occurrence(j)+":"+j.kind;const current=await this.state.storage.get<DoseJob>(key);if(current&&current.retry>0&&current.at>Date.now())return;await this.state.storage.put(key,current?{...j,eventCreatedAt:current.eventCreatedAt}:j);}
+  private async addJobs(uid:number,mid:number,start:string,end:string,times:unknown[],tz:string):Promise<void>{
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(start)||!/^\d{4}-\d{2}-\d{2}$/.test(end)||end<start)return;
+    const today=scheduleDate(Date.now(),tz), horizon=new Date(today+"T00:00:00Z");horizon.setUTCDate(horizon.getUTCDate()+31);
+    let d=start>today?start:today;const last=end<horizon.toISOString().slice(0,10)?end:horizon.toISOString().slice(0,10);
+    while(d<=last){for(const raw of times){const t=String(raw).slice(0,5);if(!/^([01]\d|2[0-3]):[0-5]\d$/.test(t))continue;const at=scheduleInstant(d,t,tz);const base={userId:uid,medicationId:mid,date:d,time:t,tz,retry:0,eventCreatedAt:Date.now()};await this.putJob({...base,at,scheduledAt:at,kind:"reminder"});await this.putJob({...base,at:at+60000,scheduledAt:at+60000,kind:"missed"});}const n=new Date(d+"T00:00:00Z");n.setUTCDate(n.getUTCDate()+1);d=n.toISOString().slice(0,10);}
+  }
+  private async reconcile():Promise<void>{
+    const uid=await this.state.storage.get<number>("uid"),tz=await this.state.storage.get<string>("tz")||"UTC";if(!uid)return;
+    const today=scheduleDate(Date.now(),tz);const [rows]=await query<Json[]>(this.env,"SELECT m.id,DATE_FORMAT(m.start_date,'%Y-%m-%d') AS start_date,DATE_FORMAT(m.end_date,'%Y-%m-%d') AS end_date,mt.time_of_day FROM medications m JOIN medication_times mt ON mt.medication_id=m.id WHERE m.user_id=? AND m.active=1 AND m.end_date>=?",[uid,today]);
+    const grouped=new Map<number,{start:string,end:string,times:string[]}>();
+    for(const r of rows){const id=Number(r.id);const v=grouped.get(id)||{start:String(r.start_date).slice(0,10),end:String(r.end_date).slice(0,10),times:[]};v.times.push(String(r.time_of_day).slice(0,5));grouped.set(id,v);}
+    const jobs=await this.state.storage.list<DoseJob>({prefix:"job:"});
+    for(const [key,j] of jobs){const s=grouped.get(j.medicationId);if(!s||!s.times.includes(j.time.slice(0,5))||j.date<s.start||j.date>s.end)await this.state.storage.delete(key);}
+    for(const [id,v] of grouped)await this.addJobs(uid,id,v.start,v.end,v.times,tz);
+  }
+  private async arm():Promise<void>{const jobs=await this.state.storage.list<DoseJob>({prefix:"job:"});const times=[...jobs.values()].map(j=>j.at);if(times.length)await this.state.storage.setAlarm(Math.max(Date.now()+100,Math.min(...times)));else await this.state.storage.deleteAlarm();}
+  private async valid(j:DoseJob):Promise<{med:Json,status:string|null}|null>{
+    const [rows]=await query<Json[]>(this.env,"SELECT m.id,m.name,m.dosage FROM medications m JOIN medication_times mt ON mt.medication_id=m.id WHERE m.id=? AND m.user_id=? AND m.active=1 AND m.start_date<=? AND m.end_date>=? AND TIME_FORMAT(mt.time_of_day,'%H:%i')=? LIMIT 1",[j.medicationId,j.userId,j.date,j.date,j.time]);
+    if(!rows.length)return null;const [logs]=await query<Json[]>(this.env,"SELECT status FROM intake_logs WHERE medication_id=? AND date=? AND TIME_FORMAT(time,'%H:%i')=? ORDER BY id DESC LIMIT 1",[j.medicationId,j.date,j.time]);
+    return {med:rows[0],status:logs[0]?.status?String(logs[0].status).toUpperCase():null};
+  }
+  private async remind(j:DoseJob):Promise<void>{const eventId=this.occurrence(j)+":reminder";if(await this.state.storage.get("done:"+eventId))return;const v=await this.valid(j);if(!v||!doseReminderAllowed(v.status))return;await this.push(j,{title:"DoseBuddy dose reminder",body:"A scheduled dose is due at "+j.time+".",tag:"dose-"+this.occurrence(j),data:{type:"scheduled-dose",eventId:eventId,medicationId:j.medicationId,date:j.date,time:j.time,url:"/"}});await this.state.storage.put("done:"+eventId,true);}
+  private async miss(j:DoseJob):Promise<void>{
+    const eventId=this.occurrence(j)+":missed";if(await this.state.storage.get("done:"+eventId))return;
+    const db=await getDbConnection(this.env);let shouldNotify=false;let transitioned=false;let logId:number|null=null;
+    try{await db.beginTransaction();const [meds]=await query<Json[]>(db,"SELECT m.id FROM medications m JOIN medication_times mt ON mt.medication_id=m.id WHERE m.id=? AND m.user_id=? AND m.active=1 AND m.start_date<=? AND m.end_date>=? AND TIME_FORMAT(mt.time_of_day,'%H:%i')=? LIMIT 1 FOR UPDATE",[j.medicationId,j.userId,j.date,j.date,j.time]);if(!meds.length){await db.rollback();return;}
+      const [logs]=await query<Json[]>(db,"SELECT id,status FROM intake_logs WHERE medication_id=? AND date=? AND TIME_FORMAT(time,'%H:%i')=? ORDER BY id DESC FOR UPDATE",[j.medicationId,j.date,j.time]);
+      if(logs.some(log=>!missedNotificationEligible(String(log.status).toUpperCase()))){await db.rollback();return;}
+      const existing=logs[0];
+      if(!existing){const [inserted]=await query<{insertId:number}>(db,"INSERT INTO intake_logs (marker_user_id,medication_id,date,time,status,scheduled_time,missed_time,created_at,updated_at) VALUES (?,?,?,?,'MISSED',CONCAT(?,' ',?),NOW(),NOW(),NOW())",[j.userId,j.medicationId,j.date,j.time,j.date,j.time]);logId=inserted.insertId;shouldNotify=true;transitioned=true;}
+      else{logId=Number(existing.id);if(String(existing.status).toUpperCase()!=="MISSED"){await query(db,"UPDATE intake_logs SET status='MISSED',missed_time=NOW(),updated_at=NOW() WHERE id=? AND status<>'TAKEN'",[logId]);transitioned=true;}shouldNotify=true;}
+      if(transitioned)await query(db,"INSERT INTO activities (user_id,type,message,related_entity_type,related_entity_id,created_at) VALUES (?,'DOSE_MISSED',?,'INTAKE_LOG',?,NOW())",[j.userId,"Missed dose scheduled for "+j.time,logId]);
+      await db.commit();
+    }catch(e){try{await db.rollback();}catch{}throw e;}finally{await db.end();}
+    if(shouldNotify){await this.push(j,{title:"DoseBuddy - Missed Dose",body:"A dose scheduled for "+j.time+" was not marked as taken.",tag:"dose-"+this.occurrence(j),data:{type:"missed-dose",eventId:eventId,medicationId:j.medicationId,date:j.date,time:j.time,url:"/"}});await this.state.storage.put("done:"+eventId,true);}
+  }
+  private async push(j:DoseJob,payload:Json):Promise<void>{const [rows]=await query<Json[]>(this.env,"SELECT id,subscription_data FROM push_subscriptions WHERE user_id=? AND active=1",[j.userId]);if(!rows.length)throw new Error("No active push subscriptions");let accepted=0;for(const r of rows){try{const eventId=String(payload.data?.eventId||this.occurrence(j));const sent=await sendWebPushNotification(this.env,JSON.parse(r.subscription_data),payload,{eventId,userId:j.userId,subscriptionId:Number(r.id),retryCount:j.retry,eventCreatedAt:j.eventCreatedAt,scheduledAt:j.scheduledAt});if(sent)accepted++;}catch(e){console.error(JSON.stringify({event:"web_push_delivery_error",occurrence:this.occurrence(j),subscriptionId:r.id,category:e instanceof Error?e.name:"unknown"}));}}console.log(JSON.stringify({event:"dose_push_result",occurrence:this.occurrence(j),kind:j.kind,attempts:rows.length,providerAccepted:accepted}));if(!accepted)throw new Error("No push endpoint accepted the message");}
+}

@@ -5,7 +5,11 @@
   "compatibility_date": "2026-09-22",
   "compatibility_flags": ["nodejs_compat"],
   "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "18124332f92a4a538050187dc00e8a84" }],
+  "durable_objects": {
+    "bindings": [{ "name": "DOSE_SCHEDULER", "class_name": "DoseScheduler" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["DoseScheduler"] }],
   "triggers": {
-    "crons": ["* * * * *"]
+    "crons": ["*/5 * * * *"]
   }
 }

@@ -21,13 +21,12 @@ self.addEventListener("push", (event) => {
     
     try {
         const data = event.data.json();
-        console.log("[DoseBuddy SW] Push data:", data);
-        
         const notificationOptions = {
             body: data.body || "",
             icon: data.icon || "/favicon.ico",
             badge: data.badge || "/favicon.ico",
             tag: data.tag || "dosebuddy-push",
+            renotify: false,
             data: data.data || {},
             requireInteraction: true,
             actions: [
