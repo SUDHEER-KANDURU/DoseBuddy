@@ -1830,20 +1830,24 @@ export default {
             "INSERT INTO activities (user_id,type,message,related_entity_type,related_entity_id,created_at) VALUES (?,?,?,?,?,NOW())",
             [actor.id, "MEDICINE_ADDED", `Added new medication: ${b.name} (${b.dosage})`, "MEDICATION", r.insertId]
           );
-          const schedulerId = env.DOSE_SCHEDULER.idFromName(String(actor.id));
-          const schedulerResponse = await env.DOSE_SCHEDULER.get(schedulerId).fetch("https://dose-scheduler/schedule", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-              userId: actor.id,
-              medicationId: r.insertId,
-              startDate: b.startDate,
-              endDate: b.endDate,
-              times: Array.isArray(b.times) ? b.times : [],
-              timeZone: typeof b.timeZone === "string" ? b.timeZone : "UTC"
-            })
-          });
-          if (!schedulerResponse.ok) console.error(JSON.stringify({ event: "dose_schedule_enqueue_failed", medicationId: r.insertId, status: schedulerResponse.status }));
+          try {
+            const schedulerId = env.DOSE_SCHEDULER.idFromName(String(actor.id));
+            const schedulerResponse = await env.DOSE_SCHEDULER.get(schedulerId).fetch("https://dose-scheduler/schedule", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({
+                userId: actor.id,
+                medicationId: r.insertId,
+                startDate: b.startDate,
+                endDate: b.endDate,
+                times: Array.isArray(b.times) ? b.times : [],
+                timeZone: typeof b.timeZone === "string" ? b.timeZone : "UTC"
+              })
+            });
+            if (!schedulerResponse.ok) console.error(JSON.stringify({ event: "dose_schedule_enqueue_failed", medicationId: r.insertId, status: schedulerResponse.status }));
+          } catch (error) {
+            console.error(JSON.stringify({ event: "dose_schedule_enqueue_error", medicationId: r.insertId, category: error instanceof Error ? error.name : "unknown" }));
+          }
           return plain("Medication added");
         } finally {
           if (db) {
