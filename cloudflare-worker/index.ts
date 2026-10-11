@@ -2039,6 +2039,9 @@ export default {
           const [medRows] = await query<Json[]>(db, "SELECT * FROM medications WHERE id=? LIMIT 1", [b.medicationId]);
           const med = medRows[0];
           if (!med) return json({ message: "Medication not found" }, 400);
+          const owner = await getUser(db, Number(med.user_id));
+          if (!owner) return json({ message: "Medication owner not found" }, 404);
+          if (!accessible(actor, owner)) return json({ message: "Access denied" }, 403);
 
           const [existing] = await query<Json[]>(
             db,
