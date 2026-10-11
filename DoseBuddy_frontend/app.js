@@ -5141,6 +5141,9 @@ function setupAiHandlers() {
             }
         });
     });
+
+    // Setup unified AI chat
+    setupUnifiedAiChat();
 }
 
 async function searchAiMedicineInfo() {
@@ -9320,3 +9323,403 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("export-vitals-pdf")
         ?.addEventListener("click", exportVitalsPDF);
 });
+
+// ────────────────────────────────────────────────────────────────────────────
+// Unified AI Chat System
+// ────────────────────────────────────────────────────────────────────────────
+
+let aiConversationState = {
+    conversationId: null,
+    state: {},
+    isProcessing: false
+};
+
+function setupUnifiedAiChat() {
+    const chatInput = document.getElementById("ai-chat-input");
+    const chatSend = document.getElementById("ai-chat-send");
+    const chatMessages = document.getElementById("ai-chat-messages");
+    const newConversationBtn = document.getElementById("new-conversation-btn");
+
+    if (!chatInput || !chatSend || !chatMessages) {
+        console.log("AI chat elements not found, skipping setup");
+        return;
+    }
+
+    // Auto-resize textarea
+    chatInput.addEventListener("input", () => {
+        chatInput.style.height = "auto";
+        chatInput.style.height = Math.min(chatInput.scrollHeight, 120) + "px";
+        
+        // Enable/disable send button
+        chatSend.disabled = !chatInput.value.trim() || aiConversationState.isProcessing;
+    });
+
+    // Send message on Enter (not Shift+Enter)
+    chatInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            if (!aiConversationState.isProcessing && chatInput.value.trim()) {
+                sendChatMessage();
+            }
+        }
+    });
+
+    // Send button click
+    chatSend.addEventListener("click", sendChatMessage);
+
+    // New conversation button
+    if (newConversationBtn) {
+        newConversationBtn.addEventListener("click", startNewConversation);
+    }
+
+    // Starter prompt buttons
+    document.querySelectorAll(".ai-starter-prompt").forEach(btn => {
+        btn.addEventListener("click", () => {
+            const prompt = btn.dataset.prompt;
+            if (prompt) {
+                chatInput.value = prompt;
+                chatInput.focus();
+                sendChatMessage();
+            }
+        });
+    });
+}
+
+async function sendChatMessage() {
+    const chatInput = document.getElementById("ai-chat-input");
+    const chatMessages = document.getElementById("ai-chat-messages");
+    
+    const message = chatInput.value.trim();
+    if (!message || aiConversationState.isProcessing) return;
+
+    aiConversationState.isProcessing = true;
+    updateSendButton();
+
+    // Add user message to chat
+    addChatMessage("user", message);
+    chatInput.value = "";
+    chatInput.style.height = "auto";
+
+    try {
+        // Generate conversation ID if new conversation
+        if (!aiConversationState.conversationId) {
+            aiConversationState.conversationId = "chat_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9);
+        }
+
+        const response = await authFetch(`${API_BASE}/ai/chat`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                message: message,
+                conversationId: aiConversationState.conversationId,
+                conversationState: aiConversationState.state
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        
+        if (!data.success) {
+            throw new Error(data.error || "Unknown error");
+        }
+
+        // Update conversation state
+        aiConversationState.state = data.conversationState || {};
+
+        // Handle response based on type
+        handleAiResponse(data);
+
+    } catch (error) {
+        console.error("AI chat error:", error);
+        addChatMessage("assistant", "I'm sorry, I'm having trouble right now. Please try again in a moment.", "error");
+    } finally {
+        aiConversationState.isProcessing = false;
+        updateSendButton();
+    }
+}
+
+function handleAiResponse(data) {
+    const responseType = data.type;
+
+    switch (responseType) {
+        case "URGENT_WARNING":
+            addChatMessage("assistant", data.message, "urgent");
+            break;
+            
+        case "QUESTION":
+            addChatMessage("assistant", data.message);
+            if (data.options) {
+                addQuestionOptions(data);
+            }
+            break;
+            
+        case "RESPONSE":
+            addChatMessage("assistant", data.message);
+            break;
+            
+        default:
+            addChatMessage("assistant", data.message || "I received your message.");
+    }
+
+    scrollChatToBottom();
+}
+
+function addChatMessage(sender, content, messageType = "normal") {
+    const chatMessages = document.getElementById("ai-chat-messages");
+    const messageDiv = document.createElement("div");
+    messageDiv.className = `ai-chat-message ai-chat-${sender} ${messageType !== "normal" ? `ai-message-${messageType}` : ""}`;
+
+    if (sender === "assistant") {
+        messageDiv.innerHTML = `
+            <div class="ai-avatar">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/>
+                </svg>
+            </div>
+            <div class="ai-message-content">
+                <div class="ai-message-text">${formatMessageText(content)}</div>
+            </div>
+        `;
+    } else {
+        messageDiv.innerHTML = `
+            <div class="ai-message-content">
+                <div class="ai-message-text">${escapeHtml(content)}</div>
+            </div>
+        `;
+    }
+
+    chatMessages.appendChild(messageDiv);
+    scrollChatToBottom();
+}
+
+function addQuestionOptions(data) {
+    const chatMessages = document.getElementById("ai-chat-messages");
+    const optionsDiv = document.createElement("div");
+    optionsDiv.className = "ai-question-options";
+
+    const questionType = data.questionType || "SINGLE_SELECT";
+
+    if (questionType === "SINGLE_SELECT") {
+        data.options.forEach(option => {
+            const btn = document.createElement("button");
+            btn.className = "ai-option-btn";
+            btn.innerHTML = `
+                <span class="ai-option-text">${escapeHtml(option.text)}</span>
+                ${option.description ? `<span class="ai-option-desc">${escapeHtml(option.description)}</span>` : ""}
+            `;
+            
+            btn.addEventListener("click", () => {
+                selectOption(option.value || option.text, optionsDiv);
+            });
+            
+            optionsDiv.appendChild(btn);
+        });
+    } else if (questionType === "TEXT_INPUT") {
+        const inputContainer = document.createElement("div");
+        inputContainer.className = "ai-text-input-container";
+        
+        const input = document.createElement("input");
+        input.type = "text";
+        input.className = "ai-text-input";
+        input.placeholder = data.placeholder || "Type your answer...";
+        
+        const submitBtn = document.createElement("button");
+        submitBtn.className = "ai-text-submit";
+        submitBtn.textContent = "Submit";
+        
+        const submitAnswer = () => {
+            const value = input.value.trim();
+            if (value) {
+                selectOption(value, optionsDiv);
+            }
+        };
+        
+        input.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") {
+                e.preventDefault();
+                submitAnswer();
+            }
+        });
+        
+        submitBtn.addEventListener("click", submitAnswer);
+        
+        inputContainer.appendChild(input);
+        inputContainer.appendChild(submitBtn);
+        optionsDiv.appendChild(inputContainer);
+        
+        // Focus the input
+        setTimeout(() => input.focus(), 100);
+    }
+
+    chatMessages.appendChild(optionsDiv);
+    scrollChatToBottom();
+}
+
+function selectOption(value, optionsContainer) {
+    // Disable all option buttons
+    optionsContainer.querySelectorAll(".ai-option-btn, .ai-text-input, .ai-text-submit").forEach(el => {
+        el.disabled = true;
+        el.style.opacity = "0.6";
+        el.style.pointerEvents = "none";
+    });
+
+    // Add user's selected answer as a message
+    addChatMessage("user", value);
+
+    // Continue conversation with selected value
+    continueConversationWithAnswer(value);
+}
+
+async function continueConversationWithAnswer(answer) {
+    aiConversationState.isProcessing = true;
+    updateSendButton();
+
+    try {
+        const response = await authFetch(`${API_BASE}/ai/chat`, {
+            method: "POST", 
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                message: answer,
+                conversationId: aiConversationState.conversationId,
+                conversationState: aiConversationState.state
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        
+        if (!data.success) {
+            throw new Error(data.error || "Unknown error");
+        }
+
+        // Update conversation state
+        aiConversationState.state = data.conversationState || {};
+
+        // Handle response
+        handleAiResponse(data);
+
+    } catch (error) {
+        console.error("AI chat error:", error);
+        addChatMessage("assistant", "I'm sorry, I had trouble processing that. Please try again.", "error");
+    } finally {
+        aiConversationState.isProcessing = false;
+        updateSendButton();
+    }
+}
+
+function startNewConversation() {
+    aiConversationState = {
+        conversationId: null,
+        state: {},
+        isProcessing: false
+    };
+
+    const chatMessages = document.getElementById("ai-chat-messages");
+    
+    // Remove all messages except the welcome message
+    const messages = chatMessages.querySelectorAll(".ai-chat-message, .ai-question-options");
+    messages.forEach(msg => msg.remove());
+
+    const chatInput = document.getElementById("ai-chat-input");
+    if (chatInput) {
+        chatInput.value = "";
+        chatInput.style.height = "auto";
+        chatInput.focus();
+    }
+
+    updateSendButton();
+}
+
+function updateSendButton() {
+    const chatSend = document.getElementById("ai-chat-send");
+    const chatInput = document.getElementById("ai-chat-input");
+    
+    if (chatSend && chatInput) {
+        chatSend.disabled = !chatInput.value.trim() || aiConversationState.isProcessing;
+        
+        if (aiConversationState.isProcessing) {
+            chatSend.innerHTML = `
+                <svg class="ai-spinner" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="18" height="18">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"/>
+                </svg>
+            `;
+        } else {
+            chatSend.innerHTML = `
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="18" height="18">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"/>
+                </svg>
+            `;
+        }
+    }
+}
+
+function scrollChatToBottom() {
+    const chatMessages = document.getElementById("ai-chat-messages");
+    if (chatMessages) {
+        setTimeout(() => {
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }, 100);
+    }
+}
+
+function formatMessageText(text) {
+    return text
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*(.*?)\*/g, '<em>$1</em>')
+        .replace(/\n/g, '<br>')
+        .replace(/•\s/g, '• ');
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+async function checkSymptomsView() {
+    const input = document.getElementById("symptom-query-view");
+    const resultBox = document.getElementById("symptom-response-view");
+    const submitBtn = document.getElementById("symptom-submit-view");
+
+    if (!input || !resultBox) return;
+
+    const symptoms = input.value.trim();
+    if (!symptoms) {
+        resultBox.innerHTML = '<p class="error-text">Please describe your symptoms.</p>';
+        resultBox.style.display = "block";
+        return;
+    }
+
+    setButtonLoading(submitBtn, true, "Analyzing...");
+    resultBox.style.display = "none";
+
+    try {
+        const res = await authFetch(`${API_BASE}/medicine/symptom-check`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ 
+                symptoms: symptoms,
+                userId: currentUser ? currentUser.id.toString() : ""
+            })
+        });
+
+        if (!res.ok) throw new Error(`Request failed (HTTP ${res.status})`);
+
+        const result = await res.text();
+        resultBox.innerHTML = `<div class="ai-response-content">${result.replace(/\n/g, '<br>')}</div>`;
+        resultBox.style.display = "block";
+        
+    } catch (err) {
+        console.error("Symptom check error:", err);
+        resultBox.innerHTML = '<p class="error-text">Unable to analyze symptoms right now. Please try again later.</p>';
+        resultBox.style.display = "block";
+    } finally {
+        setButtonLoading(submitBtn, false, "Check Symptoms");
+    }
+}
