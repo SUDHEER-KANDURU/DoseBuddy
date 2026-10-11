@@ -77,7 +77,6 @@ async function refreshAccessToken() {
 
 async function authFetch(url, options = {}) {
     const startTime = performance.now();
-    console.log(`[AuthFetch] Starting request to ${url}`);
     
     // Refresh proactively if the token is about to expire
     if (isAccessTokenExpired()) {
@@ -101,7 +100,6 @@ async function authFetch(url, options = {}) {
     
     const controller = new AbortController();
     const timeoutId = setTimeout(() => {
-        console.log(`[AuthFetch] Request timeout after ${timeoutMs}ms for ${url}`);
         controller.abort();
     }, timeoutMs);
 
@@ -117,7 +115,6 @@ async function authFetch(url, options = {}) {
         clearTimeout(timeoutId);
         
         const fetchTime = performance.now() - startTime;
-        console.log(`[AuthFetch] Initial response in ${fetchTime.toFixed(2)}ms, status: ${response.status}`);
 
         if (response.status === 401) {
             const retryStartTime = performance.now();
@@ -2186,8 +2183,6 @@ async function renderDashboard() {
     const renderId = ++_dashboardRenderId;
 
     console.log(`[FEAT-001 DEBUG] renderDashboard() started, renderId: ${renderId}`);
-    console.log(`[FEAT-001 DEBUG] currentUser exists:`, !!currentUser);
-    console.log(`[FEAT-001 DEBUG] Initial medsCache state:`, medsCache ? medsCache.length + ' items' : 'null/undefined');
 
     // Update greeting and date every time the dashboard renders
     updateGreeting();

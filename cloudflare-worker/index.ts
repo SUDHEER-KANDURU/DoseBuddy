@@ -71,13 +71,8 @@ async function getDbConnection(env: Env) {
     password: env.HYPERDRIVE.password,
     database: env.HYPERDRIVE.database,
     port: env.HYPERDRIVE.port,
-    disableEval: true,
     timezone: "Z",
     connectTimeout: 5000,         // 5 second connection timeout
-    acquireTimeout: 5000,         // 5 second acquire timeout
-    timeout: 10000,               // 10 second query timeout
-    connectionLimit: 10,          // Connection pool limit
-    queueLimit: 0,                // No queue limit - fail fast when pool exhausted
     multipleStatements: false     // Security: disable multiple statements
   })) as any;
 }

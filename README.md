@@ -55,9 +55,9 @@ Built as a **portfolio-grade, production-style full-stack project**, DoseBuddy d
 
 <div align="center">
 
-|  JWT Auth |  Prescription OCR |  AI Medicine Assistant |  Symptom Checker |
+|  JWT Auth |  Prescription OCR |  Unified AI Assistant |  Health Analytics |
 |:---:|:---:|:---:|:---:|
-| Secure login & registration with token-based auth | Scan prescriptions via Gemini Vision API | Ask anything about medicines & interactions | AI-powered symptom analysis & guidance |
+| Secure login & registration with token-based auth | Scan prescriptions via Gemini Vision API | Intelligent conversational AI for medicines, symptoms & health guidance | Visual reports, adherence tracking & health insights |
 
 |  Health Analytics |  Streak Tracking |  Vitals Monitor |  Dark Mode |
 |:---:|:---:|:---:|:---:|
@@ -85,8 +85,7 @@ Built as a **portfolio-grade, production-style full-stack project**, DoseBuddy d
 <summary><b> AI-Powered Features</b></summary>
 <br/>
 
--  **Medicine Assistant** — Natural language queries about medicines, dosages, and drug interactions
--  **Symptom Checker** — Describe symptoms, receive structured differential diagnosis and guidance
+-  **Unified AI Assistant** — Conversational health AI that combines medicine information, symptom checking, drug interactions, and personalized guidance in one intelligent chat interface
 -  **Prescription OCR** — Upload prescription images or PDFs for automatic medicine extraction and scheduling
 
 </details>
@@ -116,31 +115,25 @@ Built as a **portfolio-grade, production-style full-stack project**, DoseBuddy d
 
 ##  AI Features
 
-###  Medicine Assistant
+### 🤖 Unified AI Assistant
 
-Ask any question about a medicine in plain language. The AI returns a professionally structured, healthcare-style response:
+Experience intelligent, conversational health assistance that combines medicine information, symptom checking, and personalized guidance in one seamless chat interface.
 
+**Key Features:**
 ```
-  MEDICINE OVERVIEW        →  Drug class, mechanism, and what it is
-  DOSAGE INFORMATION       →  Standard dosing guidelines and frequency
-  COMMON USES              →  Approved indications and common applications
-  WARNINGS & PRECAUTIONS  →  Contraindications, interactions, and safety notes
-  SIDE EFFECTS             →  Common and serious adverse effects
-  WHEN TO CONSULT A DOCTOR →  Red-flag symptoms and escalation guidance
+  CONVERSATIONAL FLOW      →  Natural language health questions and guidance
+  MEDICINE INFORMATION     →  Drug details, interactions, and safety warnings  
+  SYMPTOM ANALYSIS         →  Progressive questioning with differential diagnosis
+  PERSONALIZED CONTEXT     →  Uses your medication history for tailored responses
+  SAFETY MONITORING        →  Urgent symptom detection with emergency guidance
+  MEDICAL DISCLAIMERS      →  Clear professional advice and emergency contacts
 ```
 
----
-
-###  Symptom Checker
-
-
-Describe symptoms in plain language and receive structured, safe health guidance:
-
-```
-Possible Causes        →  Differential diagnosis suggestions
-What You Can Do        →  Safe home management steps
-When to See a Doctor   →  Urgency indicators and red flags
-```
+**Smart Conversation Types:**
+- **Medicine Questions** — Drug information, interactions, side effects, timing
+- **Symptom Discussions** — Progressive symptom analysis with safety guidance  
+- **Health Guidance** — General health questions using your medication context
+- **Emergency Detection** — Immediate alerts for urgent symptoms with emergency contacts
 
 ---
 
@@ -186,7 +179,7 @@ Automatically populates the medication schedule with **name, dosage, timing, and
 ### AI & External APIs
 | Provider | Model | Purpose |
 |---|---|---|
-| [Groq API](https://groq.com/) | LLaMA 3.3 70B Versatile | Medicine Assistant, Symptom Checker, prescription text parsing |
+| [Groq API](https://groq.com/) | LLaMA 3.3 70B Versatile | Unified AI Assistant, conversational health guidance, prescription text parsing |
 | [Google Gemini API](https://ai.google.dev/) | Gemini Vision | Prescription image OCR and medicine extraction |
 
 ---
@@ -197,7 +190,7 @@ Automatically populates the medication schedule with **name, dosage, timing, and
 ┌─────────────────────────────────────────────────────────┐
 │                    USER BROWSER                         │
 │         HTML + CSS + Vanilla JavaScript (SPA)           │
-│    Dashboard · Medications · AI Tools · Reports         │
+│    Dashboard · Medications · AI Assistant · Reports         │
 └──────────────────────┬──────────────────────────────────┘
                        │  HTTP / REST API
                        ▼
@@ -212,8 +205,8 @@ Automatically populates the medication schedule with **name, dosage, timing, and
 │   MySQL 8.0      │    │        AI PROVIDERS           │
 │   Database       │    │  ┌─────────────────────────┐  │
 │                  │    │  │  Groq API (LLaMA 3.3)   │  │
-│  Users           │    │  │  Medicine Assistant      │  │
-│  Medications     │    │  │  Symptom Checker         │  │
+│  Users           │    │  │  Unified AI Assistant    │  │
+│  Medications     │    │  │  Health Conversations    │  │
 │  IntakeLogs      │    │  │  Prescription Parsing    │  │
 │  Vitals          │    │  └─────────────────────────┘  │
 │  Streaks         │    │  ┌─────────────────────────┐  │
@@ -233,8 +226,8 @@ Automatically populates the medication schedule with **name, dosage, timing, and
 ###  Add Medicines
 ![Add Medicines](Screenshots/Add%20Medicines.png)
 
-###  AI Assistant & Symptom Checker
-![AI](Screenshots/AI.png)
+### 🤖 Unified AI Assistant
+![AI Assistant](Screenshots/AI.png)
 
 ###  BMI Calculator
 ![BMI Calculator](Screenshots/BMI%20calculator.png)
@@ -261,7 +254,7 @@ DoseBuddy/
 │   │   ├── controller/                      # REST API endpoint controllers
 │   │   │   ├── AuthController.java          # Login, register, JWT
 │   │   │   ├── MedicationController.java    # CRUD for medications
-│   │   │   ├── MedicineAiController.java    # AI medicine assistant
+│   │   │   ├── UnifiedAiController.java     # Unified AI assistant
 │   │   │   ├── PrescriptionController.java  # OCR upload & parsing
 │   │   │   ├── VitalController.java         # Vitals logging
 │   │   │   ├── BmiController.java           # BMI calculation
@@ -320,8 +313,9 @@ DoseBuddy/
 ### AI Features
 | Method | Endpoint | Description |
 |---|---|---|
-| `GET` | `/api/medicine/ai-info?name={medicine}` | AI medicine assistant |
-| `POST` | `/api/medicine/symptom-check` | Symptom checker |
+| `POST` | `/api/ai/chat` | Unified AI assistant with conversational health guidance |
+| `GET` | `/api/medicine/ai-info?name={medicine}` | Legacy medicine assistant (backward compatibility) |
+| `POST` | `/api/medicine/symptom-check` | Legacy symptom checker (backward compatibility) |
 | `POST` | `/api/prescription/upload` | Prescription OCR upload |
 
 ### Health Monitoring
