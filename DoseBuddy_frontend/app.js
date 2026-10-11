@@ -275,12 +275,6 @@ function registerServiceWorker() {
             console.log("[DoseBuddy SW] Notifications will use fallback method");
         });
 
-    navigator.serviceWorker.addEventListener("message", event => {
-        if (event.data?.type === "DOSEBUDDY_PUSH_SUBSCRIPTION_CHANGED" && currentUser && "Notification" in window && Notification.permission === "granted") {
-            initializeWebPush().then(refreshPushDiagnostics);
-        }
-    });
-
     // Also pick up an existing registration from a previous page load
     navigator.serviceWorker.ready.then(reg => {
         if (!_swRegistration) {
@@ -290,150 +284,6 @@ function registerServiceWorker() {
     }).catch(err => {
         console.error("[DoseBuddy SW] Failed to get ready registration:", err.message);
     });
-}
-
-// ── Web Push Subscription Management ─────────────────────────────────────────
-let _pushSubscription = null;
-let _vapidPublicKey = null;
-let _pushInitializationPromise = null;
-
-/**
- * Initialize Web Push notifications
- */
-function initializeWebPush() {
-    if (_pushInitializationPromise) return _pushInitializationPromise;
-    _pushInitializationPromise = initializeWebPushOnce().finally(() => {
-        _pushInitializationPromise = null;
-    });
-    return _pushInitializationPromise;
-}
-
-async function initializeWebPushOnce() {
-    if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
-        console.log("[Web Push] Not supported in this browser");
-        return false;
-    }
-
-    try {
-        // Get VAPID public key from server
-        const response = await authFetch(`${API_BASE}/push/vapid-key`);
-        if (!response.ok) throw new Error(`VAPID configuration unavailable (${response.status})`);
-        const data = await response.json();
-        if (!data.publicKey) throw new Error("VAPID public key is missing");
-        _vapidPublicKey = data.publicKey;
-
-        // Check if already subscribed
-        const registration = await navigator.serviceWorker.ready;
-        const existingSubscription = await registration.pushManager.getSubscription();
-        if (existingSubscription) {
-            _pushSubscription = existingSubscription;
-            const boundKey = existingSubscription.options?.applicationServerKey;
-            if (!boundKey) {
-                await existingSubscription.unsubscribe();
-                _pushSubscription = null;
-                return await subscribeToPushNotifications();
-            } else {
-                const expected = urlBase64ToUint8Array(_vapidPublicKey);
-                const actual = new Uint8Array(boundKey);
-                if (actual.length !== expected.length || actual.some((byte, index) => byte !== expected[index])) {
-                    await existingSubscription.unsubscribe();
-                    _pushSubscription = null;
-                    return await subscribeToPushNotifications();
-                }
-            }
-            return await registerPushSubscription(existingSubscription);
-        }
-
-        return await subscribeToPushNotifications();
-    } catch (error) {
-        console.error("[Web Push] Initialization failed:", error);
-        return false;
-    }
-}
-
-/**
- * Subscribe to push notifications
- */
-async function subscribeToPushNotifications() {
-    if (!_vapidPublicKey) {
-        console.error("[Web Push] VAPID key not available");
-        return false;
-    }
-
-    try {
-        const registration = await navigator.serviceWorker.ready;
-        
-        const subscription = await registration.pushManager.subscribe({
-            userVisibleOnly: true,
-            applicationServerKey: urlBase64ToUint8Array(_vapidPublicKey)
-        });
-
-        return await registerPushSubscription(subscription);
-    } catch (error) {
-        console.error("[Web Push] Subscription failed:", error);
-        return false;
-    }
-}
-
-async function registerPushSubscription(subscription) {
-    const response = await authFetch(`${API_BASE}/push/subscribe`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subscription: subscription.toJSON() })
-    });
-    if (!response.ok) throw new Error(`Server rejected push subscription (${response.status})`);
-    _pushSubscription = subscription;
-    console.info("[Web Push] Browser subscription registered with authenticated account");
-    return true;
-}
-
-/**
- * Convert VAPID key from base64 to Uint8Array
- */
-function urlBase64ToUint8Array(base64String) {
-    const padding = "=".repeat((4 - base64String.length % 4) % 4);
-    const base64 = (base64String + padding)
-        .replace(/-/g, "+")
-        .replace(/_/g, "/");
-
-    const rawData = window.atob(base64);
-    const outputArray = new Uint8Array(rawData.length);
-
-    for (let i = 0; i < rawData.length; ++i) {
-        outputArray[i] = rawData.charCodeAt(i);
-    }
-    return outputArray;
-}
-
-/**
- * Check if push notifications are supported
- */
-function isPushNotificationSupported() {
-    return "serviceWorker" in navigator && 
-           "PushManager" in window && 
-           "Notification" in window;
-}
-
-/**
- * Request notification permission and set up push if granted
- */
-async function requestNotificationPermission() {
-    if (!isPushNotificationSupported()) {
-        return "denied";
-    }
-
-    try {
-        const permission = await Notification.requestPermission();
-        if (permission === "granted") {
-            const pushReady = await initializeWebPush();
-            if (!pushReady) console.warn("[Web Push] Permission was granted, but subscription setup did not complete");
-            refreshPushDiagnostics();
-        }
-        return permission;
-    } catch (error) {
-        console.error("[Notifications] Permission request failed:", error);
-        return "denied";
-    }
 }
 
 /**
@@ -918,14 +768,6 @@ function showAuthView() {
 }
 
 function showAppViews() {
-    if (currentUser && getAccessToken()) {
-        const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-        authFetch(`${API_BASE}/notifications/timezone`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ timeZone })
-        }).catch(error => console.warn("[Dose scheduler] Time zone sync failed:", error.message));
-    }
     const authView = document.getElementById("auth-view");
     const appShell = document.getElementById("app-shell");
 
@@ -1719,26 +1561,6 @@ function completeLoginFromResponse(user) {
         console.log(`[DoseBuddy DEBUG] checkReminders interval already running`);
     }
 
-    // Initialize Web Push notifications for background missed-dose alerts
-    if (isPushNotificationSupported()) {
-        if (Notification.permission === "granted") {
-            // User has already granted permission, set up Web Push
-            initializeWebPush().then(success => {
-                if (success) {
-                    console.log("[DoseBuddy] Web Push notifications ready for background alerts");
-                } else {
-                    console.warn("[DoseBuddy] Web Push setup failed, using foreground notifications only");
-                }
-            });
-        } else if (Notification.permission === "denied" && getAccessToken()) {
-            authFetch(`${API_BASE}/push/unsubscribe`, {
-                method: "POST", headers: { "Content-Type": "application/json" }, body: "{}"
-            }).catch(error => console.warn("[Web Push] Could not deactivate revoked permission:", error.message));
-        }
-    } else {
-        console.log("[DoseBuddy] Push notifications not supported, using foreground alerts only");
-    }
-
     if ("Notification" in window && Notification.permission === "default") {
         setTimeout(() => showNotifPermissionBanner(), 2000);
     }
@@ -2221,8 +2043,7 @@ function setupMedicineForm() {
             instructions,
             startDate,
             endDate,
-            times,
-            timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
+            times
         };
 
         try {
@@ -7278,7 +7099,7 @@ function showNotifPermissionBanner() {
             banner.classList.remove("notif-banner-visible");
             setTimeout(() => banner.remove(), 300);
             if (permission === "granted") {
-                showToast(_pushSubscription ? "Background push is configured. Check device settings for display and sound." : "Permission is granted, but background push setup failed. Check Notification Preferences.", _pushSubscription ? "success" : "warning", 6500);
+                showToast("Notifications enabled! You'll get dose reminders on time.", "success", 5000);
                 // Re-schedule now that we have permission
                 scheduleMedicineReminders();
             } else if (permission === "denied") {
@@ -7294,6 +7115,23 @@ function showNotifPermissionBanner() {
 }
 
 // Requests notification permission — must be called from a user gesture.
+function requestNotificationPermission() {
+    if (!("Notification" in window)) {
+        return Promise.resolve("denied");
+    }
+    if (Notification.permission === "granted") {
+        return Promise.resolve("granted");
+    }
+    // Notification.requestPermission returns a Promise in modern browsers
+    // and uses a callback in old Safari. We normalise both here.
+    return new Promise(resolve => {
+        const result = Notification.requestPermission(permission => resolve(permission));
+        if (result && typeof result.then === "function") {
+            result.then(resolve).catch(() => resolve("denied"));
+        }
+    });
+}
+
 // Updates the permission status row inside the Notification Preferences modal.
 function updateNotifPermissionStatus() {
     const statusRow   = document.getElementById("notif-perm-status-row");
@@ -7309,7 +7147,6 @@ function updateNotifPermissionStatus() {
     }
 
     const perm = Notification.permission;
-    refreshPushDiagnostics();
     if (perm === "granted") {
         statusText.textContent  = "✓ Enabled — you will receive dose reminders.";
         statusText.className    = "notif-perm-text notif-perm-granted";
@@ -7322,35 +7159,6 @@ function updateNotifPermissionStatus() {
         statusText.textContent  = "⚠ Permission required — click Enable Notifications to get started.";
         statusText.className    = "notif-perm-text notif-perm-default";
         enableBtn.style.display = "inline-flex";
-    }
-}
-
-async function refreshPushDiagnostics() {
-    const target = document.getElementById("notif-push-diagnostics");
-    if (!target) return;
-    if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
-        target.textContent = "Background push is not supported by this browser.";
-        return;
-    }
-    try {
-        const registration = await navigator.serviceWorker.getRegistration();
-        const active = !!registration?.active;
-        const controlsPage = !!navigator.serviceWorker.controller;
-        const subscription = active ? await registration.pushManager.getSubscription() : null;
-        let server = null;
-        if (currentUser && getAccessToken()) {
-            const response = await authFetch(`${API_BASE}/push/status`);
-            if (response.ok) server = await response.json();
-        }
-        const localState = subscription ? "browser subscription present" : "no browser subscription";
-        const serverState = server?.registered ? "registered with this account" : "not registered with this account";
-        const lastTest = localStorage.getItem("dosebuddy_push_test_accepted_at");
-        target.textContent = `Service Worker ${active ? "active" : "not active"}${controlsPage ? " and controlling this page" : ""}${registration?.scope ? ` at ${registration.scope}` : ""}; ${localState}; ${serverState}; ` +
-            `VAPID ${server?.vapidConfigured ? "configured" : "not verified"}.` +
-            (server?.lastRegisteredAt ? ` Last registration: ${new Date(server.lastRegisteredAt).toLocaleString()}.` : "") +
-            (lastTest ? ` Last provider-accepted test: ${new Date(lastTest).toLocaleString()}.` : "");
-    } catch (error) {
-        target.textContent = `Push diagnostics unavailable (${error.message}).`;
     }
 }
 
@@ -7728,7 +7536,7 @@ document.addEventListener("DOMContentLoaded", () => {
         requestNotificationPermission().then(permission => {
             updateNotifPermissionStatus();
             if (permission === "granted") {
-                showToast(_pushSubscription ? "Background push is configured. Check device settings for display and sound." : "Permission is granted, but background push setup failed. Check Notification Preferences.", _pushSubscription ? "success" : "warning", 6500);
+                showToast("Notifications enabled! You'll get dose reminders on time.", "success", 5000);
                 // Remove the banner if it was showing
                 const banner = document.getElementById("notif-permission-banner");
                 if (banner) { banner.classList.remove("notif-banner-visible"); setTimeout(() => banner.remove(), 300); }
@@ -7831,22 +7639,26 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         if (btn) { btn.disabled = true; btn.textContent = "Sending…"; }
-        try {
-            if (!await initializeWebPush()) throw new Error("Push subscription is not configured");
-            const response = await authFetch(`${API_BASE}/push/test`, { method: "POST" });
-            const data = await response.json().catch(() => ({}));
-            if (!response.ok || !data.providerAccepted) {
-                showResult(`❌ Push service rejected the test (${data.message || response.status}).`, "var(--error, #e53e3e)");
+        showDoseBuddySystemNotification("DoseBuddy Test ✓", {
+            body: "Notifications are working! You will receive your dose reminders.",
+            tag:  "dosebuddy-test-" + Date.now(),
+        }).then(result => {
+            if (result.ok) {
+                showResult(`✓ Test notification sent successfully via ${result.method}! Check your browser notifications.`, "var(--success, #16a34a)");
+            } else if (result.reason === "permission-denied") {
+                showResult("❌ Notifications are blocked. Please enable them in your browser settings.", "var(--error, #e53e3e)");
+            } else if (result.reason === "permission-not-granted") {
+                showResult("⚠ Permission not granted. Click 'Enable Notifications' button first.", "var(--warning, #d97706)");
+            } else if (result.reason === "unsupported") {
+                showResult("⚠ Your browser doesn't support notifications. In-app reminders will still work.", "var(--warning, #d97706)");
             } else {
-                localStorage.setItem("dosebuddy_push_test_accepted_at", new Date().toISOString());
-                showResult("✓ Push service accepted the test. This does not confirm display; close DoseBuddy and check this device's notification center.", "var(--success, #16a34a)");
-                refreshPushDiagnostics();
+                showResult(`⚠ Browser notifications unavailable (${result.reason}). In-app notifications still work.`, "var(--warning, #d97706)");
             }
-        } catch (e) {
-            showResult(`❌ Push test failed: ${e.message}`, "var(--error, #e53e3e)");
-        } finally {
+        }).catch(e => {
+            showResult(`❌ Unexpected error: ${e.message}`, "var(--error, #e53e3e)");
+        }).finally(() => {
             if (btn) { btn.disabled = false; btn.textContent = "Send Test"; }
-        }
+        });
     });
 
     // ── Dev-only "Test Missed Dose Alert" button ──────────────────────────
