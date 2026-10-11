@@ -86,7 +86,11 @@ async function getDbConnection(env: Env) {
     port: env.HYPERDRIVE.port,
     timezone: "Z",
     connectTimeout: 5000,         // 5 second connection timeout
-    multipleStatements: false     // Security: disable multiple statements
+    multipleStatements: false,    // Security: disable multiple statements
+    // mysql2's default row parser compiles code with new Function. Cloudflare
+    // Workers disallow string-based code generation, so use its interpreted
+    // parser for all Hyperdrive results.
+    disableEval: true
   })) as any;
 }
 
