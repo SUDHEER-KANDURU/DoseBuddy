@@ -275,6 +275,12 @@ function registerServiceWorker() {
             console.log("[DoseBuddy SW] Notifications will use fallback method");
         });
 
+    navigator.serviceWorker.addEventListener("message", event => {
+        if (event.data?.type === "DOSEBUDDY_PUSH_SUBSCRIPTION_CHANGED" && currentUser && "Notification" in window && Notification.permission === "granted") {
+            initializeWebPush().then(refreshPushDiagnostics);
+        }
+    });
+
     // Also pick up an existing registration from a previous page load
     navigator.serviceWorker.ready.then(reg => {
         if (!_swRegistration) {
@@ -7329,6 +7335,7 @@ async function refreshPushDiagnostics() {
     try {
         const registration = await navigator.serviceWorker.getRegistration();
         const active = !!registration?.active;
+        const controlsPage = !!navigator.serviceWorker.controller;
         const subscription = active ? await registration.pushManager.getSubscription() : null;
         let server = null;
         if (currentUser && getAccessToken()) {
@@ -7338,7 +7345,7 @@ async function refreshPushDiagnostics() {
         const localState = subscription ? "browser subscription present" : "no browser subscription";
         const serverState = server?.registered ? "registered with this account" : "not registered with this account";
         const lastTest = localStorage.getItem("dosebuddy_push_test_accepted_at");
-        target.textContent = `Service Worker ${active ? "active" : "not active"}${registration?.scope ? ` at ${registration.scope}` : ""}; ${localState}; ${serverState}; ` +
+        target.textContent = `Service Worker ${active ? "active" : "not active"}${controlsPage ? " and controlling this page" : ""}${registration?.scope ? ` at ${registration.scope}` : ""}; ${localState}; ${serverState}; ` +
             `VAPID ${server?.vapidConfigured ? "configured" : "not verified"}.` +
             (server?.lastRegisteredAt ? ` Last registration: ${new Date(server.lastRegisteredAt).toLocaleString()}.` : "") +
             (lastTest ? ` Last provider-accepted test: ${new Date(lastTest).toLocaleString()}.` : "");

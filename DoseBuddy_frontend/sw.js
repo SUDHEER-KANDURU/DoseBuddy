@@ -11,6 +11,22 @@ self.addEventListener("activate", (event) => {
     event.waitUntil(self.clients.claim());
 });
 
+self.addEventListener("pushsubscriptionchange", (event) => {
+    event.waitUntil((async () => {
+        const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+        if (clients.length) {
+            clients.forEach(client => client.postMessage({ type: "DOSEBUDDY_PUSH_SUBSCRIPTION_CHANGED" }));
+            return;
+        }
+        await self.registration.showNotification("DoseBuddy notifications need refreshing", {
+            body: "Open DoseBuddy while signed in to reconnect background reminders.",
+            tag: "dosebuddy-push-renewal",
+            renotify: false,
+            data: { url: "/" }
+        });
+    })());
+});
+
 self.addEventListener("push", (event) => {
     console.log("[DoseBuddy SW] Push event received");
     
