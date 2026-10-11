@@ -6,6 +6,6 @@
   "compatibility_flags": ["nodejs_compat"],
   "hyperdrive": [{ "binding": "HYPERDRIVE", "id": "18124332f92a4a538050187dc00e8a84" }],
   "triggers": {
-    "crons": ["*/5 * * * *"]
+    "crons": ["* * * * *"]
   }
 }

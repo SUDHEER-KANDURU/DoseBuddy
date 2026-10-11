@@ -286,6 +286,137 @@ function registerServiceWorker() {
     });
 }
 
+// ── Web Push Subscription Management ─────────────────────────────────────────
+let _pushSubscription = null;
+let _vapidPublicKey = null;
+
+/**
+ * Initialize Web Push notifications
+ */
+async function initializeWebPush() {
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+        console.log("[Web Push] Not supported in this browser");
+        return false;
+    }
+
+    try {
+        // Get VAPID public key from server
+        const response = await authFetch(`${API_BASE}/push/vapid-key`);
+        const data = await response.json();
+        _vapidPublicKey = data.publicKey;
+
+        // Check if already subscribed
+        const registration = await navigator.serviceWorker.ready;
+        const existingSubscription = await registration.pushManager.getSubscription();
+        if (existingSubscription) {
+            _pushSubscription = existingSubscription;
+            console.log("[Web Push] Already subscribed");
+            return true;
+        }
+
+        return await subscribeToPushNotifications();
+    } catch (error) {
+        console.error("[Web Push] Initialization failed:", error);
+        return false;
+    }
+}
+
+/**
+ * Subscribe to push notifications
+ */
+async function subscribeToPushNotifications() {
+    if (!_vapidPublicKey) {
+        console.error("[Web Push] VAPID key not available");
+        return false;
+    }
+
+    try {
+        const registration = await navigator.serviceWorker.ready;
+        
+        const subscription = await registration.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(_vapidPublicKey)
+        });
+
+        // Send subscription to server
+        const response = await authFetch(`${API_BASE}/push/subscribe`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ subscription: subscription.toJSON() })
+        });
+
+        if (response.ok) {
+            _pushSubscription = subscription;
+            console.log("[Web Push] Subscription successful");
+            return true;
+        } else {
+            console.error("[Web Push] Server rejected subscription");
+            return false;
+        }
+    } catch (error) {
+        console.error("[Web Push] Subscription failed:", error);
+        return false;
+    }
+}
+
+/**
+ * Convert VAPID key from base64 to Uint8Array
+ */
+function urlBase64ToUint8Array(base64String) {
+    const padding = "=".repeat((4 - base64String.length % 4) % 4);
+    const base64 = (base64String + padding)
+        .replace(/-/g, "+")
+        .replace(/_/g, "/");
+
+    const rawData = window.atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+
+    for (let i = 0; i < rawData.length; ++i) {
+        outputArray[i] = rawData.charCodeAt(i);
+    }
+    return outputArray;
+}
+
+/**
+ * Check if push notifications are supported
+ */
+function isPushNotificationSupported() {
+    return "serviceWorker" in navigator && 
+           "PushManager" in window && 
+           "Notification" in window;
+}
+
+/**
+ * Request notification permission and set up push if granted
+ */
+async function requestNotificationPermission() {
+    if (!isPushNotificationSupported()) {
+        return { granted: false, reason: "Push notifications not supported" };
+    }
+
+    try {
+        const permission = await Notification.requestPermission();
+        
+        if (permission === "granted") {
+            // Initialize Web Push after permission granted
+            const pushSetup = await initializeWebPush();
+            return { 
+                granted: true, 
+                pushEnabled: pushSetup,
+                reason: pushSetup ? "Full setup complete" : "Permission granted, push setup failed"
+            };
+        } else {
+            return { 
+                granted: false, 
+                reason: permission === "denied" ? "Permission denied" : "Permission dismissed"
+            };
+        }
+    } catch (error) {
+        console.error("[Notifications] Permission request failed:", error);
+        return { granted: false, reason: "Permission request failed" };
+    }
+}
+
 /**
  * Show a system (browser) notification using the Service Worker.
  * Falls back to direct 'new Notification()' if service worker fails.
@@ -1559,6 +1690,32 @@ function completeLoginFromResponse(user) {
         }, 15000);
     } else {
         console.log(`[DoseBuddy DEBUG] checkReminders interval already running`);
+    }
+
+    // Initialize Web Push notifications for background missed-dose alerts
+    if (isPushNotificationSupported()) {
+        if (Notification.permission === "granted") {
+            // User has already granted permission, set up Web Push
+            initializeWebPush().then(success => {
+                if (success) {
+                    console.log("[DoseBuddy] Web Push notifications ready for background alerts");
+                } else {
+                    console.warn("[DoseBuddy] Web Push setup failed, using foreground notifications only");
+                }
+            });
+        } else if (Notification.permission === "default") {
+            // Ask for permission on first login
+            console.log("[DoseBuddy] Requesting notification permission for missed-dose alerts");
+            requestNotificationPermission().then(result => {
+                if (result.granted) {
+                    console.log("[DoseBuddy] Notification permission granted:", result.reason);
+                } else {
+                    console.log("[DoseBuddy] Notification permission not granted:", result.reason);
+                }
+            });
+        }
+    } else {
+        console.log("[DoseBuddy] Push notifications not supported, using foreground alerts only");
     }
 
     if ("Notification" in window && Notification.permission === "default") {

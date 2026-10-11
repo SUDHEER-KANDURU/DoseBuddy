@@ -2551,6 +2551,7 @@ export default {
         `SELECT 
           m.id as medication_id,
           u.id as user_id,
+          u.name as user_name,
           mt.time_of_day,
           m.name as medication_name,
           m.dosage,
@@ -2602,6 +2603,17 @@ export default {
               `Missed ${dose.medication_name} (${dose.dosage}) scheduled for ${dose.time_str}`,
               insertResult.insertId
             ]
+          );
+
+          // Send Web Push notification
+          ctx.waitUntil(
+            sendMissedDoseNotification(
+              env, 
+              dose.user_id, 
+              dose.medication_name, 
+              dose.dosage, 
+              dose.time_str
+            )
           );
 
           processedCount++;
