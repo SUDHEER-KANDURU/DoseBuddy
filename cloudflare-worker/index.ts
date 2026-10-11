@@ -8,6 +8,9 @@ export interface Env {
   GEMINI_API_KEY?: string;
   GROQ_MODEL?: string;
   GEMINI_MODEL?: string;
+  VAPID_PUBLIC_KEY?: string;
+  VAPID_PRIVATE_KEY?: string;
+  VAPID_EMAIL?: string;
 }
 
 interface ScheduledEvent {
@@ -368,6 +371,124 @@ function bufferToBase64(buffer: ArrayBuffer): string {
     binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, end)));
   }
   return btoa(binary);
+}
+
+// ── Web Push Notification Functions ─────────────────────────────────────────
+async function generateVapidJWT(env: Env, audience: string): Promise<string> {
+  if (!env.VAPID_PRIVATE_KEY || !env.VAPID_EMAIL) {
+    throw new Error("VAPID credentials not configured");
+  }
+
+  const header = { alg: "ES256", typ: "JWT" };
+  const payload = {
+    aud: audience,
+    exp: Math.floor(Date.now() / 1000) + 3600, // 1 hour expiry
+    sub: `mailto:${env.VAPID_EMAIL}`
+  };
+
+  const headerB64 = btoa(JSON.stringify(header)).replace(/[+/]/g, c => c === '+' ? '-' : '_').replace(/=/g, '');
+  const payloadB64 = btoa(JSON.stringify(payload)).replace(/[+/]/g, c => c === '+' ? '-' : '_').replace(/=/g, '');
+  const message = `${headerB64}.${payloadB64}`;
+
+  // Import VAPID private key
+  const privateKeyBuffer = Uint8Array.from(atob(env.VAPID_PRIVATE_KEY), c => c.charCodeAt(0));
+  const cryptoKey = await crypto.subtle.importKey(
+    "pkcs8",
+    privateKeyBuffer,
+    { name: "ECDSA", namedCurve: "P-256" },
+    false,
+    ["sign"]
+  );
+
+  // Sign the JWT
+  const signature = await crypto.subtle.sign(
+    { name: "ECDSA", hash: "SHA-256" },
+    cryptoKey,
+    new TextEncoder().encode(message)
+  );
+
+  const signatureB64 = btoa(String.fromCharCode(...new Uint8Array(signature)))
+    .replace(/[+/]/g, c => c === '+' ? '-' : '_').replace(/=/g, '');
+
+  return `${message}.${signatureB64}`;
+}
+
+async function sendWebPushNotification(env: Env, subscription: any, payload: any): Promise<boolean> {
+  try {
+    const { endpoint, keys } = subscription;
+    
+    // Generate VAPID JWT for the push service
+    const url = new URL(endpoint);
+    const audience = `${url.protocol}//${url.host}`;
+    const vapidJWT = await generateVapidJWT(env, audience);
+
+    // Encrypt payload (simplified implementation)
+    const payloadStr = JSON.stringify(payload);
+    
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/octet-stream",
+        "Authorization": `vapid t=${vapidJWT}, k=${env.VAPID_PUBLIC_KEY}`,
+        "TTL": "86400"
+      },
+      body: payloadStr
+    });
+
+    if (response.ok) {
+      console.log("[Web Push] Notification sent successfully");
+      return true;
+    } else {
+      console.warn(`[Web Push] Failed to send notification: ${response.status}`);
+      return false;
+    }
+  } catch (error) {
+    console.error("[Web Push] Error sending notification:", error);
+    return false;
+  }
+}
+
+async function sendMissedDoseNotification(env: Env, userId: number, medicationName: string, dosage: string, scheduledTime: string): Promise<void> {
+  try {
+    // Get user's push subscriptions
+    const [subscriptions] = await query<any[]>(
+      env,
+      "SELECT * FROM push_subscriptions WHERE user_id = ? AND active = 1",
+      [userId]
+    );
+
+    const payload = {
+      title: "DoseBuddy - Missed Dose",
+      body: `You missed your ${medicationName} (${dosage}) scheduled for ${scheduledTime}`,
+      icon: "/favicon.ico",
+      badge: "/favicon.ico",
+      tag: "missed-dose",
+      data: {
+        type: "missed-dose",
+        userId,
+        medicationName,
+        scheduledTime,
+        url: "/"
+      }
+    };
+
+    let successCount = 0;
+    for (const sub of subscriptions) {
+      try {
+        const subscription = JSON.parse(sub.subscription_data);
+        const sent = await sendWebPushNotification(env, subscription, payload);
+        if (sent) successCount++;
+      } catch (error) {
+        console.error(`[Web Push] Failed to send to subscription ${sub.id}:`, error);
+        // Mark subscription as inactive if it fails
+        await query(env, "UPDATE push_subscriptions SET active = 0 WHERE id = ?", [sub.id]);
+      }
+    }
+
+    console.log(`[Web Push] Sent ${successCount}/${subscriptions.length} notifications for missed dose`);
+  } catch (error) {
+    console.error("[Web Push] Error in sendMissedDoseNotification:", error);
+  }
 }
 
 const PRESCRIPTION_PROMPT = `You are an expert Clinical Pharmacist and Medical Prescription Document Parser specializing in outpatient, inpatient, printed EHR summaries, and doctor prescriptions.
@@ -1550,18 +1671,30 @@ export default {
         const email = String(b.email ?? "").trim().toLowerCase(),
           password = String(b.password ?? "");
         if (!email || !password) return json({ message: "Email and password are required" }, 400);
-        const [rows] = await query<User[]>(env, "SELECT * FROM users WHERE email=? LIMIT 1", [email]);
+        let db: any = null;
+        try {
+          db = await getDbConnection(env);
+          const [rows] = await query<User[]>(db, "SELECT * FROM users WHERE email=? LIMIT 1", [email]);
         const user = rows[0];
         if (!user) return json({ message: "Invalid email or password" }, 401);
         const match = user.password_hash.startsWith("$2")
           ? await bcrypt.compare(password, user.password_hash)
           : password === user.password_hash;
         if (!match) return json({ message: "Invalid email or password" }, 401);
-        if (!user.password_hash.startsWith("$2")) {
-          user.password_hash = await bcrypt.hash(password, 10);
-          await query(env, "UPDATE users SET password_hash=?,updated_at=NOW() WHERE id=?", [user.password_hash, user.id]);
+          if (!user.password_hash.startsWith("$2")) {
+            user.password_hash = await bcrypt.hash(password, 10);
+            await query(db, "UPDATE users SET password_hash=?,updated_at=NOW() WHERE id=?", [user.password_hash, user.id]);
+          }
+          return json(await loginBody(env, user));
+        } finally {
+          if (db) {
+            try {
+              await db.end();
+            } catch (closeErr) {
+              console.error("Failed to close DB connection:", closeErr);
+            }
+          }
         }
-        return json(await loginBody(env, user));
       }
 
       if (path === "/api/auth/refresh" && request.method === "POST") {
@@ -1969,6 +2102,66 @@ export default {
         } finally {
           if (db) await db.end();
         }
+      }
+
+      // ── Push Subscriptions ──────────────────────────────────────────────────
+      if (path === "/api/push/subscribe" && request.method === "POST") {
+        const { body: b } = await requestBody(request);
+        if (!b.subscription) return json({ message: "Missing subscription data" }, 400);
+
+        try {
+          // Clean up any existing subscriptions for this user first
+          await query(
+            env,
+            "DELETE FROM push_subscriptions WHERE user_id = ? AND endpoint = ?",
+            [actor.id, b.subscription.endpoint]
+          );
+
+          // Insert new subscription
+          await query(
+            env,
+            "INSERT INTO push_subscriptions (user_id, endpoint, subscription_data, active, created_at) VALUES (?, ?, ?, 1, NOW())",
+            [actor.id, b.subscription.endpoint, JSON.stringify(b.subscription)]
+          );
+
+          return json({ success: true, message: "Push subscription registered" });
+        } catch (error) {
+          console.error("[Push Subscribe] Error:", error);
+          return json({ message: "Failed to register push subscription" }, 500);
+        }
+      }
+
+      if (path === "/api/push/unsubscribe" && request.method === "POST") {
+        const { body: b } = await requestBody(request);
+        
+        try {
+          if (b.endpoint) {
+            await query(
+              env,
+              "UPDATE push_subscriptions SET active = 0 WHERE user_id = ? AND endpoint = ?",
+              [actor.id, b.endpoint]
+            );
+          } else {
+            // Unsubscribe all for this user
+            await query(
+              env,
+              "UPDATE push_subscriptions SET active = 0 WHERE user_id = ?",
+              [actor.id]
+            );
+          }
+
+          return json({ success: true, message: "Push subscription removed" });
+        } catch (error) {
+          console.error("[Push Unsubscribe] Error:", error);
+          return json({ message: "Failed to remove push subscription" }, 500);
+        }
+      }
+
+      if (path === "/api/push/vapid-key" && request.method === "GET") {
+        if (!env.VAPID_PUBLIC_KEY) {
+          return json({ message: "VAPID not configured" }, 500);
+        }
+        return json({ publicKey: env.VAPID_PUBLIC_KEY });
       }
 
       const logsHistory = path.match(/^\/api\/logs\/history\/(\d+)$/);
