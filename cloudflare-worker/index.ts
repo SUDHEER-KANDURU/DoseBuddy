@@ -1971,35 +1971,6 @@ export default {
         }
       }
 
-      const logsToday = path.match(/^\/api\/logs\/today\/(\d+)$/);
-      if (logsToday && request.method === "GET") {
-        const target = await getUser(env, Number(logsToday[1]));
-        if (!target) return json({ message: "User not found" }, 400);
-        if (!accessible(actor, target)) return json({ message: "Access denied" }, 403);
-
-        const dateParam = url.searchParams.get("date") || new Date().toISOString().slice(0, 10);
-        
-        const [rows] = await query<Json[]>(
-          env,
-          `SELECT 
-            l.id, 
-            l.medication_id AS medicationId, 
-            m.name AS medicationName, 
-            m.dosage,
-            DATE_FORMAT(l.date,'%Y-%m-%d') AS date, 
-            TIME_FORMAT(l.time,'%H:%i') AS time, 
-            l.status,
-            l.taken_time AS takenTime,
-            l.missed_time AS missedTime
-          FROM intake_logs l 
-          JOIN medications m ON m.id = l.medication_id 
-          WHERE l.marker_user_id = ? AND l.date = ?
-          ORDER BY l.time ASC`,
-          [target.id, dateParam]
-        );
-        return json(rows);
-      }
-
       const logsHistory = path.match(/^\/api\/logs\/history\/(\d+)$/);
       if (logsHistory && request.method === "GET") {
         const target = await getUser(env, Number(logsHistory[1]));
