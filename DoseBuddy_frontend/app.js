@@ -651,6 +651,7 @@ document.addEventListener("DOMContentLoaded", () => {
         showAppViews();
         switchView("dashboard-view");
         setThemeToggleVisible(true);
+        syncBrowserTimeZone();
         fetchFullProfile(currentUser.id).then(fresh => {
             if (fresh) {
                 currentUser = { ...currentUser, ...fresh };
@@ -1541,6 +1542,7 @@ function completeLoginFromResponse(user) {
 
     currentUser = user;
     saveToLS(LS_CURRENT_USER_KEY, currentUser);
+    syncBrowserTimeZone();
 
     // Load this user's persisted in-app notifications and refresh the badge
     loadNotifStore(currentUser.id);
@@ -1833,6 +1835,30 @@ function setupForgotPassword() {
             }
         }
     });
+}
+
+async function syncBrowserTimeZone() {
+    if (!currentUser || !getAccessToken()) return;
+    let timeZone = null;
+    try {
+        timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    } catch (e) {
+        console.warn("Unable to resolve browser time zone");
+    }
+    if (!timeZone || currentUser.timeZone === timeZone) return;
+    try {
+        const res = await authFetch(`${API_BASE}/user/time-zone`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ timeZone })
+        });
+        if (!res.ok) return;
+        const saved = await res.json();
+        currentUser.timeZone = saved.timeZone;
+        saveToLS(LS_CURRENT_USER_KEY, currentUser);
+    } catch (e) {
+        console.warn("Time zone sync failed (non-fatal):", e.message);
+    }
 }
 
 async function fetchFullProfile(userId) {
@@ -5225,7 +5251,22 @@ async function sendChatMessage() {
 
     } catch (error) {
         console.error("AI chat error:", error);
-        addChatMessage("assistant", "I'm sorry, I'm having trouble right now. Please try again in a moment.", "error");
+        
+        let errorMessage = "I'm having trouble right now. Please try again in a moment.";
+        
+        if (error.message.includes('HTTP 500')) {
+            errorMessage = "There's a temporary server issue. Your message was received, but I can't respond right now. Please try again.";
+        } else if (error.message.includes('HTTP 429')) {
+            errorMessage = "I'm receiving too many requests right now. Please wait a moment and try again.";
+        } else if (error.message.includes('HTTP 404')) {
+            errorMessage = "There seems to be a configuration issue. Please contact support if this continues.";
+        } else if (error.message.includes('Failed to fetch')) {
+            errorMessage = "I can't connect to the server right now. Please check your internet connection and try again.";
+        } else if (error.message.includes('Network')) {
+            errorMessage = "Network connection issue. Please check your connection and try again.";
+        }
+        
+        addChatMessage("assistant", errorMessage, "error");
     } finally {
         aiConversationState.isProcessing = false;
         updateSendButton();
@@ -5273,10 +5314,24 @@ function addQuestionOptions(data) {
     optionsDiv.className = "ai-question-options";
     
     data.questions.forEach(option => {
+        // Validate option properties before rendering
+        if (!option || typeof option !== 'object') {
+            console.warn('Invalid option object:', option);
+            return;
+        }
+        
+        const optionText = option.text || option.id || 'Unknown option';
+        const optionValue = option.value || option.text || option.id || 'unknown';
+        
+        if (!optionText || !optionValue) {
+            console.warn('Option missing required properties:', option);
+            return;
+        }
+        
         const button = document.createElement("button");
         button.className = "ai-option-btn";
-        button.textContent = option.text;
-        button.onclick = () => selectOption(option.value, optionsDiv);
+        button.textContent = optionText;
+        button.onclick = () => selectOption(optionValue, optionsDiv);
         optionsDiv.appendChild(button);
     });
     
@@ -5296,6 +5351,13 @@ function selectOption(value, optionsContainer) {
 }
 
 async function sendOptionSelection(value) {
+    // Validate the value before sending
+    if (!value || value === 'undefined' || value === 'null') {
+        console.error('Invalid option value:', value);
+        addChatMessage("assistant", "There was an issue with your selection. Please try choosing an option again.", "error");
+        return;
+    }
+    
     aiConversationState.isProcessing = true;
     updateSendButton();
 
@@ -5304,7 +5366,7 @@ async function sendOptionSelection(value) {
             method: "POST", 
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-                message: value,
+                message: String(value), // Ensure it's a string
                 conversationId: aiConversationState.conversationId,
                 conversationState: aiConversationState.state,
                 isOptionSelection: true
@@ -5321,12 +5383,25 @@ async function sendOptionSelection(value) {
             throw new Error(data.error || "Unknown error");
         }
 
-        aiConversationState.state = data.conversationState || {};
+        // Validate response data before using
+        if (data.conversationState) {
+            aiConversationState.state = data.conversationState;
+        }
+        
         handleAiResponse(data);
 
     } catch (error) {
         console.error("Option selection error:", error);
-        addChatMessage("assistant", "I'm sorry, I'm having trouble processing your selection. Please try again.", "error");
+        
+        let errorMessage = "I'm having trouble processing your selection. Please try again.";
+        
+        if (error.message.includes('HTTP 500')) {
+            errorMessage = "There's a server issue processing your selection. Please try again or type your answer instead.";
+        } else if (error.message.includes('Failed to fetch')) {
+            errorMessage = "Connection issue. Please check your internet and try selecting the option again.";
+        }
+        
+        addChatMessage("assistant", errorMessage, "error");
     } finally {
         aiConversationState.isProcessing = false;
         updateSendButton();

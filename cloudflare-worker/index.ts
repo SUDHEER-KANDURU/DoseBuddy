@@ -1,5 +1,9 @@
 import { createConnection } from "mysql2/promise";
 import bcrypt from "bcryptjs";
+import { addLocalDays, canonicalTimeZone, occurrenceForInstant, resolveLocalOccurrence, zonedParts } from "./scheduling";
+import { markOccurrenceMissed, markOccurrenceTaken, transact, upsertOccurrence } from "./dose-occurrences";
+import { notificationEventId, occurrenceIsCurrent, type DeliveryOccurrence } from "./notification-delivery";
+import { sendWebPush, type PushSubscriptionData } from "./web-push";
 
 export interface Env {
   HYPERDRIVE: Hyperdrive;
@@ -24,7 +28,7 @@ interface ExecutionContext {
 }
 
 type Json = Record<string, any>;
-type User = Json & { id: number; email: string; password_hash: string; role: string; patient_email?: string | null };
+type User = Json & { id: number; email: string; password_hash: string; role: string; patient_email?: string | null; time_zone?: string | null };
 
 const enc = new TextEncoder(), dec = new TextDecoder(), ACCESS = 900, REFRESH = 604800;
 const cors = {
@@ -207,6 +211,7 @@ async function loginBody(env: Env, user: User) {
     gender: user.gender,
     emergencyContact: user.emergency_contact,
     acceptedTerms: Boolean(user.accepted_terms),
+    timeZone: user.time_zone ?? null,
     accessToken: await jwt(env, { ...base, role: user.role, type: "access", exp: Math.floor(Date.now() / 1000) + ACCESS }),
     refreshToken: await jwt(env, { ...base, type: "refresh", exp: Math.floor(Date.now() / 1000) + REFRESH }),
     expiresIn: ACCESS
@@ -378,122 +383,18 @@ function bufferToBase64(buffer: ArrayBuffer): string {
 }
 
 // ── Web Push Notification Functions ─────────────────────────────────────────
-async function generateVapidJWT(env: Env, audience: string): Promise<string> {
-  if (!env.VAPID_PRIVATE_KEY || !env.VAPID_EMAIL) {
+function vapidConfig(env: Env) {
+  if (!env.VAPID_PUBLIC_KEY || !env.VAPID_PRIVATE_KEY || !env.VAPID_EMAIL) {
     throw new Error("VAPID credentials not configured");
   }
-
-  const header = { alg: "ES256", typ: "JWT" };
-  const payload = {
-    aud: audience,
-    exp: Math.floor(Date.now() / 1000) + 3600, // 1 hour expiry
-    sub: `mailto:${env.VAPID_EMAIL}`
+  return {
+    publicKey: env.VAPID_PUBLIC_KEY,
+    privateKey: env.VAPID_PRIVATE_KEY,
+    subject: env.VAPID_EMAIL.includes(":") ? env.VAPID_EMAIL : `mailto:${env.VAPID_EMAIL}`
   };
-
-  const headerB64 = btoa(JSON.stringify(header)).replace(/[+/]/g, c => c === '+' ? '-' : '_').replace(/=/g, '');
-  const payloadB64 = btoa(JSON.stringify(payload)).replace(/[+/]/g, c => c === '+' ? '-' : '_').replace(/=/g, '');
-  const message = `${headerB64}.${payloadB64}`;
-
-  // Import VAPID private key
-  const privateKeyBuffer = Uint8Array.from(atob(env.VAPID_PRIVATE_KEY), c => c.charCodeAt(0));
-  const cryptoKey = await crypto.subtle.importKey(
-    "pkcs8",
-    privateKeyBuffer,
-    { name: "ECDSA", namedCurve: "P-256" },
-    false,
-    ["sign"]
-  );
-
-  // Sign the JWT
-  const signature = await crypto.subtle.sign(
-    { name: "ECDSA", hash: "SHA-256" },
-    cryptoKey,
-    new TextEncoder().encode(message)
-  );
-
-  const signatureB64 = btoa(String.fromCharCode(...new Uint8Array(signature)))
-    .replace(/[+/]/g, c => c === '+' ? '-' : '_').replace(/=/g, '');
-
-  return `${message}.${signatureB64}`;
 }
 
-async function sendWebPushNotification(env: Env, subscription: any, payload: any): Promise<boolean> {
-  try {
-    const { endpoint, keys } = subscription;
-    
-    // Generate VAPID JWT for the push service
-    const url = new URL(endpoint);
-    const audience = `${url.protocol}//${url.host}`;
-    const vapidJWT = await generateVapidJWT(env, audience);
-
-    // Encrypt payload (simplified implementation)
-    const payloadStr = JSON.stringify(payload);
-    
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/octet-stream",
-        "Authorization": `vapid t=${vapidJWT}, k=${env.VAPID_PUBLIC_KEY}`,
-        "TTL": "86400"
-      },
-      body: payloadStr
-    });
-
-    if (response.ok) {
-      console.log("[Web Push] Notification sent successfully");
-      return true;
-    } else {
-      console.warn(`[Web Push] Failed to send notification: ${response.status}`);
-      return false;
-    }
-  } catch (error) {
-    console.error("[Web Push] Error sending notification:", error);
-    return false;
-  }
-}
-
-async function sendMissedDoseNotification(env: Env, userId: number, medicationName: string, dosage: string, scheduledTime: string): Promise<void> {
-  try {
-    // Get user's push subscriptions
-    const [subscriptions] = await query<any[]>(
-      env,
-      "SELECT * FROM push_subscriptions WHERE user_id = ? AND active = 1",
-      [userId]
-    );
-
-    const payload = {
-      title: "DoseBuddy - Missed Dose",
-      body: `You missed your ${medicationName} (${dosage}) scheduled for ${scheduledTime}`,
-      icon: "/favicon.ico",
-      badge: "/favicon.ico",
-      tag: "missed-dose",
-      data: {
-        type: "missed-dose",
-        userId,
-        medicationName,
-        scheduledTime,
-        url: "/"
-      }
-    };
-
-    let successCount = 0;
-    for (const sub of subscriptions) {
-      try {
-        const subscription = JSON.parse(sub.subscription_data);
-        const sent = await sendWebPushNotification(env, subscription, payload);
-        if (sent) successCount++;
-      } catch (error) {
-        console.error(`[Web Push] Failed to send to subscription ${sub.id}:`, error);
-        // Mark subscription as inactive if it fails
-        await query(env, "UPDATE push_subscriptions SET active = 0 WHERE id = ?", [sub.id]);
-      }
-    }
-
-    console.log(`[Web Push] Sent ${successCount}/${subscriptions.length} notifications for missed dose`);
-  } catch (error) {
-    console.error("[Web Push] Error in sendMissedDoseNotification:", error);
-  }
-}
+const mysqlDateTime = (date: Date) => date.toISOString().slice(0, 23).replace("T", " ");
 
 const PRESCRIPTION_PROMPT = `You are an expert Clinical Pharmacist and Medical Prescription Document Parser specializing in outpatient, inpatient, printed EHR summaries, and doctor prescriptions.
 
@@ -1068,40 +969,89 @@ function createUrgentWarningResponse(message: string, conversationId: string, co
 }
 
 function detectIntent(message: string, userMedications: any[]): string {
-  const lowerMessage = message.toLowerCase();
-
-  // Check for medication-related queries
-  if (/.*\b(medicine|medication|drug|pill|tablet)\b.*\b(info|information|about|what|tell)\b.*/.test(lowerMessage) ||
-      /.*\bwhat.*(is|does)\b.*\b(medicine|medication|drug)\b.*/.test(lowerMessage)) {
+  if (!message || typeof message !== 'string') {
+    return "GENERAL";
+  }
+  
+  const lowerMessage = message.toLowerCase().trim();
+  const words = lowerMessage.split(/\s+/);
+  
+  // Handle single-word queries
+  if (words.length === 1) {
+    const word = words[0];
+    
+    // Check if it's a known medication name
+    const medicineNames = ['zinc', 'aspirin', 'ibuprofen', 'acetaminophen', 'paracetamol', 'vitamins', 'iron', 'calcium'];
+    if (medicineNames.includes(word) || userMedications.some(med => med.name?.toLowerCase().includes(word))) {
+      return "MEDICINE_INFO";
+    }
+    
+    // Check if it's a symptom
+    const symptoms = ['headache', 'pain', 'nausea', 'fever', 'dizzy', 'tired', 'weak', 'sick'];
+    if (symptoms.includes(word)) {
+      return "SYMPTOM_CHECK";
+    }
+    
+    // Default single-word to general for clarification
+    return "GENERAL";
+  }
+  
+  // Enhanced medication-related query detection
+  const medicineKeywords = ['medicine', 'medication', 'drug', 'pill', 'tablet', 'capsule', 'supplement', 'vitamin', 'zinc', 'aspirin', 'ibuprofen', 'acetaminophen', 'paracetamol'];
+  const medicineActions = ['info', 'information', 'about', 'what', 'tell', 'explain', 'describe', 'learn'];
+  
+  const hasMedicineKeyword = medicineKeywords.some(keyword => lowerMessage.includes(keyword));
+  const hasMedicineAction = medicineActions.some(action => lowerMessage.includes(action));
+  
+  if (hasMedicineKeyword && (hasMedicineAction || lowerMessage.includes('what is') || lowerMessage.includes('tell me'))) {
     return "MEDICINE_INFO";
   }
-
-  // Check for symptom reports
-  if (/.*\b(feel|feeling|have|experiencing|symptom)\b.*(pain|ache|sick|nausea|dizzy|fever|headache|stomach)\b.*/.test(lowerMessage) ||
-      /.*\b(pain|ache|sick|nausea|dizzy|fever|headache|stomach)\b.*/.test(lowerMessage)) {
+  
+  // Check if message mentions any user medication by name
+  if (userMedications.some(med => med.name && lowerMessage.includes(med.name.toLowerCase()))) {
+    return "MEDICINE_INFO";
+  }
+  
+  // Enhanced symptom detection - handle complex phrases like "headache body pains"
+  const symptomKeywords = ['pain', 'pains', 'ache', 'aches', 'hurt', 'sore', 'sick', 'nausea', 'dizzy', 'fever', 'headache', 'stomach', 'chest', 'back', 'joint', 'muscle', 'body'];
+  const symptomIndicators = ['feel', 'feeling', 'have', 'having', 'experiencing', 'suffering', 'getting', 'been'];
+  const temporalIndicators = ['for', 'since', 'from', 'days', 'hours', 'weeks', 'yesterday', 'today', 'ago'];
+  
+  const hasSymptom = symptomKeywords.some(keyword => lowerMessage.includes(keyword));
+  const hasIndicator = symptomIndicators.some(indicator => lowerMessage.includes(indicator));
+  const hasTemporal = temporalIndicators.some(temporal => lowerMessage.includes(temporal));
+  
+  // "headache body pains" or "I have headache" or "feeling pain for 4 days"
+  if (hasSymptom && (hasIndicator || hasTemporal || words.length <= 4)) {
     return "SYMPTOM_CHECK";
   }
-
+  
   // Check for side effect concerns
-  if (/.*\b(side effect|adverse|reaction)\b.*/.test(lowerMessage) ||
-      /.*\b(cause|caused by|from taking|after taking)\b.*\b(medicine|medication|drug)\b.*/.test(lowerMessage)) {
+  if (lowerMessage.includes('side effect') || lowerMessage.includes('adverse') || lowerMessage.includes('reaction') ||
+      (lowerMessage.includes('cause') && hasMedicineKeyword) ||
+      (lowerMessage.includes('after taking') || lowerMessage.includes('from taking'))) {
     return "SIDE_EFFECT";
   }
 
   // Check for interaction queries
-  if (/.*\b(interact|interaction|together|combine|mix)\b.*\b(medicine|medication|drug)\b.*/.test(lowerMessage) ||
-      /.*\bcan.*take.*(with|together)\b.*/.test(lowerMessage)) {
+  if ((lowerMessage.includes('interact') || lowerMessage.includes('interaction') || 
+       lowerMessage.includes('together') || lowerMessage.includes('combine') || 
+       lowerMessage.includes('mix') || lowerMessage.includes('with')) && hasMedicineKeyword) {
     return "INTERACTION";
   }
 
   // Check for schedule/dosage questions
-  if (/.*\b(schedule|when|time|dose|dosage|how often|missed|miss)\b.*\b(take|taking)\b.*/.test(lowerMessage) ||
-      /.*\b(today|tomorrow|morning|evening)\b.*\b(medicine|medication)\b.*/.test(lowerMessage)) {
+  if ((lowerMessage.includes('schedule') || lowerMessage.includes('when') || 
+       lowerMessage.includes('time') || lowerMessage.includes('dose') || 
+       lowerMessage.includes('dosage') || lowerMessage.includes('how often') ||
+       lowerMessage.includes('missed') || lowerMessage.includes('miss')) && 
+      (lowerMessage.includes('take') || lowerMessage.includes('taking'))) {
     return "SCHEDULE";
   }
 
   // Check for prescription questions
-  if (/.*\b(prescription|prescribed|doctor said|instructions)\b.*/.test(lowerMessage)) {
+  if (lowerMessage.includes('prescription') || lowerMessage.includes('prescribed') || 
+      lowerMessage.includes('doctor said') || lowerMessage.includes('instructions')) {
     return "PRESCRIPTION";
   }
 
@@ -1136,19 +1086,137 @@ function extractMedicineName(message: string, userMedications: any[]): string | 
 }
 
 function extractSymptom(message: string): string | null {
-  const symptomKeywords = ["headache", "fever", "nausea", "pain", "ache", "dizzy", "sick", "stomach"];
+  if (!message || typeof message !== 'string') {
+    return null;
+  }
   
+  const lowerMessage = message.toLowerCase();
+  const symptomKeywords = [
+    "headache", "head ache", "migraine", 
+    "fever", "temperature", 
+    "nausea", "nauseated", "queasy",
+    "pain", "ache", "hurt", "hurting", "sore", 
+    "dizzy", "dizziness", "lightheaded",
+    "sick", "illness", "unwell",
+    "stomach ache", "stomach pain", "abdominal pain",
+    "chest pain", "back pain", "joint pain", "muscle pain",
+    "body pain", "body aches", "fatigue", "tired", "weakness"
+  ];
+  
+  // Check for compound symptoms like "headache body pains"
+  const foundSymptoms = [];
   for (const symptom of symptomKeywords) {
-    if (message.toLowerCase().includes(symptom)) {
-      return symptom;
+    if (lowerMessage.includes(symptom)) {
+      foundSymptoms.push(symptom);
+    }
+  }
+  
+  if (foundSymptoms.length > 0) {
+    // Return the most specific or first found symptom
+    // Prioritize longer/more specific matches
+    return foundSymptoms.sort((a, b) => b.length - a.length)[0];
+  }
+  
+  return null;
+}
+
+function extractDuration(message: string): { value: number; unit: string; text: string } | null {
+  if (!message || typeof message !== 'string') {
+    return null;
+  }
+  
+  const lowerMessage = message.toLowerCase();
+  
+  // Patterns for duration extraction
+  const patterns = [
+    /(\d+)\s*(day|days)/i,
+    /(\d+)\s*(hour|hours|hrs?)/i,
+    /(\d+)\s*(week|weeks)/i,
+    /(\d+)\s*(month|months)/i,
+    /(for|since|from)\s+(\d+)\s*(day|days)/i,
+    /(for|since|from)\s+(\d+)\s*(hour|hours|hrs?)/i,
+    /(for|since|from)\s+(\d+)\s*(week|weeks)/i,
+    /(for|since|from)\s+(\d+)\s*(month|months)/i,
+    /past\s+(\d+)\s*(day|days)/i,
+    /last\s+(\d+)\s*(day|days)/i
+  ];
+  
+  for (const pattern of patterns) {
+    const match = lowerMessage.match(pattern);
+    if (match) {
+      const value = parseInt(match[1] || match[2], 10);
+      const unit = (match[2] || match[3]).toLowerCase();
+      
+      // Normalize units
+      let normalizedUnit = 'days';
+      if (unit.startsWith('hour')) normalizedUnit = 'hours';
+      else if (unit.startsWith('week')) normalizedUnit = 'weeks';
+      else if (unit.startsWith('month')) normalizedUnit = 'months';
+      
+      return {
+        value,
+        unit: normalizedUnit,
+        text: match[0].trim()
+      };
     }
   }
   
   return null;
 }
 
+function extractFactsFromMessage(message: string, userMedications: any[]): any {
+  const facts: any = {};
+  
+  // Extract symptom
+  const symptom = extractSymptom(message);
+  if (symptom) {
+    facts.symptom = symptom;
+  }
+  
+  // Extract duration
+  const duration = extractDuration(message);
+  if (duration) {
+    facts.duration = duration.text;
+    facts.durationDays = convertToDays(duration.value, duration.unit);
+    facts.durationParsed = duration;
+  }
+  
+  // Extract medicine name
+  const medicine = extractMedicineName(message, userMedications);
+  if (medicine) {
+    facts.medicine = medicine;
+  }
+  
+  // Extract severity indicators
+  const severityKeywords = ['mild', 'moderate', 'severe', 'intense', 'terrible', 'unbearable', 'slight', 'bad', 'worse'];
+  const lowerMessage = message.toLowerCase();
+  
+  for (const severity of severityKeywords) {
+    if (lowerMessage.includes(severity)) {
+      facts.severity = severity;
+      break;
+    }
+  }
+  
+  return facts;
+}
+
+function convertToDays(value: number, unit: string): number {
+  switch (unit) {
+    case 'hours': return Math.round(value / 24 * 10) / 10; // Round to 1 decimal
+    case 'days': return value;
+    case 'weeks': return value * 7;
+    case 'months': return value * 30; // Approximate
+    default: return value;
+  }
+}
+
 function createOption(id: string, text: string, description: string = ""): any {
-  const option: any = { id, text };
+  const option: any = { 
+    id, 
+    text,
+    value: text  // Frontend expects option.value - use text as the value
+  };
   if (description) {
     option.description = description;
   }
@@ -1228,25 +1296,122 @@ async function processSymptomCheckIntent(env: Env, message: string, conversation
     conversationId
   };
 
+  // Extract facts from the current message
+  const facts = extractFactsFromMessage(message, userMedications);
+  
+  // Merge facts into conversation state, preserving existing information
+  if (!conversationState.extractedFacts) {
+    conversationState.extractedFacts = {};
+  }
+  
+  // Update facts without overwriting existing ones unless explicitly contradicted
+  Object.keys(facts).forEach(key => {
+    conversationState.extractedFacts[key] = facts[key];
+  });
+
   const currentQuestion = conversationState.currentQuestion;
+  const extractedFacts = conversationState.extractedFacts;
   
   if (!currentQuestion) {
-    // First interaction - ask about symptom severity
-    const symptom = extractSymptom(message);
+    // First interaction - extract what we can, then ask for missing info
+    const symptom = extractedFacts.symptom || extractSymptom(message);
+    const duration = extractedFacts.duration || extractedFacts.durationParsed;
+    
     conversationState.reportedSymptom = symptom || message;
-    conversationState.currentQuestion = "severity";
     
-    response.messageType = "QUESTION";
-    response.message = `I understand you're experiencing ${symptom || "symptoms"}. How would you describe the severity?`;
-    response.questionType = "SINGLE_SELECT";
+    // If we have both symptom and duration, ask about severity
+    if (symptom && duration) {
+      conversationState.currentQuestion = "severity";
+      
+      const durationText = extractedFacts.duration || `for ${extractedFacts.durationDays} days`;
+      response.messageType = "QUESTION";
+      response.message = `I understand you've been experiencing ${symptom} ${durationText}. How would you describe the severity?`;
+      response.questionType = "SINGLE_SELECT";
+      
+      response.questions = [
+        createOption("mild", "Mild", "Noticeable but manageable"),
+        createOption("moderate", "Moderate", "Interfering with normal activities"),
+        createOption("severe", "Severe", "Difficult to continue normal activities"),
+        createOption("very-severe", "Very severe", "Extremely intense"),
+        createOption("custom", "Describe it differently", "")
+      ];
+    }
+    // If we have symptom but no duration, ask about duration
+    else if (symptom && !duration) {
+      conversationState.currentQuestion = "duration";
+      
+      response.messageType = "QUESTION";
+      response.message = `I understand you're experiencing ${symptom}. How long have you been feeling this way?`;
+      response.questionType = "SINGLE_SELECT";
+      
+      response.questions = [
+        createOption("today", "Started today", ""),
+        createOption("1-2-days", "1-2 days ago", ""),
+        createOption("3-7-days", "3-7 days ago", ""),
+        createOption("week-plus", "More than a week ago", ""),
+        createOption("not-sure", "I'm not sure", ""),
+        createOption("custom", "Other timeframe", "")
+      ];
+    }
+    // If we don't have clear symptom info, ask for clarification
+    else {
+      conversationState.currentQuestion = "symptom-clarification";
+      
+      response.messageType = "QUESTION";
+      response.message = "I want to help you with your symptoms. Could you describe what you're experiencing?";
+      response.questionType = "TEXT_INPUT";
+      response.placeholder = "Describe your symptoms...";
+    }
     
-    response.questions = [
-      createOption("mild", "Mild", "Noticeable but manageable"),
-      createOption("moderate", "Moderate", "Interfering with normal activities"),
-      createOption("severe", "Severe", "Difficult to continue normal activities"),
-      createOption("very-severe", "Very severe", "Extremely intense"),
-      createOption("custom", "Describe it differently", "")
-    ];
+    response.conversationState = conversationState;
+    return response;
+  }
+  
+  if (currentQuestion === "symptom-clarification") {
+    // Re-extract facts from the clarification
+    const newFacts = extractFactsFromMessage(message, userMedications);
+    Object.keys(newFacts).forEach(key => {
+      conversationState.extractedFacts[key] = newFacts[key];
+    });
+    
+    conversationState.reportedSymptom = newFacts.symptom || message;
+    
+    if (newFacts.duration || newFacts.durationParsed) {
+      // We now have duration, move to severity
+      conversationState.currentQuestion = "severity";
+      
+      const symptom = newFacts.symptom || "these symptoms";
+      const durationText = newFacts.duration || `for ${newFacts.durationDays} days`;
+      
+      response.messageType = "QUESTION";
+      response.message = `I understand you've been experiencing ${symptom} ${durationText}. How would you describe the severity?`;
+      response.questionType = "SINGLE_SELECT";
+      
+      response.questions = [
+        createOption("mild", "Mild", "Noticeable but manageable"),
+        createOption("moderate", "Moderate", "Interfering with normal activities"),
+        createOption("severe", "Severe", "Difficult to continue normal activities"),
+        createOption("very-severe", "Very severe", "Extremely intense"),
+        createOption("custom", "Describe it differently", "")
+      ];
+    } else {
+      // Still need duration info
+      conversationState.currentQuestion = "duration";
+      
+      const symptom = newFacts.symptom || "these symptoms";
+      response.messageType = "QUESTION";
+      response.message = `Thank you for clarifying about ${symptom}. How long have you been experiencing this?`;
+      response.questionType = "SINGLE_SELECT";
+      
+      response.questions = [
+        createOption("today", "Started today", ""),
+        createOption("1-2-days", "1-2 days ago", ""),
+        createOption("3-7-days", "3-7 days ago", ""),
+        createOption("week-plus", "More than a week ago", ""),
+        createOption("not-sure", "I'm not sure", ""),
+        createOption("custom", "Other timeframe", "")
+      ];
+    }
     
     response.conversationState = conversationState;
     return response;
@@ -1254,27 +1419,7 @@ async function processSymptomCheckIntent(env: Env, message: string, conversation
   
   if (currentQuestion === "severity") {
     conversationState.severity = message;
-    conversationState.currentQuestion = "duration";
-    
-    response.messageType = "QUESTION";
-    response.message = "When did this start?";
-    response.questionType = "SINGLE_SELECT";
-    
-    response.questions = [
-      createOption("today", "Started today", ""),
-      createOption("1-2-days", "1-2 days ago", ""),
-      createOption("3-7-days", "3-7 days ago", ""),
-      createOption("week-plus", "More than a week ago", ""),
-      createOption("not-sure", "I'm not sure", ""),
-      createOption("custom", "Other timeframe", "")
-    ];
-    
-    response.conversationState = conversationState;
-    return response;
-  }
-  
-  if (currentQuestion === "duration") {
-    conversationState.duration = message;
+    conversationState.extractedFacts.severity = message;
     
     // Check if user has medications that might be relevant
     if (userMedications.length > 0) {
@@ -1295,10 +1440,53 @@ async function processSymptomCheckIntent(env: Env, message: string, conversation
       
       response.conversationState = conversationState;
       return response;
+    } else {
+      // No medications, proceed to final analysis
+      conversationState.completed = true;
+      return await generateSymptomAnalysis(env, conversationState, conversationId, userMedications);
     }
   }
   
-  // Generate final symptom analysis
+  if (currentQuestion === "duration") {
+    conversationState.duration = message;
+    
+    // Try to extract duration from the response
+    const durationFacts = extractDuration(message);
+    if (durationFacts) {
+      conversationState.extractedFacts.duration = durationFacts.text;
+      conversationState.extractedFacts.durationDays = convertToDays(durationFacts.value, durationFacts.unit);
+      conversationState.extractedFacts.durationParsed = durationFacts;
+    }
+    
+    // Move to severity question
+    conversationState.currentQuestion = "severity";
+    
+    response.messageType = "QUESTION";
+    response.message = "How would you describe the severity of your symptoms?";
+    response.questionType = "SINGLE_SELECT";
+    
+    response.questions = [
+      createOption("mild", "Mild", "Noticeable but manageable"),
+      createOption("moderate", "Moderate", "Interfering with normal activities"),
+      createOption("severe", "Severe", "Difficult to continue normal activities"),
+      createOption("very-severe", "Very severe", "Extremely intense"),
+      createOption("custom", "Describe it differently", "")
+    ];
+    
+    response.conversationState = conversationState;
+    return response;
+  }
+  
+  if (currentQuestion === "medication-timing") {
+    conversationState.medicationTiming = message;
+    conversationState.completed = true;
+    
+    // Generate final symptom analysis
+    return await generateSymptomAnalysis(env, conversationState, conversationId, userMedications);
+  }
+  
+  // Fallback - should not reach here normally
+  conversationState.completed = true;
   return await generateSymptomAnalysis(env, conversationState, conversationId, userMedications);
 }
 
@@ -1517,31 +1705,57 @@ async function processUnifiedChat(env: Env, message: string, conversationId: str
 }
 
 async function callAi(env: Env, prompt: string): Promise<Response> {
+  // Input validation
+  if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
+    console.error('Invalid prompt provided to callAi:', prompt);
+    return plain("Please provide a valid question or message.");
+  }
+
+  const trimmedPrompt = prompt.trim();
+  
+  // Check if API keys are configured
+  const hasGemini = Boolean(env.GEMINI_API_KEY);
+  const hasGroq = Boolean(env.GROQ_API_KEY);
+  
+  if (!hasGemini && !hasGroq) {
+    console.error('No AI provider API keys configured');
+    return plain("AI health assistant is temporarily unavailable due to configuration issues. Please consult your physician or pharmacist.");
+  }
+
   // 1. Try Gemini models if GEMINI_API_KEY is configured
-  if (env.GEMINI_API_KEY) {
+  if (hasGemini) {
     const models = [
       env.GEMINI_MODEL || "gemini-2.5-flash",
       "gemini-2.5-flash-lite"
     ];
+    
     for (const model of models) {
       try {
+        console.log(`Attempting Gemini request with model: ${model}`);
         const resp = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${env.GEMINI_API_KEY}`,
           {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({
-              contents: [{ parts: [{ text: prompt }] }],
+              contents: [{ parts: [{ text: trimmedPrompt }] }],
               generationConfig: { temperature: 0.2 }
             })
           }
         );
+        
         if (resp.ok) {
           const data = await resp.json<any>();
           const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
           if (text && text.trim()) {
+            console.log(`Gemini ${model} success`);
             return plain(text.trim());
+          } else {
+            console.warn(`Gemini ${model} returned empty response:`, data);
           }
+        } else {
+          const errorText = await resp.text();
+          console.error(`Gemini ${model} HTTP ${resp.status}: ${errorText}`);
         }
       } catch (err) {
         console.error(`Gemini model ${model} error:`, err);
@@ -1550,14 +1764,16 @@ async function callAi(env: Env, prompt: string): Promise<Response> {
   }
 
   // 2. Try Groq models if GROQ_API_KEY is configured
-  if (env.GROQ_API_KEY) {
+  if (hasGroq) {
     const models = [
       env.GROQ_MODEL || "llama-3.3-70b-versatile",
       "llama-3.1-8b-instant",
       "openai/gpt-oss-20b"
     ];
+    
     for (const model of models) {
       try {
+        console.log(`Attempting Groq request with model: ${model}`);
         const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
           method: "POST",
           headers: {
@@ -1566,16 +1782,23 @@ async function callAi(env: Env, prompt: string): Promise<Response> {
           },
           body: JSON.stringify({
             model,
-            messages: [{ role: "user", content: prompt }],
+            messages: [{ role: "user", content: trimmedPrompt }],
             temperature: 0.2
           })
         });
+        
         if (resp.ok) {
           const data = await resp.json<any>();
           const text = data.choices?.[0]?.message?.content;
           if (text && text.trim()) {
+            console.log(`Groq ${model} success`);
             return plain(text.trim());
+          } else {
+            console.warn(`Groq ${model} returned empty response:`, data);
           }
+        } else {
+          const errorText = await resp.text();
+          console.error(`Groq ${model} HTTP ${resp.status}: ${errorText}`);
         }
       } catch (err) {
         console.error(`Groq model ${model} error:`, err);
@@ -1583,7 +1806,10 @@ async function callAi(env: Env, prompt: string): Promise<Response> {
     }
   }
 
-  // 3. Graceful controlled fallback if AI provider is unreachable or unconfigured
+  // 3. Intelligent fallback responses based on prompt content
+  console.warn('All AI providers failed, using intelligent fallback');
+  
+  // Handle special JSON array requests for health insights
   if (prompt.includes("health insights") || prompt.includes("Patient data") || prompt.includes("JSON array")) {
     const fallbackArray = [
       { title: "Medication Adherence", message: "Keep taking your scheduled doses consistently for optimal health outcomes.", type: "info", icon: "💊" },
@@ -1593,8 +1819,24 @@ async function callAi(env: Env, prompt: string): Promise<Response> {
     ];
     return plain(JSON.stringify(fallbackArray));
   }
-
-  return plain("AI health assistant is temporarily unavailable. Please consult your physician or pharmacist.");
+  
+  // Context-aware fallback for different types of queries
+  const lowerPrompt = trimmedPrompt.toLowerCase();
+  
+  if (lowerPrompt.includes('symptom') || lowerPrompt.includes('pain') || lowerPrompt.includes('headache') || lowerPrompt.includes('feeling')) {
+    return plain(`I understand you're asking about symptoms, but our AI assistant is temporarily unavailable. For health concerns, please consider consulting your healthcare provider, especially if symptoms persist or worsen.`);
+  }
+  
+  if (lowerPrompt.includes('medicine') || lowerPrompt.includes('medication') || lowerPrompt.includes('drug') || lowerPrompt.includes('zinc')) {
+    return plain(`I'd like to help with your medication question, but our AI assistant is temporarily unavailable. Please consult your pharmacist or healthcare provider for accurate medication information and guidance.`);
+  }
+  
+  if (lowerPrompt.includes('side effect') || lowerPrompt.includes('interaction')) {
+    return plain(`For questions about medication side effects or interactions, please speak with your pharmacist or healthcare provider immediately, as our AI assistant is temporarily unavailable.`);
+  }
+  
+  // Default fallback
+  return plain(`I received your message about "${trimmedPrompt.substring(0, 50)}${trimmedPrompt.length > 50 ? '...' : ''}", but our AI health assistant is temporarily unavailable. Please consult your physician or pharmacist for health-related guidance.`);
 }
 
 export default {
@@ -1883,20 +2125,31 @@ export default {
         let db: any = null;
         try {
           db = await getDbConnection(env);
+          await db.beginTransaction();
           const [r] = await query<{ insertId: number }>(
             db,
-            "INSERT INTO medications (user_id,name,dosage,instructions,start_date,end_date) VALUES (?,?,?,?,?,?)",
+            "INSERT INTO medications (user_id,name,dosage,instructions,start_date,end_date,active,schedule_version) VALUES (?,?,?,?,?,?,1,1)",
             [actor.id, b.name, b.dosage, b.instructions ?? null, b.startDate, b.endDate]
           );
+
+          const times: string[] = [];
           for (const time of Array.isArray(b.times) ? b.times : []) {
             await query(db, "INSERT INTO medication_times (medication_id,time_of_day) VALUES (?,?)", [r.insertId, time]);
+            times.push(time);
           }
+
           await query(
             db,
             "INSERT INTO activities (user_id,type,message,related_entity_type,related_entity_id,created_at) VALUES (?,?,?,?,?,NOW())",
             [actor.id, "MEDICINE_ADDED", `Added new medication: ${b.name} (${b.dosage})`, "MEDICATION", r.insertId]
           );
+          await db.commit();
+
+          console.log(`[Medication Add] Medication ${b.name} added successfully (server-side notifications enabled)`);
           return plain("Medication added");
+        } catch (error) {
+          if (db) await db.rollback();
+          throw error;
         } finally {
           if (db) {
             try {
@@ -1916,14 +2169,12 @@ export default {
           : (await query<User[]>(env, "SELECT * FROM users WHERE email=? LIMIT 1", [decodeURIComponent(medsEmail![1]).toLowerCase()]))[0][0];
         if (!target) return plain(medsId ? "User not found" : "Patient not found", 400);
         if (!accessible(actor, target)) return plain("Access denied", 403);
-        // Accept client-supplied local date to avoid UTC timezone mismatch for users outside UTC.
-        const clientDateParam = url.searchParams.get("date");
-        const medsDateStr = (clientDateParam && /^\d{4}-\d{2}-\d{2}$/.test(clientDateParam))
-          ? clientDateParam
-          : new Date().toISOString().split("T")[0];
+        const targetZone = canonicalTimeZone(target.time_zone);
+        if (!targetZone) return json([]);
+        const medsDateStr = zonedParts(Date.now(), targetZone).date;
         const [rows] = await query<Json[]>(
           env,
-          "SELECT m.*,JSON_ARRAYAGG(JSON_OBJECT('id',mt.id,'timeOfDay',TIME_FORMAT(mt.time_of_day,'%H:%i:%s'))) times FROM medications m LEFT JOIN medication_times mt ON mt.medication_id=m.id WHERE m.user_id=? AND m.start_date<=? AND m.end_date>=? GROUP BY m.id",
+          "SELECT m.*,JSON_ARRAYAGG(JSON_OBJECT('id',mt.id,'timeOfDay',TIME_FORMAT(mt.time_of_day,'%H:%i:%s'))) times FROM medications m LEFT JOIN medication_times mt ON mt.medication_id=m.id WHERE m.user_id=? AND m.active=1 AND m.start_date<=? AND m.end_date>=? GROUP BY m.id",
           [target.id, medsDateStr, medsDateStr]
         );
         return json(
@@ -1937,17 +2188,54 @@ export default {
       }
 
       const del = path.match(/^\/api\/medications\/(\d+)$/);
+      if (del && request.method === "PUT") {
+        const { body: b } = await requestBody(request);
+        let db: any = null;
+        try {
+          db = await getDbConnection(env);
+          await db.beginTransaction();
+          const [rows] = await query<Json[]>(db, "SELECT * FROM medications WHERE id=? FOR UPDATE", [del[1]]);
+          const medication = rows[0];
+          if (!medication) { await db.rollback(); return new Response(null, { status: 404, headers: cors }); }
+          if (Number(medication.user_id) !== actor.id) { await db.rollback(); return plain("Access denied", 403); }
+          const times = Array.isArray(b.times) ? b.times : null;
+          await query(db,
+            "UPDATE medications SET name=?,dosage=?,instructions=?,start_date=?,end_date=?,active=?,schedule_version=schedule_version+1 WHERE id=?",
+            [b.name ?? medication.name, b.dosage ?? medication.dosage, b.instructions ?? medication.instructions,
+             b.startDate ?? String(medication.start_date).slice(0, 10), b.endDate ?? String(medication.end_date).slice(0, 10),
+             b.active === false ? 0 : Number(medication.active ?? 1), del[1]]);
+          if (times) {
+            await query(db, "DELETE FROM medication_times WHERE medication_id=?", [del[1]]);
+            for (const time of times) await query(db, "INSERT INTO medication_times (medication_id,time_of_day) VALUES (?,?)", [del[1], time]);
+          }
+          await query(db, "UPDATE push_delivery_attempts SET outcome='OBSOLETE',next_attempt_at=NULL WHERE medication_id=? AND outcome IN ('CLAIMED','RETRY')", [del[1]]);
+          await db.commit();
+          return plain("Medication updated");
+        } catch (error) {
+          if (db) await db.rollback();
+          throw error;
+        } finally {
+          if (db) await db.end();
+        }
+      }
+
       if (del && request.method === "DELETE") {
         let db: any = null;
         try {
           db = await getDbConnection(env);
-          const [rows] = await query<Json[]>(db, "SELECT * FROM medications WHERE id=?", [del[1]]);
-          if (!rows[0]) return new Response(null, { status: 404, headers: cors });
-          if (Number(rows[0].user_id) !== actor.id) return plain("Access denied", 403);
+          await db.beginTransaction();
+          const [rows] = await query<Json[]>(db, "SELECT * FROM medications WHERE id=? FOR UPDATE", [del[1]]);
+          if (!rows[0]) { await db.rollback(); return new Response(null, { status: 404, headers: cors }); }
+          if (Number(rows[0].user_id) !== actor.id) { await db.rollback(); return plain("Access denied", 403); }
+          await query(db, "UPDATE push_delivery_attempts SET outcome='OBSOLETE',next_attempt_at=NULL WHERE medication_id=? AND outcome IN ('CLAIMED','RETRY')", [del[1]]);
           await query(db, "DELETE FROM intake_logs WHERE medication_id=?", [del[1]]);
           await query(db, "DELETE FROM medication_times WHERE medication_id=?", [del[1]]);
           await query(db, "DELETE FROM medications WHERE id=?", [del[1]]);
+          await db.commit();
           return new Response(null, { status: 204, headers: cors });
+        } catch (error) {
+          if (db) await db.rollback();
+          throw error;
         } finally {
           if (db) {
             try {
@@ -1966,15 +2254,14 @@ export default {
         if (!target) return json({ message: "User not found" }, 400);
         if (!accessible(actor, target)) return json({ message: "Access denied" }, 403);
 
-        // Accept client-supplied local date to avoid UTC timezone mismatch for users outside UTC.
-        const clientDateParam = url.searchParams.get("date");
-        const todayStr = (clientDateParam && /^\d{4}-\d{2}-\d{2}$/.test(clientDateParam))
-          ? clientDateParam
-          : new Date().toISOString().split("T")[0];
+        const targetZone = canonicalTimeZone(target.time_zone);
+        if (!targetZone) return json([]);
+        const currentLocal = zonedParts(Date.now(), targetZone);
+        const todayStr = currentLocal.date;
 
         const [meds] = await query<Json[]>(
           env,
-          "SELECT m.id AS med_id, m.name AS med_name, m.dosage, mt.time_of_day FROM medications m JOIN medication_times mt ON mt.medication_id=m.id WHERE m.user_id=? AND m.start_date<=? AND m.end_date>=?",
+          "SELECT m.id AS med_id, m.name AS med_name, m.dosage, mt.time_of_day FROM medications m JOIN medication_times mt ON mt.medication_id=m.id WHERE m.user_id=? AND m.active=1 AND m.start_date<=? AND m.end_date>=?",
           [target.id, todayStr, todayStr]
         );
         const [logs] = await query<Json[]>(
@@ -1988,12 +2275,8 @@ export default {
           logMap.set(`${l.medication_id}_${l.time}`, l);
         }
 
-        // isPast: date is now client-supplied (correct for user's timezone).
-        // For the time portion we use UTC hours/minutes from the server since we
-        // don't receive a timezone offset from the client. This is display-only.
-        const now = new Date();
-        const currentHours = now.getUTCHours();
-        const currentMins = now.getUTCMinutes();
+        const currentHours = currentLocal.hour;
+        const currentMins = currentLocal.minute;
 
         const doses = meds.map(m => {
           const rawTime = String(m.time_of_day || "00:00:00").substring(0, 5);
@@ -2031,52 +2314,48 @@ export default {
       if (path === "/api/logs/mark" && request.method === "POST") {
         const { body: b } = await requestBody(request);
         if (!b.medicationId || !b.date || !b.time) return json({ message: "Missing required fields" }, 400);
-
         const status = String(b.status || "TAKEN").toUpperCase();
+        if (status !== "TAKEN" && status !== "MISSED") return json({ message: "Invalid dose status" }, 400);
         let db: any = null;
         try {
           db = await getDbConnection(env);
-          const [medRows] = await query<Json[]>(db, "SELECT * FROM medications WHERE id=? LIMIT 1", [b.medicationId]);
-          const med = medRows[0];
-          if (!med) return json({ message: "Medication not found" }, 400);
-          const owner = await getUser(db, Number(med.user_id));
-          if (!owner) return json({ message: "Medication owner not found" }, 404);
-          if (!accessible(actor, owner)) return json({ message: "Access denied" }, 403);
-
-          const [existing] = await query<Json[]>(
-            db,
-            "SELECT id FROM intake_logs WHERE marker_user_id=? AND medication_id=? AND date=? AND TIME_FORMAT(time,'%H:%i')=? LIMIT 1",
-            [actor.id, b.medicationId, b.date, String(b.time).substring(0, 5)]
-          );
-
-          let logId: number;
-          if (existing.length > 0) {
-            logId = existing[0].id;
-            await query(
-              db,
-              "UPDATE intake_logs SET status=?, taken_time=IF(?='TAKEN',NOW(),NULL), missed_time=IF(?='MISSED',NOW(),NULL), updated_at=NOW() WHERE id=?",
-              [status, status, status, logId]
-            );
-          } else {
-            const [insertRes] = await query<{ insertId: number }>(
-              db,
-              "INSERT INTO intake_logs (marker_user_id,medication_id,date,time,status,scheduled_time,taken_time,missed_time,created_at,updated_at) VALUES (?,?,?,?,?,CONCAT(?,' ',?),IF(?='TAKEN',NOW(),NULL),IF(?='MISSED',NOW(),NULL),NOW(),NOW())",
-              [actor.id, b.medicationId, b.date, b.time, status, b.date, b.time, status, status]
-            );
-            logId = insertRes.insertId;
-          }
-
-          const activityMsg =
-            status === "TAKEN"
-              ? `Took ${med.name} (${med.dosage}) at ${String(b.time).substring(0, 5)}`
-              : `Missed ${med.name} (${med.dosage}) scheduled for ${String(b.time).substring(0, 5)}`;
-          await query(
-            db,
-            "INSERT INTO activities (user_id,type,message,related_entity_type,related_entity_id,created_at) VALUES (?,?,?,?,?,NOW())",
-            [actor.id, status === "TAKEN" ? "DOSE_TAKEN" : "DOSE_MISSED", activityMsg, "INTAKE_LOG", logId]
-          );
-
-          return json({ success: true, logId });
+          const result = await transact(db, async () => {
+            const localTime = String(b.time).substring(0, 5);
+            const [medRows] = await query<Json[]>(db,
+              "SELECT m.* FROM medications m JOIN medication_times mt ON mt.medication_id=m.id WHERE m.id=? AND m.active=1 AND ? BETWEEN m.start_date AND m.end_date AND TIME_FORMAT(mt.time_of_day,'%H:%i')=? LIMIT 1 FOR UPDATE",
+              [b.medicationId, b.date, localTime]);
+            const med = medRows[0];
+            if (!med) throw new Error("Medication or current schedule not found");
+            const owner = await getUser(db, Number(med.user_id));
+            if (!owner || !accessible(actor, owner)) throw new Error("Access denied");
+            const zone = canonicalTimeZone(owner.time_zone);
+            if (!zone) throw new Error("User time zone is not configured");
+            const occurrenceId = await upsertOccurrence(db, {
+              medicationId: Number(med.id), userId: Number(med.user_id), scheduleVersion: Number(med.schedule_version),
+              localDate: b.date, localTime, scheduledAtUtc: mysqlDateTime(resolveLocalOccurrence(b.date, localTime, zone))
+            });
+            const changed = status === "TAKEN"
+              ? await markOccurrenceTaken(db, occurrenceId)
+              : await markOccurrenceMissed(db, occurrenceId);
+            const [logResult] = await query<{ insertId: number }>(db,
+              `INSERT INTO intake_logs (occurrence_id,marker_user_id,medication_id,date,time,status,scheduled_time,taken_time,missed_time,created_at,updated_at)
+               VALUES (?,?,?,?,?,?,CONCAT(?,' ',?),IF(?='TAKEN',NOW(),NULL),IF(?='MISSED',NOW(),NULL),NOW(),NOW())
+               ON DUPLICATE KEY UPDATE status=IF(VALUES(status)='TAKEN','TAKEN',status),taken_time=IF(VALUES(status)='TAKEN',NOW(),taken_time),missed_time=IF(status='TAKEN',NULL,NOW()),updated_at=NOW(),id=LAST_INSERT_ID(id)`,
+              [occurrenceId, actor.id, b.medicationId, b.date, localTime, status, b.date, localTime, status, status]);
+            if (changed) {
+              const activityMsg = status === "TAKEN"
+                ? `Took ${med.name} (${med.dosage}) at ${localTime}`
+                : `Missed ${med.name} (${med.dosage}) scheduled for ${localTime}`;
+              await query(db, "INSERT INTO activities (user_id,type,message,related_entity_type,related_entity_id,created_at) VALUES (?,?,?,?,?,NOW())",
+                [actor.id, status === "TAKEN" ? "DOSE_TAKEN" : "DOSE_MISSED", activityMsg, "INTAKE_LOG", logResult.insertId]);
+            }
+            return { success: true, logId: logResult.insertId };
+          });
+          return json(result);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Unable to mark dose";
+          const statusCode = message === "Access denied" ? 403 : 400;
+          return json({ message }, statusCode);
         } finally {
           if (db) await db.end();
         }
@@ -2091,19 +2370,24 @@ export default {
           db = await getDbConnection(env);
           for (const req of list) {
             if (!req.medicationId || !req.date || !req.time) continue;
-            const [existing] = await query<Json[]>(
-              db,
-              "SELECT id FROM intake_logs WHERE marker_user_id=? AND medication_id=? AND date=? AND TIME_FORMAT(time,'%H:%i')=? LIMIT 1",
-              [actor.id, req.medicationId, req.date, String(req.time).substring(0, 5)]
-            );
-            if (existing.length === 0) {
-              const [ins] = await query<{ insertId: number }>(
-                db,
-                "INSERT INTO intake_logs (marker_user_id,medication_id,date,time,status,scheduled_time,missed_time,created_at,updated_at) VALUES (?,?,?,?,'MISSED',CONCAT(?,' ',?),NOW(),NOW(),NOW())",
-                [actor.id, req.medicationId, req.date, req.time, req.date, req.time]
-              );
+            await transact(db, async () => {
+              const localTime = String(req.time).substring(0, 5);
+              const [meds] = await query<Json[]>(db,
+                "SELECT m.* FROM medications m JOIN medication_times mt ON mt.medication_id=m.id WHERE m.id=? AND m.active=1 AND ? BETWEEN m.start_date AND m.end_date AND TIME_FORMAT(mt.time_of_day,'%H:%i')=? LIMIT 1 FOR UPDATE",
+                [req.medicationId, req.date, localTime]);
+              const med = meds[0];
+              if (!med) return;
+              const owner = await getUser(db, Number(med.user_id));
+              if (!owner || !accessible(actor, owner)) return;
+              const zone = canonicalTimeZone(owner.time_zone);
+              if (!zone) return;
+              const occurrenceId = await upsertOccurrence(db, { medicationId: Number(med.id), userId: Number(med.user_id), scheduleVersion: Number(med.schedule_version), localDate: req.date, localTime, scheduledAtUtc: mysqlDateTime(resolveLocalOccurrence(req.date, localTime, zone)) });
+              if (!await markOccurrenceMissed(db, occurrenceId)) return;
+              const [ins] = await query<{ insertId: number }>(db,
+                "INSERT INTO intake_logs (occurrence_id,marker_user_id,medication_id,date,time,status,scheduled_time,missed_time,created_at,updated_at) VALUES (?,?,?,?,?,'MISSED',CONCAT(?,' ',?),NOW(),NOW(),NOW()) ON DUPLICATE KEY UPDATE status=IF(status='TAKEN','TAKEN','MISSED'),missed_time=IF(status='TAKEN',missed_time,NOW()),id=LAST_INSERT_ID(id)",
+                [occurrenceId, actor.id, req.medicationId, req.date, localTime, req.date, localTime]);
               created++;
-            }
+            });
           }
           return json({ created });
         } finally {
@@ -2112,11 +2396,22 @@ export default {
       }
 
       // ── Push Subscriptions ──────────────────────────────────────────────────
+      if (path === "/api/user/time-zone" && request.method === "PUT") {
+        const { body: b } = await requestBody(request);
+        const timeZone = canonicalTimeZone(b.timeZone);
+        if (!timeZone) return json({ message: "A valid IANA time zone is required" }, 400);
+        await query(env, "UPDATE users SET time_zone=?,updated_at=NOW() WHERE id=?", [timeZone, actor.id]);
+        return json({ timeZone });
+      }
+
       if (path === "/api/push/subscribe" && request.method === "POST") {
         const { body: b } = await requestBody(request);
         if (!b.subscription) return json({ message: "Missing subscription data" }, 400);
+        const subscriptionZone = b.timeZone === undefined ? null : canonicalTimeZone(b.timeZone);
+        if (b.timeZone !== undefined && !subscriptionZone) return json({ message: "Invalid IANA time zone" }, 400);
 
         try {
+          if (subscriptionZone) await query(env, "UPDATE users SET time_zone=?,updated_at=NOW() WHERE id=?", [subscriptionZone, actor.id]);
           // Clean up any existing subscriptions for this user first
           await query(
             env,
@@ -2197,12 +2492,15 @@ export default {
 
         const isWeek = path.includes("/summary/week/");
         const days = isWeek ? 7 : Math.min(3650, Math.max(1, parseInt(url.searchParams.get("days") || "7", 10)));
-        const safeDaysSub = Math.max(0, days - 1);
+        const zone = canonicalTimeZone(target.time_zone);
+        if (!zone) return json([]);
+        const today = zonedParts(Date.now(), zone).date;
+        const firstDay = addLocalDays(today, -(days - 1));
 
         const [logCounts] = await query<Json[]>(
           env,
-          `SELECT DATE_FORMAT(date,'%Y-%m-%d') AS day_str, SUM(status='TAKEN') AS taken, SUM(status='MISSED') AS missed FROM intake_logs WHERE marker_user_id=? AND date>=DATE_SUB(CURDATE(), INTERVAL ${safeDaysSub} DAY) GROUP BY day_str`,
-          [target.id]
+          "SELECT DATE_FORMAT(date,'%Y-%m-%d') AS day_str, SUM(status='TAKEN') AS taken, SUM(status='MISSED') AS missed FROM intake_logs WHERE marker_user_id=? AND date>=? AND date<=? GROUP BY day_str",
+          [target.id, firstDay, today]
         );
 
         const countMap = new Map<string, { taken: number; missed: number }>();
@@ -2211,11 +2509,8 @@ export default {
         }
 
         const result: Array<{ date: string; taken: number; missed: number }> = [];
-        const today = new Date();
         for (let i = days - 1; i >= 0; i--) {
-          const d = new Date(today);
-          d.setDate(today.getDate() - i);
-          const dStr = d.toISOString().split("T")[0];
+          const dStr = addLocalDays(today, -i);
           const c = countMap.get(dStr) || { taken: 0, missed: 0 };
           result.push({ date: dStr, taken: c.taken, missed: c.missed });
         }
@@ -2230,21 +2525,22 @@ export default {
         if (!accessible(actor, target)) return json({ message: "Access denied" }, 403);
 
         const days = Math.min(3650, Math.max(0, parseInt(url.searchParams.get("days") || "0", 10)));
-        const safeDaysSub = Math.max(0, days - 1);
-        const filter = days > 0 ? `AND date>=DATE_SUB(CURDATE(), INTERVAL ${safeDaysSub} DAY)` : "";
-        const params = [target.id];
+        const zone = canonicalTimeZone(target.time_zone);
+        if (!zone) return json({ total: 0, taken: 0, missed: 0, pending: 0, adherencePercentage: 0, missedToday: 0, missedThisWeek: 0, missedThisMonth: 0, mostMissedMedicine: "-", mostMissedCount: 0 });
+        const today = zonedParts(Date.now(), zone).date;
+        const filter = days > 0 ? "AND date>=?" : "";
 
         const [counts] = await query<Json[]>(
           env,
-          `SELECT 
+          `SELECT
              COUNT(*) AS total,
              SUM(status='TAKEN') AS taken,
              SUM(status='MISSED') AS missed,
-             SUM(date=CURDATE() AND status='MISSED') AS missedToday,
-             SUM(date>=DATE_SUB(CURDATE(), INTERVAL 6 DAY) AND status='MISSED') AS missedThisWeek,
-             SUM(date>=DATE_SUB(CURDATE(), INTERVAL 29 DAY) AND status='MISSED') AS missedThisMonth
+             SUM(date=? AND status='MISSED') AS missedToday,
+             SUM(date>=? AND status='MISSED') AS missedThisWeek,
+             SUM(date>=? AND status='MISSED') AS missedThisMonth
            FROM intake_logs WHERE marker_user_id=? ${filter}`,
-          params
+          days > 0 ? [today, addLocalDays(today, -6), addLocalDays(today, -29), target.id, addLocalDays(today, -(days - 1))] : [today, addLocalDays(today, -6), addLocalDays(today, -29), target.id]
         );
 
         const total = Number(counts[0]?.total || 0);
@@ -2495,7 +2791,7 @@ export default {
         if (request.method === "GET") {
           const { password_hash, ...safe } = target;
           const dobStr = safe.dob ? (typeof safe.dob === "string" ? safe.dob.slice(0, 10) : new Date(safe.dob).toISOString().slice(0, 10)) : null;
-          return json({ ...safe, dob: dobStr, patientEmail: target.patient_email, emergencyContact: target.emergency_contact, acceptedTerms: Boolean(target.accepted_terms) });
+          return json({ ...safe, dob: dobStr, patientEmail: target.patient_email, emergencyContact: target.emergency_contact, acceptedTerms: Boolean(target.accepted_terms), timeZone: target.time_zone ?? null });
         }
         if (request.method === "PUT") {
           const { body: b } = await requestBody(request);
@@ -2507,7 +2803,7 @@ export default {
           );
           const { password_hash, ...safe } = (await getUser(env, target.id))!;
           const dobStr = safe.dob ? (typeof safe.dob === "string" ? safe.dob.slice(0, 10) : new Date(safe.dob).toISOString().slice(0, 10)) : null;
-          return json({ ...safe, dob: dobStr, patientEmail: safe.patient_email, emergencyContact: safe.emergency_contact, acceptedTerms: Boolean(safe.accepted_terms) });
+          return json({ ...safe, dob: dobStr, patientEmail: safe.patient_email, emergencyContact: safe.emergency_contact, acceptedTerms: Boolean(safe.accepted_terms), timeZone: safe.time_zone ?? null });
         }
       }
 
@@ -2538,84 +2834,137 @@ export default {
   },
 
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
-    console.log("[DoseBuddy Cron] Starting missed-dose processing");
-    
+    console.log("[DoseBuddy Cron] Starting zone-aware occurrence processing");
+    const now = new Date(event.scheduledTime || Date.now());
     try {
-      const now = new Date();
-      const gracePeriodMinutes = 1; // 1-minute grace period as per requirements
-      const cutoffTime = new Date(now.getTime() - gracePeriodMinutes * 60 * 1000);
-      
-      // Query for pending doses that are past their grace period
-      const [rows] = await query<any[]>(
-        env,
-        `SELECT 
-          m.id as medication_id,
-          u.id as user_id,
-          mt.time_of_day,
-          m.name as medication_name,
-          m.dosage,
-          CURDATE() as date_str,
-          TIME_FORMAT(mt.time_of_day, '%H:%i') as time_str
-        FROM medications m
-        JOIN medication_times mt ON m.id = mt.medication_id  
-        JOIN users u ON m.user_id = u.id
-        WHERE m.active = 1
-        AND CONCAT(CURDATE(), ' ', mt.time_of_day) <= ?
-        AND NOT EXISTS (
-          SELECT 1 FROM intake_logs il 
-          WHERE il.medication_id = m.id 
-          AND il.marker_user_id = u.id
-          AND il.date = CURDATE()
-          AND TIME_FORMAT(il.time, '%H:%i') = TIME_FORMAT(mt.time_of_day, '%H:%i')
-        )`,
-        [cutoffTime.toISOString().slice(0, 19).replace('T', ' ')]
-      );
-
-      let processedCount = 0;
-      
-      for (const dose of rows) {
-        try {
-          // Mark dose as missed atomically
-          const [insertResult] = await query<{ insertId: number }>(
-            env,
-            `INSERT INTO intake_logs 
-            (marker_user_id, medication_id, date, time, status, scheduled_time, missed_time, created_at, updated_at)
-            VALUES (?, ?, ?, ?, 'MISSED', CONCAT(?, ' ', ?), NOW(), NOW(), NOW())`,
-            [
-              dose.user_id,
-              dose.medication_id, 
-              dose.date_str,
-              dose.time_str,
-              dose.date_str,
-              dose.time_str
-            ]
-          );
-
-          // Log activity
-          await query(
-            env,
-            `INSERT INTO activities 
-            (user_id, type, message, related_entity_type, related_entity_id, created_at)
-            VALUES (?, 'DOSE_MISSED', ?, 'INTAKE_LOG', ?, NOW())`,
-            [
-              dose.user_id,
-              `Missed ${dose.medication_name} (${dose.dosage}) scheduled for ${dose.time_str}`,
-              insertResult.insertId
-            ]
-          );
-
-          processedCount++;
-          console.log(`[DoseBuddy Cron] Marked missed: ${dose.medication_name} for user ${dose.user_id} at ${dose.time_str}`);
-          
-        } catch (error) {
-          console.error(`[DoseBuddy Cron] Failed to process dose for user ${dose.user_id}:`, error);
-        }
-      }
-      
-      console.log(`[DoseBuddy Cron] Processed ${processedCount} missed doses`);
-      
+      await this.processDueReminders(env, now);
+      await this.processMissedDoses(env, now);
     } catch (error) {
-      console.error("[DoseBuddy Cron] Scheduled function error:", error);
+      console.error("[DoseBuddy Cron] Scheduled function error:", error instanceof Error ? error.message : "unknown");
+    }
+  },
+
+  async processDueReminders(env: Env, now: Date): Promise<void> {
+    const [dueRows] = await query<any[]>(env,
+      `SELECT m.id AS medication_id,m.user_id,m.name AS medication_name,m.dosage,m.start_date,m.end_date,
+              m.schedule_version,u.time_zone,TIME_FORMAT(mt.time_of_day,'%H:%i') AS time_str
+       FROM medications m JOIN medication_times mt ON mt.medication_id=m.id JOIN users u ON u.id=m.user_id
+       WHERE m.active=1 AND u.time_zone IS NOT NULL`);
+    for (const dose of dueRows) {
+      const zone = canonicalTimeZone(dose.time_zone);
+      if (!zone) continue;
+      const localNow = zonedParts(now, zone);
+      if (localNow.time !== dose.time_str) continue;
+      const occurrence = occurrenceForInstant(now, zone, dose.time_str, String(dose.start_date).slice(0, 10), String(dose.end_date).slice(0, 10));
+      if (!occurrence || Math.abs(now.getTime() - occurrence.scheduledAtUtc.getTime()) >= 60_000) continue;
+      const db = await getDbConnection(env);
+      try {
+        const occurrenceId = await upsertOccurrence(db, {
+          medicationId: Number(dose.medication_id), userId: Number(dose.user_id), scheduleVersion: Number(dose.schedule_version),
+          localDate: occurrence.localDate, localTime: occurrence.localTime, scheduledAtUtc: mysqlDateTime(occurrence.scheduledAtUtc)
+        });
+        await this.sendDoseNotification(env, db, { ...dose, occurrence_id: occurrenceId, local_date: occurrence.localDate, event_type: "REMINDER" });
+      } finally {
+        await db.end();
+      }
+    }
+  },
+
+  async processMissedDoses(env: Env, now: Date): Promise<void> {
+    const cutoff = mysqlDateTime(new Date(now.getTime() - 60_000));
+    const [rows] = await query<any[]>(env,
+      `SELECT o.id AS occurrence_id,o.medication_id,o.user_id,o.schedule_version,
+              DATE_FORMAT(o.local_date,'%Y-%m-%d') AS local_date,TIME_FORMAT(o.local_time,'%H:%i') AS time_str,
+              o.scheduled_at_utc,m.name AS medication_name,m.dosage
+       FROM dose_occurrences o JOIN medications m ON m.id=o.medication_id
+       WHERE o.state='PENDING' AND o.scheduled_at_utc<=?`, [cutoff]);
+    for (const dose of rows) {
+      const db = await getDbConnection(env);
+      let transitioned = false;
+      try {
+        transitioned = await transact(db, async () => {
+          if (!await markOccurrenceMissed(db, Number(dose.occurrence_id))) return false;
+          const [log] = await query<{ insertId: number }>(db,
+            `INSERT INTO intake_logs (occurrence_id,marker_user_id,medication_id,date,time,status,scheduled_time,missed_time,created_at,updated_at)
+             VALUES (?,?,?,?,?,'MISSED',?,NOW(),NOW(),NOW())
+             ON DUPLICATE KEY UPDATE status=IF(status='TAKEN','TAKEN','MISSED'),missed_time=IF(status='TAKEN',missed_time,NOW()),id=LAST_INSERT_ID(id)`,
+            [dose.occurrence_id, dose.user_id, dose.medication_id, dose.local_date, dose.time_str, dose.scheduled_at_utc]);
+          await query(db, "INSERT INTO activities (user_id,type,message,related_entity_type,related_entity_id,created_at) VALUES (?,'DOSE_MISSED',?,'INTAKE_LOG',?,NOW())",
+            [dose.user_id, `Missed ${dose.medication_name} (${dose.dosage}) scheduled for ${dose.time_str}`, log.insertId]);
+          return true;
+        });
+        if (transitioned) await this.sendDoseNotification(env, db, { ...dose, event_type: "MISSED" });
+      } catch (error) {
+        console.error(`[DoseBuddy Cron] Failed missed transition for occurrence ${dose.occurrence_id}:`, error instanceof Error ? error.message : "unknown");
+      } finally {
+        await db.end();
+      }
+    }
+
+    const [retryRows] = await query<any[]>(env,
+      `SELECT DISTINCT o.id AS occurrence_id,o.medication_id,o.user_id,o.schedule_version,
+              DATE_FORMAT(o.local_date,'%Y-%m-%d') AS local_date,TIME_FORMAT(o.local_time,'%H:%i') AS time_str,
+              o.scheduled_at_utc,m.name AS medication_name,m.dosage,a.event_type
+       FROM push_delivery_attempts a JOIN dose_occurrences o ON o.id=a.occurrence_id JOIN medications m ON m.id=o.medication_id
+       WHERE a.outcome='RETRY' AND a.next_attempt_at<=NOW()`);
+    for (const dose of retryRows) {
+      const db = await getDbConnection(env);
+      try { await this.sendDoseNotification(env, db, dose); } finally { await db.end(); }
+    }
+  },
+
+  async sendDoseNotification(env: Env, db: any, dose: any): Promise<void> {
+    const event: DeliveryOccurrence = {
+      occurrenceId: Number(dose.occurrence_id), medicationId: Number(dose.medication_id), userId: Number(dose.user_id),
+      scheduleVersion: Number(dose.schedule_version), localDate: String(dose.local_date), localTime: String(dose.time_str).slice(0, 5),
+      eventType: String(dose.event_type).toUpperCase() === "MISSED" ? "MISSED" : "REMINDER"
+    };
+    const eventId = notificationEventId(event);
+    const [subscriptions] = await query<any[]>(db, "SELECT * FROM push_subscriptions WHERE user_id=? AND active=1", [event.userId]);
+    for (const sub of subscriptions) {
+      const [insert] = await query<any>(db,
+        `INSERT IGNORE INTO push_delivery_attempts
+          (event_id,occurrence_id,medication_id,schedule_version,user_id,subscription_id,event_type,scheduled_at,attempted_at,outcome,retry_count)
+         VALUES (?,?,?,?,?,?,?,?,NOW(),'CLAIMED',0)`,
+        [eventId, event.occurrenceId, event.medicationId, event.scheduleVersion, event.userId, sub.id, event.eventType, dose.scheduled_at_utc]);
+      let claimed = Number(insert.affectedRows) === 1;
+      if (!claimed) {
+        const [retryClaim] = await query<any>(db,
+          "UPDATE push_delivery_attempts SET outcome='CLAIMED',attempted_at=NOW() WHERE event_id=? AND subscription_id=? AND outcome='RETRY' AND next_attempt_at<=NOW()",
+          [eventId, sub.id]);
+        claimed = Number(retryClaim.affectedRows) === 1;
+      }
+      if (!claimed) continue;
+      if (!await occurrenceIsCurrent(db, event)) {
+        await query(db, "UPDATE push_delivery_attempts SET outcome='OBSOLETE',next_attempt_at=NULL WHERE event_id=? AND subscription_id=?", [eventId, sub.id]);
+        continue;
+      }
+      const payload = event.eventType === "REMINDER" ? {
+        title: "DoseBuddy - Medication Reminder", body: `Time to take ${dose.medication_name} (${dose.dosage})`,
+        icon: "/favicon.ico", badge: "/favicon.ico", tag: `reminder-${eventId}`,
+        data: { type: "dose-reminder", doseId: eventId, userId: event.userId, medicationId: event.medicationId, url: "/" },
+        timestamp: Date.now(), requireInteraction: true
+      } : {
+        title: "DoseBuddy - Missed Dose", body: `You missed ${dose.medication_name} (${dose.dosage}) scheduled for ${event.localTime}`,
+        icon: "/favicon.ico", badge: "/favicon.ico", tag: `missed-${eventId}`,
+        data: { type: "missed-dose", doseId: eventId, userId: event.userId, medicationId: event.medicationId, url: "/" }
+      };
+      try {
+        const result = await sendWebPush(JSON.parse(sub.subscription_data) as PushSubscriptionData, payload, vapidConfig(env));
+        if (result.expired) {
+          await query(db, "UPDATE push_subscriptions SET active=0 WHERE id=?", [sub.id]);
+          await query(db, "UPDATE push_delivery_attempts SET outcome='EXPIRED',provider_status=?,next_attempt_at=NULL WHERE event_id=? AND subscription_id=?", [result.status, eventId, sub.id]);
+        } else if (result.ok) {
+          await query(db, "UPDATE push_delivery_attempts SET outcome='SENT',provider_status=?,next_attempt_at=NULL WHERE event_id=? AND subscription_id=?", [result.status, eventId, sub.id]);
+        } else if (result.retryable) {
+          await query(db, "UPDATE push_delivery_attempts SET outcome='RETRY',provider_status=?,retry_count=retry_count+1,next_attempt_at=DATE_ADD(NOW(),INTERVAL 5 MINUTE) WHERE event_id=? AND subscription_id=?", [result.status, eventId, sub.id]);
+        } else {
+          await query(db, "UPDATE push_delivery_attempts SET outcome='FAILED',provider_status=?,next_attempt_at=NULL WHERE event_id=? AND subscription_id=?", [result.status, eventId, sub.id]);
+        }
+      } catch (error) {
+        await query(db, "UPDATE push_delivery_attempts SET outcome='RETRY',error_category='transport',retry_count=retry_count+1,next_attempt_at=DATE_ADD(NOW(),INTERVAL 5 MINUTE) WHERE event_id=? AND subscription_id=?", [eventId, sub.id]);
+        console.error(`[Web Push] Delivery failed for event ${eventId}`);
+      }
     }
   }
 };
