@@ -9,9 +9,14 @@ class RouteDbAdapter {
   calls: Array<[string, unknown[]]> = [];
   actor = patient;
   medication = { id: 7, user_id: 1, name: "Current med", dosage: "5mg", instructions: null, start_date: "2026-01-01", end_date: "2026-12-31", active: 1, schedule_version: 3 };
+  failMedicationInsert?: Error;
+  medicationInsertFailures = 0;
+  commits = 0;
+  rollbacks = 0;
 
   async query(statement: string, values: unknown[] = []): Promise<any> {
     this.calls.push([statement, values]);
+    if (statement.startsWith("INSERT INTO medications") && this.failMedicationInsert && this.medicationInsertFailures++ === 0) throw this.failMedicationInsert;
     if (statement.includes("FROM users WHERE email=?")) {
       const user = String(values[0]) === caregiver.email ? caregiver : patient;
       return [[user], undefined];
@@ -31,8 +36,8 @@ class RouteDbAdapter {
     return [{ affectedRows: 1, insertId: 12 }, undefined];
   }
   async beginTransaction() {}
-  async commit() {}
-  async rollback() {}
+  async commit() { this.commits++; }
+  async rollback() { this.rollbacks++; }
   async end() {}
 }
 
@@ -120,4 +125,64 @@ test("protected routes reject missing authorization before database writes", asy
   const response = await worker.fetch(new Request("https://dosebuddy.test/api/user/time-zone", { method: "PUT", body: JSON.stringify({ timeZone: "UTC" }) }), env(db));
   assert.equal(response.status, 401);
   assert.equal(db.calls.length, 0);
+});
+
+test("manual medication save accepts the browser payload and commits its schedule", async () => {
+  const db = new RouteDbAdapter();
+  const { accessToken } = await login(db);
+  const response = await worker.fetch(authorized("/api/medications/add", accessToken, "POST", {
+    userId: 999, name: "test", dosage: "1231", instructions: "", startDate: "2026-10-12", endDate: "2026-10-12", times: ["19:07"]
+  }), env(db));
+  assert.equal(response.status, 200);
+  const medicationInsert = db.calls.find(([sql]) => sql.startsWith("INSERT INTO medications"));
+  assert.deepEqual(medicationInsert?.[1], [patient.id, "test", "1231", "", "2026-10-12", "2026-10-12"]);
+  assert.deepEqual(db.calls.find(([sql]) => sql.startsWith("INSERT INTO medication_times"))?.[1], [8, "19:07"]);
+  assert.equal(db.commits, 1);
+});
+
+test("prescription medication save accepts default and multi-slot schedules for the authenticated actor", async () => {
+  const db = new RouteDbAdapter();
+  const { accessToken } = await login(db);
+  const response = await worker.fetch(authorized("/api/medications/add", accessToken, "POST", {
+    userId: 999, name: "Example (generic)", dosage: "10mg", instructions: "with food", startDate: "2026-10-12", endDate: "2026-11-11", times: ["08:00", "13:00", "18:00"]
+  }), env(db));
+  assert.equal(response.status, 200);
+  assert.deepEqual(db.calls.find(([sql]) => sql.startsWith("INSERT INTO medications"))?.[1], [patient.id, "Example (generic)", "10mg", "with food", "2026-10-12", "2026-11-11"]);
+  assert.deepEqual(db.calls.filter(([sql]) => sql.startsWith("INSERT INTO medication_times")).map(([, values]) => values), [[8, "08:00"], [8, "13:00"], [8, "18:00"]]);
+});
+
+test("medication create rejects malformed schedules before database writes", async () => {
+  for (const payload of [
+    { name: "test", dosage: "1", startDate: "2026-02-30", endDate: "2026-03-01", times: ["08:00"] },
+    { name: "test", dosage: "1", startDate: "2026-03-02", endDate: "2026-03-01", times: ["08:00"] },
+    { name: "test", dosage: "1", startDate: "2026-03-01", endDate: "2026-03-01", times: [] },
+    { name: "test", dosage: "1", startDate: "2026-03-01", endDate: "2026-03-01", times: ["08:00", "08:00"] },
+    { name: "test", dosage: "1", startDate: "2026-03-01", endDate: "2026-03-01", times: ["25:00"] }
+  ]) {
+    const db = new RouteDbAdapter();
+    const { accessToken } = await login(db);
+    const callsBeforeAdd = db.calls.length;
+    const response = await worker.fetch(authorized("/api/medications/add", accessToken, "POST", payload), env(db));
+    assert.equal(response.status, 400);
+    assert.equal(db.calls.slice(callsBeforeAdd).some(([sql]) => !sql.includes("FROM users WHERE id=?")), false);
+  }
+});
+
+test("medication create retries with the legacy schema after notification-column failure", async () => {
+  const db = new RouteDbAdapter();
+  db.failMedicationInsert = Object.assign(new Error("Unknown column 'active' in 'field list'"), { code: "ER_BAD_FIELD_ERROR" });
+  const { accessToken } = await login(db);
+  const response = await worker.fetch(authorized("/api/medications/add", accessToken, "POST", {
+    name: "test", dosage: "1", startDate: "2026-03-01", endDate: "2026-03-01", times: ["08:00"]
+  }), env(db));
+  assert.equal(response.status, 200);
+  assert.deepEqual(
+    db.calls.filter(([sql]) => sql.startsWith("INSERT INTO medications")).map(([sql, values]) => [sql, values]),
+    [
+      ["INSERT INTO medications (user_id,name,dosage,instructions,start_date,end_date,active,schedule_version) VALUES (?,?,?,?,?,?,1,1)", [patient.id, "test", "1", null, "2026-03-01", "2026-03-01"]],
+      ["INSERT INTO medications (user_id,name,dosage,instructions,start_date,end_date) VALUES (?,?,?,?,?,?)", [patient.id, "test", "1", null, "2026-03-01", "2026-03-01"]]
+    ]
+  );
+  assert.equal(db.rollbacks, 1);
+  assert.equal(db.commits, 1);
 });
