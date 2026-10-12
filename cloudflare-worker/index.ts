@@ -1,9 +1,9 @@
 import { createConnection } from "mysql2/promise";
 import bcrypt from "bcryptjs";
-import { addLocalDays, canonicalTimeZone, dueOccurrencesAtInstant, resolveLocalOccurrence, zonedParts } from "./scheduling";
-import { markOccurrenceMissed, markOccurrenceTaken, transact, upsertOccurrence } from "./dose-occurrences";
-import { notificationEventId, occurrenceIsCurrent, type DeliveryOccurrence } from "./notification-delivery";
-import { sendWebPush, type PushSubscriptionData } from "./web-push";
+import { addLocalDays, canonicalTimeZone, dueOccurrencesAtInstant, resolveLocalOccurrence, zonedParts } from "./scheduling.ts";
+import { markOccurrenceMissed, markOccurrenceTaken, transact, upsertOccurrence } from "./dose-occurrences.ts";
+import { notificationEventId, occurrenceIsCurrent, type DeliveryOccurrence } from "./notification-delivery.ts";
+import { sendWebPush, type PushSubscriptionData } from "./web-push.ts";
 
 export interface Env {
   HYPERDRIVE: Hyperdrive;
@@ -2946,35 +2946,52 @@ const worker = {
         claimed = Number(retryClaim.affectedRows) === 1;
       }
       if (!claimed) continue;
-      if (!await occurrenceIsCurrent(db, event)) {
-        await query(db, "UPDATE push_delivery_attempts SET outcome='OBSOLETE',next_attempt_at=NULL WHERE event_id=? AND subscription_id=?", [eventId, sub.id]);
-        continue;
-      }
-      const payload = event.eventType === "REMINDER" ? {
-        title: "DoseBuddy - Medication Reminder", body: `Time to take ${dose.medication_name} (${dose.dosage})`,
-        icon: "/favicon.ico", badge: "/favicon.ico", tag: `reminder-${eventId}`,
-        data: { type: "dose-reminder", doseId: eventId, userId: event.userId, medicationId: event.medicationId, url: "/" },
-        timestamp: Date.now(), requireInteraction: true
-      } : {
-        title: "DoseBuddy - Missed Dose", body: `You missed ${dose.medication_name} (${dose.dosage}) scheduled for ${event.localTime}`,
-        icon: "/favicon.ico", badge: "/favicon.ico", tag: `missed-${eventId}`,
-        data: { type: "missed-dose", doseId: eventId, userId: event.userId, medicationId: event.medicationId, url: "/" }
-      };
+      await db.beginTransaction();
       try {
-        const result = await sendWebPush(JSON.parse(sub.subscription_data) as PushSubscriptionData, payload, vapidConfig(env));
-        if (result.expired) {
-          await query(db, "UPDATE push_subscriptions SET active=0 WHERE id=?", [sub.id]);
-          await query(db, "UPDATE push_delivery_attempts SET outcome='EXPIRED',provider_status=?,next_attempt_at=NULL WHERE event_id=? AND subscription_id=?", [result.status, eventId, sub.id]);
-        } else if (result.ok) {
-          await query(db, "UPDATE push_delivery_attempts SET outcome='SENT',provider_status=?,next_attempt_at=NULL WHERE event_id=? AND subscription_id=?", [result.status, eventId, sub.id]);
-        } else if (result.retryable) {
-          await query(db, "UPDATE push_delivery_attempts SET outcome='RETRY',provider_status=?,retry_count=retry_count+1,next_attempt_at=DATE_ADD(NOW(),INTERVAL 5 MINUTE) WHERE event_id=? AND subscription_id=?", [result.status, eventId, sub.id]);
-        } else {
-          await query(db, "UPDATE push_delivery_attempts SET outcome='FAILED',provider_status=?,next_attempt_at=NULL WHERE event_id=? AND subscription_id=?", [result.status, eventId, sub.id]);
+        // Medication mutations lock the medication row before invalidating attempts. Taking
+        // the same lock here makes final dispatch and edit/delete mutually exclusive.
+        if (!await occurrenceIsCurrent(db, event, true)) {
+          await query(db, "UPDATE push_delivery_attempts SET outcome='OBSOLETE',next_attempt_at=NULL WHERE event_id=? AND subscription_id=? AND outcome='CLAIMED'", [eventId, sub.id]);
+          await db.commit();
+          continue;
         }
+        const [attempts] = await query<any[]>(db,
+          "SELECT id FROM push_delivery_attempts WHERE event_id=? AND subscription_id=? AND outcome='CLAIMED' FOR UPDATE",
+          [eventId, sub.id]);
+        if (attempts.length !== 1) {
+          await db.commit();
+          continue;
+        }
+        const payload = event.eventType === "REMINDER" ? {
+          title: "DoseBuddy - Medication Reminder", body: `Time to take ${dose.medication_name} (${dose.dosage})`,
+          icon: "/favicon.ico", badge: "/favicon.ico", tag: `reminder-${eventId}`,
+          data: { type: "dose-reminder", doseId: eventId, userId: event.userId, medicationId: event.medicationId, url: "/" },
+          timestamp: Date.now(), requireInteraction: true
+        } : {
+          title: "DoseBuddy - Missed Dose", body: `You missed ${dose.medication_name} (${dose.dosage}) scheduled for ${event.localTime}`,
+          icon: "/favicon.ico", badge: "/favicon.ico", tag: `missed-${eventId}`,
+          data: { type: "missed-dose", doseId: eventId, userId: event.userId, medicationId: event.medicationId, url: "/" }
+        };
+        try {
+          const result = await sendWebPush(JSON.parse(sub.subscription_data) as PushSubscriptionData, payload, vapidConfig(env));
+          if (result.expired) {
+            await query(db, "UPDATE push_subscriptions SET active=0 WHERE id=?", [sub.id]);
+            await query(db, "UPDATE push_delivery_attempts SET outcome='EXPIRED',provider_status=?,next_attempt_at=NULL WHERE event_id=? AND subscription_id=? AND outcome='CLAIMED'", [result.status, eventId, sub.id]);
+          } else if (result.ok) {
+            await query(db, "UPDATE push_delivery_attempts SET outcome='SENT',provider_status=?,next_attempt_at=NULL WHERE event_id=? AND subscription_id=? AND outcome='CLAIMED'", [result.status, eventId, sub.id]);
+          } else if (result.retryable) {
+            await query(db, "UPDATE push_delivery_attempts SET outcome='RETRY',provider_status=?,retry_count=retry_count+1,next_attempt_at=DATE_ADD(NOW(),INTERVAL 5 MINUTE) WHERE event_id=? AND subscription_id=? AND outcome='CLAIMED'", [result.status, eventId, sub.id]);
+          } else {
+            await query(db, "UPDATE push_delivery_attempts SET outcome='FAILED',provider_status=?,next_attempt_at=NULL WHERE event_id=? AND subscription_id=? AND outcome='CLAIMED'", [result.status, eventId, sub.id]);
+          }
+        } catch (error) {
+          await query(db, "UPDATE push_delivery_attempts SET outcome='RETRY',error_category='transport',retry_count=retry_count+1,next_attempt_at=DATE_ADD(NOW(),INTERVAL 5 MINUTE) WHERE event_id=? AND subscription_id=? AND outcome='CLAIMED'", [eventId, sub.id]);
+          console.error(`[Web Push] Delivery failed for event ${eventId}`);
+        }
+        await db.commit();
       } catch (error) {
-        await query(db, "UPDATE push_delivery_attempts SET outcome='RETRY',error_category='transport',retry_count=retry_count+1,next_attempt_at=DATE_ADD(NOW(),INTERVAL 5 MINUTE) WHERE event_id=? AND subscription_id=?", [eventId, sub.id]);
-        console.error(`[Web Push] Delivery failed for event ${eventId}`);
+        await db.rollback();
+        throw error;
       }
     }
   }
