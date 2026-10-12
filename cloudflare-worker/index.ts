@@ -170,6 +170,41 @@ async function requestBody(request: Request): Promise<{ body: Json; error?: stri
   }
 }
 
+function medicationCreatePayload(body: Json): { value?: { name: string; dosage: string; instructions: string | null; startDate: string; endDate: string; times: string[] }; error?: string } {
+  const calendarDate = (value: unknown) => {
+    if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+    const [year, month, day] = value.split("-").map(Number);
+    const date = new Date(Date.UTC(year, month - 1, day));
+    return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+  };
+  if (typeof body.name !== "string" || !body.name.trim()) return { error: "Medication name is required" };
+  if (typeof body.dosage !== "string" || !body.dosage.trim()) return { error: "Medication dosage is required" };
+  if (!calendarDate(body.startDate) || !calendarDate(body.endDate)) return { error: "Start and end dates must use YYYY-MM-DD" };
+  if (body.endDate < body.startDate) return { error: "End date cannot be before start date" };
+  if (!Array.isArray(body.times) || body.times.length === 0) return { error: "At least one medication time is required" };
+  const times: string[] = [];
+  for (const value of body.times) {
+    if (typeof value !== "string") return { error: "Medication times must use HH:mm" };
+    const match = /^(\d{2}):(\d{2})(?::00)?$/.exec(value);
+    if (!match || Number(match[1]) > 23 || Number(match[2]) > 59) return { error: "Medication times must use HH:mm" };
+    times.push(`${match[1]}:${match[2]}`);
+  }
+  if (new Set(times).size !== times.length) return { error: "Duplicate medication times are not allowed" };
+  return {
+    value: {
+      name: body.name.trim(), dosage: body.dosage.trim(),
+      instructions: typeof body.instructions === "string" ? body.instructions : null,
+      startDate: body.startDate, endDate: body.endDate, times
+    }
+  };
+}
+
+function medicationSchemaNotReady(error: unknown) {
+  const e = error as { code?: unknown; message?: unknown; sqlMessage?: unknown };
+  const message = [e.message, e.sqlMessage].filter(value => typeof value === "string").join(" ");
+  return e.code === "ER_BAD_FIELD_ERROR" && /\b(active|schedule_version)\b/i.test(message);
+}
+
 function logSignupFailure(phase: string, error: unknown) {
   const e = error as {
     name?: unknown;
@@ -1247,33 +1282,67 @@ async function processMedicineInfoIntent(env: Env, message: string, conversation
 
   const medicineName = extractMedicineName(message, userMedications);
   
-  if (medicineName === null && userMedications.length > 0) {
-    // Ask user to select from their medications
-    response.messageType = "QUESTION";
-    response.message = "I can help you learn about medicines. Which medicine would you like to know about?";
-    response.questionType = "MEDICINE_SELECTION";
-    
-    const questions = userMedications.map(med => ({
-      id: med.id?.toString() || "unknown",
-      text: `${med.name} (${med.dosage || "N/A"})`,
-      value: med.name
-    }));
-    
-    questions.push({
-      id: "custom",
-      text: "Other medicine not in my list",
-      value: "custom"
-    });
-    
-    response.questions = questions;
-    response.conversationState = conversationState;
-    return response;
+  // Check if the original message itself is a general medicine name
+  const lowerMessage = message.toLowerCase().trim();
+  const words = lowerMessage.split(/\s+/);
+  const knownMedicines = ['zinc', 'aspirin', 'ibuprofen', 'acetaminophen', 'paracetamol', 'vitamins', 'iron', 'calcium', 'vitamin'];
+  
+  let finalMedicineName = medicineName;
+  
+  // If no medicine extracted but the message looks like a general medicine query
+  if (!finalMedicineName) {
+    // Check if it's a single word that's a known medicine/supplement
+    if (words.length === 1 && knownMedicines.some(med => lowerMessage.includes(med))) {
+      finalMedicineName = lowerMessage;
+    }
+    // Check for patterns like "vitamin D", "vitamin C" etc
+    else if (words.length === 2 && words[0] === 'vitamin') {
+      finalMedicineName = message.trim();
+    }
+    // Check for simple "what is X" patterns
+    else if (words.length >= 3 && (lowerMessage.startsWith('what is ') || lowerMessage.startsWith('what are '))) {
+      const potentialMedicine = words.slice(2).join(' ');
+      finalMedicineName = potentialMedicine;
+    }
   }
   
-  if (medicineName === null) {
-    // Ask for medicine name
+  // Only show personal medication selection if:
+  // 1. We couldn't identify any medicine name AND
+  // 2. The user has medications AND  
+  // 3. The query seems like it's asking about personal medications
+  if (!finalMedicineName && userMedications.length > 0) {
+    // Check if query is asking about personal medications
+    const personalIndicators = ['my medicine', 'my medication', 'my pills', 'medicines i take', 'medications i take'];
+    const isPersonalQuery = personalIndicators.some(indicator => lowerMessage.includes(indicator));
+    
+    if (isPersonalQuery) {
+      // Ask user to select from their medications
+      response.messageType = "QUESTION";
+      response.message = "I can help you learn about medicines. Which medicine would you like to know about?";
+      response.questionType = "MEDICINE_SELECTION";
+      
+      const questions = userMedications.map(med => ({
+        id: med.id?.toString() || "unknown",
+        text: `${med.name} (${med.dosage || "N/A"})`,
+        value: med.name
+      }));
+      
+      questions.push({
+        id: "custom",
+        text: "Other medicine not in my list",
+        value: "custom"
+      });
+      
+      response.questions = questions;
+      response.conversationState = conversationState;
+      return response;
+    }
+  }
+  
+  if (!finalMedicineName) {
+    // Ask for medicine name - but be more specific about what we're asking
     response.messageType = "QUESTION";
-    response.message = "What medicine would you like to learn about?";
+    response.message = "What specific medicine, supplement, or health topic would you like to learn about?";
     response.questionType = "TEXT_INPUT";
     response.placeholder = "Enter medicine name...";
     response.conversationState = conversationState;
@@ -1281,13 +1350,13 @@ async function processMedicineInfoIntent(env: Env, message: string, conversation
   }
   
   // Provide medicine information using existing callAi function
-  const prompt = `Provide concise medication information, uses, common side effects, and safety guidance for: ${medicineName}`;
+  const prompt = `Provide concise medication information, uses, common side effects, and safety guidance for: ${finalMedicineName}`;
   const aiResponse = await callAi(env, prompt);
   const medicineInfo = await aiResponse.text();
   
   response.messageType = "RESPONSE";
   response.message = medicineInfo;
-  response.medicineName = medicineName;
+  response.medicineName = finalMedicineName;
   conversationState.completed = true;
   response.conversationState = conversationState;
   
@@ -2125,7 +2194,11 @@ const worker = {
 
       // ── Medications ─────────────────────────────────────────────────────
       if (path === "/api/medications/add" && request.method === "POST") {
-        const { body: b } = await requestBody(request);
+        const { body, error: bodyError } = await requestBody(request);
+        if (bodyError) return json({ message: bodyError }, 400);
+        const parsed = medicationCreatePayload(body);
+        if (parsed.error) return json({ message: parsed.error }, 400);
+        const b = parsed.value!;
         let db: any = null;
         try {
           db = await getDbConnection(env);
@@ -2133,13 +2206,11 @@ const worker = {
           const [r] = await query<{ insertId: number }>(
             db,
             "INSERT INTO medications (user_id,name,dosage,instructions,start_date,end_date,active,schedule_version) VALUES (?,?,?,?,?,?,1,1)",
-            [actor.id, b.name, b.dosage, b.instructions ?? null, b.startDate, b.endDate]
+            [actor.id, b.name, b.dosage, b.instructions, b.startDate, b.endDate]
           );
 
-          const times: string[] = [];
-          for (const time of Array.isArray(b.times) ? b.times : []) {
+          for (const time of b.times) {
             await query(db, "INSERT INTO medication_times (medication_id,time_of_day) VALUES (?,?)", [r.insertId, time]);
-            times.push(time);
           }
 
           await query(
@@ -2153,6 +2224,10 @@ const worker = {
           return plain("Medication added");
         } catch (error) {
           if (db) await db.rollback();
+          if (medicationSchemaNotReady(error)) {
+            console.error("[Medication Add] Medication schema is missing notification-era columns");
+            return json({ message: "Medication schema is not ready. Please contact support." }, 503);
+          }
           throw error;
         } finally {
           if (db) {
