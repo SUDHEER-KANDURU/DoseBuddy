@@ -1,4 +1,6 @@
-﻿const API_BASE_URL = (window.APP_CONFIG && window.APP_CONFIG.apiBaseUrl)
+﻿import { escapeHtml, renderMarkdown } from "./markdown.js";
+
+const API_BASE_URL = (window.APP_CONFIG && window.APP_CONFIG.apiBaseUrl)
     ? window.APP_CONFIG.apiBaseUrl
     : "https://dosebuddy.sudheerkanduru-5588.workers.dev";
 const API_BASE = (window.APP_CONFIG && window.APP_CONFIG.apiBase)
@@ -5290,6 +5292,13 @@ function addChatMessage(sender, content, messageType = "normal") {
     const messageDiv = document.createElement("div");
     messageDiv.className = `ai-chat-message ai-chat-${sender} ${messageType !== "normal" ? `ai-message-${messageType}` : ""}`;
 
+    // Assistant (non-error) messages may contain Markdown and are rendered through the
+    // safe escape-then-format renderer. Error assistant messages and ALL user messages are
+    // escaped so raw/user text is never interpreted as HTML or Markdown.
+    const safeContent = (sender === "assistant" && messageType !== "error")
+        ? renderMarkdown(content)
+        : escapeHtml(content);
+
     if (sender === "assistant") {
         messageDiv.innerHTML = `
             <div class="ai-avatar">
@@ -5297,10 +5306,10 @@ function addChatMessage(sender, content, messageType = "normal") {
                     <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/>
                 </svg>
             </div>
-            <div class="ai-message-content">${content}</div>
+            <div class="ai-message-content">${safeContent}</div>
         `;
     } else {
-        messageDiv.innerHTML = `<div class="ai-message-content">${content}</div>`;
+        messageDiv.innerHTML = `<div class="ai-message-content">${safeContent}</div>`;
     }
 
     chatMessages.appendChild(messageDiv);
@@ -6139,122 +6148,9 @@ const MED_SECTIONS = [
     { key: "WHEN TO CONSULT A DOCTOR",icon: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z"/></svg>`, label: "When to Consult a Doctor"},
 ];
 
-function escapeHtml(str) {
-    if (!str) return "";
-    return String(str)
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;");
-}
-
-function renderMarkdown(text) {
-    if (!text) return "";
-
-    const lines = text.split("\n");
-    let html = "";
-    let i = 0;
-    let inList = false;
-    let inOrderedList = false;
-    let inTable = false;
-    let tableRows = [];
-
-    function flushList() {
-        if (inList) { html += "</ul>"; inList = false; }
-        if (inOrderedList) { html += "</ol>"; inOrderedList = false; }
-    }
-
-    function flushTable() {
-        if (!inTable) return;
-        inTable = false;
-        if (tableRows.length < 2) { tableRows = []; return; }
-        html += '<div class="ai-table-wrap"><table class="ai-table">';
-        tableRows.forEach((row, idx) => {
-            const tag = idx === 0 ? "th" : "td";
-            const cells = row.split("|").map(c => c.trim()).filter((c, ci, arr) => ci > 0 && ci < arr.length - 1);
-            if (idx === 1 && cells.every(c => /^[-: ]+$/.test(c))) return; // skip separator row
-            html += "<tr>" + cells.map(c => `<${tag}>${inlineFormat(c)}</${tag}>`).join("") + "</tr>";
-        });
-        html += "</table></div>";
-        tableRows = [];
-    }
-
-    function inlineFormat(str) {
-        return str
-            .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-            .replace(/\*(.+?)\*/g, "<em>$1</em>")
-            .replace(/`(.+?)`/g, "<code>$1</code>");
-    }
-
-    while (i < lines.length) {
-        const line = lines[i];
-        const trimmed = line.trim();
-
-        // Table row
-        if (trimmed.startsWith("|") && trimmed.endsWith("|")) {
-            flushList();
-            inTable = true;
-            tableRows.push(trimmed);
-            i++; continue;
-        } else if (inTable) {
-            flushTable();
-        }
-
-        // Headings
-        const hMatch = trimmed.match(/^(#{1,4})\s+(.+)/);
-        if (hMatch) {
-            flushList();
-            const level = Math.min(hMatch[1].length + 1, 4);
-            html += `<h${level} class="ai-h${level}">${inlineFormat(hMatch[2])}</h${level}>`;
-            i++; continue;
-        }
-
-        // Horizontal rule
-        if (/^[-*_]{3,}$/.test(trimmed)) {
-            flushList(); html += "<hr class='ai-hr'>"; i++; continue;
-        }
-
-        // Unordered list
-        const ulMatch = trimmed.match(/^[-*•]\s+(.+)/);
-        if (ulMatch) {
-            if (!inList) { flushList(); html += '<ul class="ai-ul">'; inList = true; }
-            html += `<li>${inlineFormat(ulMatch[1])}</li>`;
-            i++; continue;
-        }
-
-        // Ordered list
-        const olMatch = trimmed.match(/^\d+\.\s+(.+)/);
-        if (olMatch) {
-            if (!inOrderedList) { flushList(); html += '<ol class="ai-ol">'; inOrderedList = true; }
-            html += `<li>${inlineFormat(olMatch[1])}</li>`;
-            i++; continue;
-        }
-
-        // Empty line — close open blocks
-        if (!trimmed) {
-            flushList();
-            i++; continue;
-        }
-
-        // Bold-only line (acts as a section heading)
-        const boldLine = trimmed.match(/^\*\*(.+)\*\*:?$/);
-        if (boldLine) {
-            flushList();
-            html += `<p class="ai-bold-heading">${inlineFormat(trimmed)}</p>`;
-            i++; continue;
-        }
-
-        // Normal paragraph
-        flushList();
-        html += `<p class="ai-p">${inlineFormat(trimmed)}</p>`;
-        i++;
-    }
-
-    flushList();
-    flushTable();
-
-    return `<div class="ai-response-body">${html}</div>`;
-}
+// escapeHtml and renderMarkdown are imported from ./markdown.js (single source of truth,
+// also used by tests). renderMarkdown escapes input before formatting so no raw HTML
+// reaches the DOM.
 
 function formatMedicineResponse(text) {
     if (!text) return "";
