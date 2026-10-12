@@ -1,6 +1,6 @@
 import { createConnection } from "mysql2/promise";
 import bcrypt from "bcryptjs";
-import { addLocalDays, canonicalTimeZone, occurrenceForInstant, resolveLocalOccurrence, zonedParts } from "./scheduling";
+import { addLocalDays, canonicalTimeZone, dueOccurrencesAtInstant, resolveLocalOccurrence, zonedParts } from "./scheduling";
 import { markOccurrenceMissed, markOccurrenceTaken, transact, upsertOccurrence } from "./dose-occurrences";
 import { notificationEventId, occurrenceIsCurrent, type DeliveryOccurrence } from "./notification-delivery";
 import { sendWebPush, type PushSubscriptionData } from "./web-push";
@@ -15,6 +15,8 @@ export interface Env {
   VAPID_PUBLIC_KEY?: string;
   VAPID_PRIVATE_KEY?: string;
   VAPID_EMAIL?: string;
+  /** Test-only database adapter; Cloudflare bindings never provide this property. */
+  TEST_DB_FACTORY?: () => Promise<any>;
 }
 
 interface ScheduledEvent {
@@ -82,6 +84,7 @@ async function claims(env: Env, token: string) {
 }
 
 async function getDbConnection(env: Env) {
+  if (env.TEST_DB_FACTORY) return env.TEST_DB_FACTORY();
   return (await createConnection({
     host: env.HYPERDRIVE.host,
     user: env.HYPERDRIVE.user,
@@ -395,6 +398,7 @@ function vapidConfig(env: Env) {
 }
 
 const mysqlDateTime = (date: Date) => date.toISOString().slice(0, 23).replace("T", " ");
+const mysqlDate = (value: unknown) => value instanceof Date ? value.toISOString().slice(0, 10) : String(value).slice(0, 10);
 
 const PRESCRIPTION_PROMPT = `You are an expert Clinical Pharmacist and Medical Prescription Document Parser specializing in outpatient, inpatient, printed EHR summaries, and doctor prescriptions.
 
@@ -1839,7 +1843,7 @@ async function callAi(env: Env, prompt: string): Promise<Response> {
   return plain(`I received your message about "${trimmedPrompt.substring(0, 50)}${trimmedPrompt.length > 50 ? '...' : ''}", but our AI health assistant is temporarily unavailable. Please consult your physician or pharmacist for health-related guidance.`);
 }
 
-export default {
+const worker = {
   async fetch(request: Request, env: Env): Promise<Response> {
     const startTime = Date.now();
     const url = new URL(request.url);
@@ -2202,7 +2206,7 @@ export default {
           await query(db,
             "UPDATE medications SET name=?,dosage=?,instructions=?,start_date=?,end_date=?,active=?,schedule_version=schedule_version+1 WHERE id=?",
             [b.name ?? medication.name, b.dosage ?? medication.dosage, b.instructions ?? medication.instructions,
-             b.startDate ?? String(medication.start_date).slice(0, 10), b.endDate ?? String(medication.end_date).slice(0, 10),
+             b.startDate ?? mysqlDate(medication.start_date), b.endDate ?? mysqlDate(medication.end_date),
              b.active === false ? 0 : Number(medication.active ?? 1), del[1]]);
           if (times) {
             await query(db, "DELETE FROM medication_times WHERE medication_id=?", [del[1]]);
@@ -2850,20 +2854,25 @@ export default {
               m.schedule_version,u.time_zone,TIME_FORMAT(mt.time_of_day,'%H:%i') AS time_str
        FROM medications m JOIN medication_times mt ON mt.medication_id=m.id JOIN users u ON u.id=m.user_id
        WHERE m.active=1 AND u.time_zone IS NOT NULL`);
-    for (const dose of dueRows) {
-      const zone = canonicalTimeZone(dose.time_zone);
-      if (!zone) continue;
-      const localNow = zonedParts(now, zone);
-      if (localNow.time !== dose.time_str) continue;
-      const occurrence = occurrenceForInstant(now, zone, dose.time_str, String(dose.start_date).slice(0, 10), String(dose.end_date).slice(0, 10));
-      if (!occurrence || Math.abs(now.getTime() - occurrence.scheduledAtUtc.getTime()) >= 60_000) continue;
+    for (const dose of dueOccurrencesAtInstant(dueRows.map(dose => ({
+      ...dose,
+      start_date: mysqlDate(dose.start_date),
+      end_date: mysqlDate(dose.end_date)
+    })), now)) {
       const db = await getDbConnection(env);
       try {
         const occurrenceId = await upsertOccurrence(db, {
           medicationId: Number(dose.medication_id), userId: Number(dose.user_id), scheduleVersion: Number(dose.schedule_version),
-          localDate: occurrence.localDate, localTime: occurrence.localTime, scheduledAtUtc: mysqlDateTime(occurrence.scheduledAtUtc)
+          localDate: dose.localDate, localTime: dose.localTime, scheduledAtUtc: mysqlDateTime(dose.scheduledAtUtc)
         });
-        await this.sendDoseNotification(env, db, { ...dose, occurrence_id: occurrenceId, local_date: occurrence.localDate, event_type: "REMINDER" });
+        await this.sendDoseNotification(env, db, {
+          ...dose,
+          occurrence_id: occurrenceId,
+          local_date: dose.localDate,
+          time_str: dose.localTime,
+          scheduled_at_utc: mysqlDateTime(dose.scheduledAtUtc),
+          event_type: "REMINDER"
+        });
       } finally {
         await db.end();
       }
@@ -2877,7 +2886,9 @@ export default {
               DATE_FORMAT(o.local_date,'%Y-%m-%d') AS local_date,TIME_FORMAT(o.local_time,'%H:%i') AS time_str,
               o.scheduled_at_utc,m.name AS medication_name,m.dosage
        FROM dose_occurrences o JOIN medications m ON m.id=o.medication_id
-       WHERE o.state='PENDING' AND o.scheduled_at_utc<=?`, [cutoff]);
+       WHERE o.state='PENDING' AND o.scheduled_at_utc<=? AND m.active=1
+         AND o.schedule_version=m.schedule_version AND o.local_date BETWEEN m.start_date AND m.end_date
+         AND EXISTS (SELECT 1 FROM medication_times mt WHERE mt.medication_id=m.id AND TIME_FORMAT(mt.time_of_day,'%H:%i')=TIME_FORMAT(o.local_time,'%H:%i'))`, [cutoff]);
     for (const dose of rows) {
       const db = await getDbConnection(env);
       let transitioned = false;
@@ -2968,3 +2979,5 @@ export default {
     }
   }
 };
+
+export default worker;
