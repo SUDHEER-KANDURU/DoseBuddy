@@ -1312,7 +1312,7 @@ async function processMedicineInfoIntent(env: Env, message: string, conversation
   // 3. The query seems like it's asking about personal medications
   if (!finalMedicineName && userMedications.length > 0) {
     // Check if query is asking about personal medications
-    const personalIndicators = ['my medicine', 'my medication', 'my pills', 'medicines i take', 'medications i take'];
+    const personalIndicators = ['my medicine', 'my medication', 'my pills', 'medicines i take', 'medications i take', 'medicines am i taking', 'medications am i taking', 'am i taking'];
     const isPersonalQuery = personalIndicators.some(indicator => lowerMessage.includes(indicator));
     
     if (isPersonalQuery) {
@@ -1734,7 +1734,7 @@ async function processGeneralHealthIntent(env: Env, message: string, conversatio
   return response;
 }
 
-async function processUnifiedChat(env: Env, message: string, conversationId: string, conversationState: any, user: any, userMedications: any[]): Promise<any> {
+async function processUnifiedChat(env: Env, message: string, conversationId: string, conversationState: any, user: any, userMedications: any[], isOptionSelection: boolean = false): Promise<any> {
   // Initialize conversation state if not provided
   if (!conversationState || typeof conversationState !== "object") {
     conversationState = {};
@@ -1745,10 +1745,40 @@ async function processUnifiedChat(env: Env, message: string, conversationId: str
     return createUrgentWarningResponse(message, conversationId, conversationState);
   }
   
-  // Detect intent if not already determined
-  let currentIntent = conversationState.currentIntent;
-  if (!currentIntent) {
-    currentIntent = detectIntent(message, userMedications);
+  // Re-classify every fresh typed message so a stale currentIntent (from a
+  // prior turn or quick-action) never routes a new message to the wrong
+  // handler. We only keep the stored intent when the user is answering a
+  // question that is already in flight (an option selection, or a same-intent
+  // follow-up such as "Since yesterday" while a symptom question is open).
+  const previousIntent = conversationState.currentIntent;
+  const detected = detectIntent(message, userMedications);
+  // A follow-up continues the question in flight when it is an option
+  // selection, when it classifies as the same intent, or when it carries no
+  // recognizable new intent on its own (e.g. "Since yesterday" -> GENERAL).
+  // A bare GENERAL message must not hijack an active flow; only a concrete new
+  // intent (a symptom report, a medicine query, etc.) breaks out of it.
+  const midFlowContinuation = Boolean(conversationState.currentQuestion) &&
+    (isOptionSelection || detected === previousIntent || detected === "GENERAL");
+
+  let currentIntent: string;
+  if (midFlowContinuation) {
+    // Keep answering the question already in progress.
+    currentIntent = previousIntent;
+  } else {
+    currentIntent = detected;
+    // When switching the stored intent AWAY from a symptom flow to a
+    // non-symptom intent, clear symptom-flow state so the new topic starts
+    // clean and no stale symptom data leaks. Staying in or switching INTO
+    // SYMPTOM_CHECK preserves symptom context for follow-ups.
+    if (previousIntent === "SYMPTOM_CHECK" && currentIntent !== "SYMPTOM_CHECK") {
+      delete conversationState.currentQuestion;
+      delete conversationState.reportedSymptom;
+      delete conversationState.severity;
+      delete conversationState.duration;
+      delete conversationState.medicationTiming;
+      delete conversationState.completed;
+      delete conversationState.extractedFacts;
+    }
     conversationState.currentIntent = currentIntent;
   }
   
@@ -2077,6 +2107,7 @@ const worker = {
         const message = String(b.message ?? "").trim();
         const conversationId = String(b.conversationId ?? "");
         const conversationState = b.conversationState || {};
+        const isOptionSelection = b.isOptionSelection === true;
         
         if (!message) {
           return json({ success: false, error: "Message is required" }, 400);
@@ -2091,7 +2122,7 @@ const worker = {
             [actor.id, today, today]
           );
 
-          const chatResponse = await processUnifiedChat(env, message, conversationId, conversationState, actor, userMedications);
+          const chatResponse = await processUnifiedChat(env, message, conversationId, conversationState, actor, userMedications, isOptionSelection);
           
           // Log activity based on intent
           const intent = chatResponse.intent || "GENERAL";
@@ -2203,11 +2234,25 @@ const worker = {
         try {
           db = await getDbConnection(env);
           await db.beginTransaction();
-          const [r] = await query<{ insertId: number }>(
-            db,
-            "INSERT INTO medications (user_id,name,dosage,instructions,start_date,end_date,active,schedule_version) VALUES (?,?,?,?,?,?,1,1)",
-            [actor.id, b.name, b.dosage, b.instructions, b.startDate, b.endDate]
-          );
+          let r: { insertId: number };
+          let legacySchema = false;
+          try {
+            [r] = await query<{ insertId: number }>(
+              db,
+              "INSERT INTO medications (user_id,name,dosage,instructions,start_date,end_date,active,schedule_version) VALUES (?,?,?,?,?,?,1,1)",
+              [actor.id, b.name, b.dosage, b.instructions, b.startDate, b.endDate]
+            );
+          } catch (error) {
+            if (!medicationSchemaNotReady(error)) throw error;
+            await db.rollback();
+            await db.beginTransaction();
+            legacySchema = true;
+            [r] = await query<{ insertId: number }>(
+              db,
+              "INSERT INTO medications (user_id,name,dosage,instructions,start_date,end_date) VALUES (?,?,?,?,?,?)",
+              [actor.id, b.name, b.dosage, b.instructions, b.startDate, b.endDate]
+            );
+          }
 
           for (const time of b.times) {
             await query(db, "INSERT INTO medication_times (medication_id,time_of_day) VALUES (?,?)", [r.insertId, time]);
@@ -2220,7 +2265,7 @@ const worker = {
           );
           await db.commit();
 
-          console.log(`[Medication Add] Medication ${b.name} added successfully (server-side notifications enabled)`);
+          console.log(`[Medication Add] Medication ${b.name} added successfully${legacySchema ? " (legacy schema; notification scheduling unavailable)" : " (server-side notifications enabled)"}`);
           return plain("Medication added");
         } catch (error) {
           if (db) await db.rollback();
