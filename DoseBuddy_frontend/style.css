@@ -7861,7 +7861,10 @@ body.dark-mode .prx-modal-add-btn:hover:not(:disabled) {
 .ai-chat-container {
     display: flex;
     flex-direction: column;
-    height: 600px;
+    /* Size to content so the input sits right under short conversations, but cap growth
+       so long conversations scroll inside a bounded area. */
+    height: auto;
+    max-height: 600px;
     border: 1px solid var(--border-color);
     border-radius: var(--radius-lg);
     background: var(--bg-primary);
@@ -7870,7 +7873,10 @@ body.dark-mode .prx-modal-add-btn:hover:not(:disabled) {
 }
 
 .ai-chat-messages {
-    flex: 1;
+    /* Size to content (no forced flex:1 expansion that strands the input at the bottom),
+       and scroll only when the conversation exceeds the container's max-height. */
+    flex: 0 1 auto;
+    min-height: 0;
     overflow-y: auto;
     padding: var(--space-4);
     display: flex;
@@ -7975,6 +7981,53 @@ body.dark-mode .prx-modal-add-btn:hover:not(:disabled) {
     background: #451a03;
     border-color: #d97706;
     color: #fbbf24;
+}
+
+/* Thinking / typing indicator (three bouncing dots) */
+.ai-typing-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: var(--space-3) var(--space-4);
+    border-radius: var(--radius-lg);
+    border-bottom-left-radius: var(--radius-sm);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+}
+
+.ai-typing-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--text-secondary);
+    opacity: 0.5;
+    animation: ai-typing-bounce 1.2s infinite ease-in-out;
+}
+
+.ai-typing-dot:nth-child(2) {
+    animation-delay: 0.2s;
+}
+
+.ai-typing-dot:nth-child(3) {
+    animation-delay: 0.4s;
+}
+
+@keyframes ai-typing-bounce {
+    0%, 60%, 100% {
+        transform: translateY(0);
+        opacity: 0.4;
+    }
+    30% {
+        transform: translateY(-5px);
+        opacity: 1;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ai-typing-dot {
+        animation: none;
+        opacity: 0.7;
+    }
 }
 
 .ai-starter-prompts {
@@ -8166,7 +8219,8 @@ body.dark-mode .prx-modal-add-btn:hover:not(:disabled) {
 /* Mobile responsive adjustments */
 @media (max-width: 768px) {
     .ai-chat-container {
-        height: 500px;
+        height: auto;
+        max-height: 500px;
     }
     
     .ai-starter-prompts {

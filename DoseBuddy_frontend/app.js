@@ -5159,6 +5159,95 @@ const aiConversationState = {
     state: {}
 };
 
+// Original welcome screen markup for the chat messages container. Kept in sync with
+// the initial content in index.html so "New Chat" can restore the exact same view.
+// The markup is fully static and controlled here, so no user/AI content is injected.
+const AI_CHAT_WELCOME_HTML = `
+    <div class="ai-welcome-message">
+        <div class="ai-avatar">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/>
+            </svg>
+        </div>
+        <div class="ai-message-content">
+            <h3>Hello! I'm your AI Health Assistant</h3>
+            <p>I can help you with questions about medicines, symptoms, side effects, and your medication schedule. What would you like to know?</p>
+
+            <div class="ai-starter-prompts">
+                <button class="ai-starter-prompt" data-prompt="Tell me about one of my medicines">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/>
+                    </svg>
+                    Learn about a medicine
+                </button>
+                <button class="ai-starter-prompt" data-prompt="I'm experiencing some symptoms">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z"/>
+                    </svg>
+                    Discuss symptoms
+                </button>
+                <button class="ai-starter-prompt" data-prompt="I think I'm having a side effect">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126z"/>
+                    </svg>
+                    Ask about side effects
+                </button>
+                <button class="ai-starter-prompt" data-prompt="Show me today's medicine schedule">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/>
+                    </svg>
+                    Review my schedule
+                </button>
+            </div>
+        </div>
+    </div>
+`;
+
+// Attach click handlers to the starter prompt buttons currently in the DOM. Called on
+// initial setup and again whenever the welcome screen is restored (e.g. "New Chat").
+function wireStarterPrompts() {
+    const chatInput = document.getElementById("ai-chat-input");
+    if (!chatInput) return;
+
+    document.querySelectorAll(".ai-starter-prompt").forEach(btn => {
+        btn.addEventListener("click", () => {
+            const prompt = btn.dataset.prompt;
+            if (prompt) {
+                chatInput.value = prompt;
+                chatInput.focus();
+                sendChatMessage();
+            }
+        });
+    });
+}
+
+// Reset the chat back to a fresh conversation and restore the welcome screen.
+function startNewConversation() {
+    const chatMessages = document.getElementById("ai-chat-messages");
+    const chatInput = document.getElementById("ai-chat-input");
+
+    // Reset conversation state.
+    aiConversationState.conversationId = null;
+    aiConversationState.state = {};
+    aiConversationState.isProcessing = false;
+
+    // Remove any lingering thinking indicator and restore the welcome screen.
+    if (typeof hideChatThinking === "function") {
+        hideChatThinking();
+    }
+    if (chatMessages) {
+        chatMessages.innerHTML = AI_CHAT_WELCOME_HTML;
+        wireStarterPrompts();
+    }
+
+    // Clear the input and re-enable the send button logic.
+    if (chatInput) {
+        chatInput.value = "";
+        chatInput.style.height = "auto";
+    }
+    updateSendButton();
+}
+
 function setupUnifiedAiChat() {
     const chatInput = document.getElementById("ai-chat-input");
     const chatSend = document.getElementById("ai-chat-send");
@@ -5192,16 +5281,13 @@ function setupUnifiedAiChat() {
     chatSend.addEventListener("click", sendChatMessage);
 
     // Starter prompt buttons
-    document.querySelectorAll(".ai-starter-prompt").forEach(btn => {
-        btn.addEventListener("click", () => {
-            const prompt = btn.dataset.prompt;
-            if (prompt) {
-                chatInput.value = prompt;
-                chatInput.focus();
-                sendChatMessage();
-            }
-        });
-    });
+    wireStarterPrompts();
+
+    // "New Chat" button: start a fresh conversation and restore the welcome screen.
+    const newConversationBtn = document.getElementById("new-conversation-btn");
+    if (newConversationBtn) {
+        newConversationBtn.addEventListener("click", startNewConversation);
+    }
 }
 
 async function sendChatMessage() {
@@ -5218,6 +5304,9 @@ async function sendChatMessage() {
     addChatMessage("user", message);
     chatInput.value = "";
     chatInput.style.height = "auto";
+
+    // Show a thinking indicator while we wait for the assistant's reply
+    showChatThinking();
 
     try {
         // Generate conversation ID if new conversation
@@ -5270,6 +5359,7 @@ async function sendChatMessage() {
         
         addChatMessage("assistant", errorMessage, "error");
     } finally {
+        hideChatThinking();
         aiConversationState.isProcessing = false;
         updateSendButton();
     }
@@ -5370,6 +5460,9 @@ async function sendOptionSelection(value) {
     aiConversationState.isProcessing = true;
     updateSendButton();
 
+    // Show a thinking indicator while we wait for the assistant's reply
+    showChatThinking();
+
     try {
         const response = await authFetch(`${API_BASE}/ai/chat`, {
             method: "POST", 
@@ -5412,8 +5505,49 @@ async function sendOptionSelection(value) {
         
         addChatMessage("assistant", errorMessage, "error");
     } finally {
+        hideChatThinking();
         aiConversationState.isProcessing = false;
         updateSendButton();
+    }
+}
+
+// Thinking / typing indicator shown while an assistant reply is being generated.
+// The markup is static and fully controlled here, so no user/AI content is injected.
+function showChatThinking() {
+    const chatMessages = document.getElementById("ai-chat-messages");
+    if (!chatMessages) return;
+
+    // Never show more than one indicator at a time.
+    hideChatThinking();
+
+    const thinkingDiv = document.createElement("div");
+    thinkingDiv.className = "ai-chat-message ai-chat-assistant ai-chat-thinking";
+    thinkingDiv.id = "ai-chat-thinking";
+    thinkingDiv.setAttribute("aria-live", "polite");
+    thinkingDiv.setAttribute("aria-label", "Assistant is typing");
+    thinkingDiv.innerHTML = `
+        <div class="ai-avatar">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/>
+            </svg>
+        </div>
+        <div class="ai-message-content">
+            <div class="ai-typing-indicator">
+                <span class="ai-typing-dot"></span>
+                <span class="ai-typing-dot"></span>
+                <span class="ai-typing-dot"></span>
+            </div>
+        </div>
+    `;
+
+    chatMessages.appendChild(thinkingDiv);
+    scrollChatToBottom();
+}
+
+function hideChatThinking() {
+    const thinkingDiv = document.getElementById("ai-chat-thinking");
+    if (thinkingDiv) {
+        thinkingDiv.remove();
     }
 }
 
