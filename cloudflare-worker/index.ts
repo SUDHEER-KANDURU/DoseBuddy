@@ -1,9 +1,9 @@
 import { createConnection } from "mysql2/promise";
 import bcrypt from "bcryptjs";
-import { addLocalDays, canonicalTimeZone, dueOccurrencesAtInstant, resolveLocalOccurrence, zonedParts } from "./scheduling.ts";
-import { markOccurrenceMissed, markOccurrenceTaken, transact, upsertOccurrence } from "./dose-occurrences.ts";
-import { notificationEventId, occurrenceIsCurrent, type DeliveryOccurrence } from "./notification-delivery.ts";
-import { sendWebPush, type PushSubscriptionData } from "./web-push.ts";
+import { addLocalDays, canonicalTimeZone, dueOccurrencesAtInstant, resolveLocalOccurrence, zonedParts } from "./scheduling";
+import { markOccurrenceMissed, markOccurrenceTaken, transact, upsertOccurrence } from "./dose-occurrences";
+import { notificationEventId, occurrenceIsCurrent, type DeliveryOccurrence } from "./notification-delivery";
+import { sendWebPush, type PushSubscriptionData } from "./web-push";
 
 export interface Env {
   HYPERDRIVE: Hyperdrive;
