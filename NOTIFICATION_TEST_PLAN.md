@@ -1,166 +1,29 @@
-# DoseBuddy Notification System - Comprehensive Test Plan
+# DoseBuddy Notification System Test Plan
 
-## Quick Verification Tests (5 minutes)
+## Evidence status
 
-### 1. Audio System Test
-```javascript
-// Run in browser console after login
-testMissedDoseSound()
-```
-**Expected Result**: Should hear the notify-sound.mp3 file play at full volume
+This plan does not constitute completed browser or deployment testing. Local Worker unit/mock tests, workerd smoke, TypeScript build, Wrangler dry-run, and Spring/H2 regression pass; the three real MySQL 8 tests and all real browser/device checks remain release gates. See [NOTIFICATION_RELEASE_GATE.md](NOTIFICATION_RELEASE_GATE.md) for the exact results and isolated-database procedure.
 
-### 2. Scheduler Status Test  
-```javascript
-// Run in browser console
-testSchedulerDebug()
-```
-**Expected Result**: Should show user logged in, medications loaded, and active timers
+## Automated local checks
 
-### 3. Permission Test
-```javascript
-// Run in browser console
-Notification.requestPermission().then(perm => console.log('Permission:', perm))
-```
-**Expected Result**: Should return "granted" or prompt user for permission
+1. Run `npm run verify`. It covers Worker unit/mock behavior, encrypted Web Push generation, VAPID key matching, time-zone/DST scheduling, date-boundary behavior, medication invalidation, lease recovery, TypeScript, local workerd smoke, and a Wrangler bundle/configuration dry-run.
+2. With no database URL configured, run:
+   ```powershell
+   Remove-Item Env:DOSEBUDDY_TEST_MYSQL_URL -ErrorAction SilentlyContinue
+   npm run test:integration
+   ```
+   Expect exactly three skipped tests. This confirms that the suite does not silently use `DB_URL`, Hyperdrive, Aiven, or production configuration.
+3. Run the Spring H2 regression suite:
+   ```powershell
+   .\DoseBuddy_Backend\mvnw.cmd -f .\DoseBuddy_Backend\pom.xml test -q
+   ```
 
-## Full Integration Test (15 minutes)
+## Required isolated MySQL 8 gate
 
-### Test Setup
-1. Login to DoseBuddy
-2. Go to "Add Medicine" section
-3. Create test medicine:
-   - Name: "Test Medicine"
-   - Dosage: "1 tablet"  
-   - Time: Set to 2 minutes from current time
-   - Start date: Today
-   - End date: Today
+Provision a new disposable MySQL 8 schema containing no production data. In an isolated PowerShell session, set only `DOSEBUDDY_TEST_MYSQL_URL`, run `npm run test:integration`, retain non-secret evidence of all three named tests with zero skips, then remove the variable and destroy the disposable schema/server. Do not use production, Aiven, `DB_URL`, or Hyperdrive credentials.
 
-### Test Sequence
+The tests are: `two-connection TAKEN versus MISSED race`, `medication mutation serializes before the final dispatch boundary`, and `notification migration converges twice from the legacy ledger`.
 
-#### Phase 1: Reminder Notification (At scheduled time)
-**Expected Behaviors**:
-- Browser notification appears: "Dose Reminder: Test Medicine"  
-- Sound plays (notify-sound.mp3 at 0.8 volume)
-- Dashboard shows "Due now" status with yellow background
-- Console logs show "REMINDER SOUND FIRED"
+## Required browser/device validation
 
-#### Phase 2: Grace Period (0-60 seconds after scheduled time)  
-**Expected Behaviors**:
-- Status remains "Due now"
-- No missed notifications yet
-- Can still mark as taken normally
-
-#### Phase 3: Missed Detection (61+ seconds after scheduled time)
-**Expected Behaviors**:
-1. **Sound**: notify-sound.mp3 plays at full volume (1.0)
-2. **Browser Notification**: "Missed dose: Test Medicine" appears
-3. **Dashboard Status**: Changes from "Due now" to "Missed" (red background)
-4. **In-App Notification**: New entry appears in notification center bell icon
-5. **Console Logs**: Shows "MISSED DOSE SOUND FIRED" and "PROCESSING MISSED"
-
-### Verification Checklist
-
-#### Audio Verification ✓
-- [ ] Reminder sound plays at dose time
-- [ ] Missed dose sound plays at 1 minute after
-- [ ] Sound volume is audible (not muted/blocked)
-- [ ] Can hear difference between reminder and missed sound timing
-
-#### Browser Notification Verification ✓  
-- [ ] Dose reminder notification at scheduled time
-- [ ] Missed dose notification at 1 minute after
-- [ ] Notifications show correct medicine name and time
-- [ ] Clicking notification opens/focuses DoseBuddy tab
-
-#### Status Change Verification ✓
-- [ ] Status starts as "Pending" before dose time  
-- [ ] Changes to "Due now" at exact dose time
-- [ ] Changes to "Missed" at exactly 1 minute after
-- [ ] Dashboard cell updates in real-time (no refresh needed)
-
-#### In-App Notification Verification ✓
-- [ ] Notification bell icon shows count badge
-- [ ] Missed dose entry appears in notification panel
-- [ ] Entry shows medicine name and scheduled time
-- [ ] Multiple missed doses accumulate in list
-
-## Extended Production Test (24 hours)
-
-### Multi-Medicine Test
-1. Create 3-4 medicines with different times throughout the day
-2. Let some be taken on time, others missed
-3. Verify each medicine triggers notifications correctly
-4. Check that notification deduplication works (no duplicates)
-
-### Edge Cases Test
-1. **Page Refresh**: Refresh browser during grace period, verify missed detection continues
-2. **Tab Background**: Put tab in background, verify notifications still work  
-3. **Multiple Tabs**: Open multiple DoseBuddy tabs, verify no duplicate sounds
-4. **Browser Restart**: Close and reopen browser, verify system still works
-
-### Performance Test
-1. Monitor browser console for errors over 24 hours
-2. Check that memory usage doesn't grow unbounded
-3. Verify notification system works after prolonged use
-
-## Troubleshooting Guide
-
-### No Sound Playing
-**Check**:
-- Is notify-sound.mp3 accessible? Visit: `[your-domain]/notify-sound.mp3`
-- Console error: "No notify-sound element found"?
-- Audio permissions blocked by browser?
-- **Fix**: Run `testMissedDoseSound()` to diagnose audio issues
-
-### No Browser Notifications
-**Check**:
-- Notification permission granted?
-- Service Worker registered? Check Application tab in DevTools
-- Console error: "Service Worker registration failed"?
-- **Fix**: Run permission test and check SW registration
-
-### Status Not Changing to Missed
-**Check**:  
-- Medicine schedule active for today?
-- Console shows "checkReminders" running every 15 seconds?
-- Backend API calls succeeding?
-- **Fix**: Run `testSchedulerDebug()` to check scheduler state
-
-### Timing Issues
-**Check**:
-- System clock accurate?  
-- Grace period set to 1 minute (MISSED_GRACE_MIN = 1)?
-- Console shows exact timing logs?
-- **Fix**: Check console timestamps and compare to system time
-
-## Console Log Patterns (Success)
-
-### At Dose Time (Reminder)
-```
-[DoseBuddy] triggerDoseNotification — med:"Test Medicine" time:14:30
-[DoseBuddy Audio] REMINDER SOUND FIRED (notify-sound.mp3)
-[DoseBuddy Notifications] ✓ Service Worker notification sent successfully
-```
-
-### At 1 Minute After (Missed)
-```
-[DoseBuddy CheckReminders] Test Medicine at 14:30: 1 minutes late  
-[DoseBuddy CheckReminders] PROCESSING MISSED: Test Medicine (1 min late)
-[DoseBuddy Audio] ✓ MISSED DOSE SOUND PLAYED (notify-sound.mp3)
-[DoseBuddy CheckReminders] ✓ Browser notification sent successfully
-[DoseBuddy CheckReminders] Updated dashboard cell to MISSED
-```
-
-## Success Criteria
-
-**✅ PASS Criteria**: All three core requirements work correctly:
-1. In-app notification center receives missed dose entries ✓
-2. Browser notifications fire at exact times ✓  
-3. Status changes "Due now" → "Missed" at 1 minute ✓
-
-**❌ FAIL Criteria**: Any of the three core requirements doesn't work
-
----
-
-**Test Status**: Ready for production verification
-**Estimated Test Time**: 5 min quick test + 15 min full test + 24hr extended test
+After an authorized non-production deployment, use a real browser/device and provider subscription to verify subscription permission, encrypted reminder receipt, correct medication/time display, notification interaction, and closed-browser behavior. Record the browser/device, provider response, schedule time zone, and result without exposing VAPID private keys. Until this is performed, closed-browser delivery remains unverified.

@@ -5,18 +5,20 @@
   "type": "module",
   "scripts": {
     "build": "tsc --noEmit",
+    "test:unit": "node --experimental-strip-types --test tests/*.test.ts",
+    "test:integration": "node --experimental-strip-types --test tests/integration/*.mysql.test.ts",
+    "test:workerd": "powershell -ExecutionPolicy Bypass -File tests/run-web-push-runtime.ps1",
+    "verify": "npm run test:unit && npm run build && npm run test:workerd && wrangler deploy --dry-run",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy"
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",
-    "mysql2": "^3.13.0",
-    "web-push": "^3.6.7"
+    "mysql2": "^3.13.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260920.1",
     "@types/node": "^26.6.2",
-    "@types/web-push": "^3.6.4",
     "typescript": "^5.7.3",
     "wrangler": "^4.135.0"
   }

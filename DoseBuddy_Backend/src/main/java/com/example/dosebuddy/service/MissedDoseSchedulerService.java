@@ -6,6 +6,7 @@ import com.example.dosebuddy.model.MedicationTime;
 import com.example.dosebuddy.model.User;
 import com.example.dosebuddy.repository.IntakeLogRepository;
 import com.example.dosebuddy.repository.MedicationRepository;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -16,6 +17,7 @@ import java.time.LocalTime;
 import java.util.List;
 
 @Service
+@ConditionalOnProperty(name = "dosebuddy.legacy-missed-scheduler.enabled", havingValue = "true")
 public class MissedDoseSchedulerService {
 
     private final MedicationRepository medRepo;

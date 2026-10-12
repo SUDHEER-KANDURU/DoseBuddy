@@ -1,9 +1,9 @@
 import { createConnection } from "mysql2/promise";
 import bcrypt from "bcryptjs";
-import { addLocalDays, canonicalTimeZone, dueOccurrencesAtInstant, resolveLocalOccurrence, zonedParts } from "./scheduling";
-import { markOccurrenceMissed, markOccurrenceTaken, transact, upsertOccurrence } from "./dose-occurrences";
-import { notificationEventId, occurrenceIsCurrent, type DeliveryOccurrence } from "./notification-delivery";
-import { sendWebPush, type PushSubscriptionData } from "./web-push";
+import { addLocalDays, canonicalTimeZone, dueOccurrencesAtInstant, resolveLocalOccurrence, zonedParts } from "./scheduling.ts";
+import { markOccurrenceMissed, markOccurrenceTaken, transact, upsertOccurrence } from "./dose-occurrences.ts";
+import { claimDeliveryAttempt, finalizeDelivery, notificationEventId, obsoleteClaim, occurrenceIsCurrent, releaseUnstartedClaim, startDeliveryDispatch, type DeliveryClaim, type DeliveryOccurrence } from "./notification-delivery.ts";
+import { sendWebPush, type PushSubscriptionData } from "./web-push.ts";
 
 export interface Env {
   HYPERDRIVE: Hyperdrive;
@@ -2912,6 +2912,7 @@ const worker = {
       }
     }
 
+    await this.recoverExpiredClaims(env);
     const [retryRows] = await query<any[]>(env,
       `SELECT DISTINCT o.id AS occurrence_id,o.medication_id,o.user_id,o.schedule_version,
               DATE_FORMAT(o.local_date,'%Y-%m-%d') AS local_date,TIME_FORMAT(o.local_time,'%H:%i') AS time_str,
@@ -2924,6 +2925,39 @@ const worker = {
     }
   },
 
+  async recoverExpiredClaims(env: Env): Promise<void> {
+    const [attempts] = await query<any[]>(env,
+      `SELECT a.event_id,a.subscription_id,a.claim_token,a.claim_version,a.dispatch_started_at,
+              o.id AS occurrence_id,o.medication_id,o.user_id,o.schedule_version,
+              DATE_FORMAT(o.local_date,'%Y-%m-%d') AS local_date,TIME_FORMAT(o.local_time,'%H:%i') AS time_str,a.event_type
+       FROM push_delivery_attempts a JOIN dose_occurrences o ON o.id=a.occurrence_id
+       WHERE a.outcome='CLAIMED' AND a.lease_expires_at<=NOW(3)`);
+    for (const attempt of attempts) {
+      const db = await getDbConnection(env);
+      const claim: DeliveryClaim = { eventId: String(attempt.event_id), subscriptionId: Number(attempt.subscription_id), token: String(attempt.claim_token), version: Number(attempt.claim_version) };
+      try {
+        if (attempt.dispatch_started_at) {
+          await finalizeDelivery(db, claim, "UNCERTAIN", undefined, "lease-expired-after-dispatch");
+          continue;
+        }
+        const occurrence: DeliveryOccurrence = {
+          occurrenceId: Number(attempt.occurrence_id), medicationId: Number(attempt.medication_id), userId: Number(attempt.user_id),
+          scheduleVersion: Number(attempt.schedule_version), localDate: String(attempt.local_date), localTime: String(attempt.time_str).slice(0, 5),
+          eventType: String(attempt.event_type) === "MISSED" ? "MISSED" : "REMINDER"
+        };
+        await db.beginTransaction();
+        if (await occurrenceIsCurrent(db, occurrence, true)) await releaseUnstartedClaim(db, claim, "lease-expired-before-dispatch");
+        else await obsoleteClaim(db, claim);
+        await db.commit();
+      } catch (error) {
+        try { await db.rollback(); } catch {}
+        console.error(`[Web Push] Failed recovering delivery claim ${attempt.event_id}`);
+      } finally {
+        await db.end();
+      }
+    }
+  },
+
   async sendDoseNotification(env: Env, db: any, dose: any): Promise<void> {
     const event: DeliveryOccurrence = {
       occurrenceId: Number(dose.occurrence_id), medicationId: Number(dose.medication_id), userId: Number(dose.user_id),
@@ -2933,32 +2967,28 @@ const worker = {
     const eventId = notificationEventId(event);
     const [subscriptions] = await query<any[]>(db, "SELECT * FROM push_subscriptions WHERE user_id=? AND active=1", [event.userId]);
     for (const sub of subscriptions) {
-      const [insert] = await query<any>(db,
-        `INSERT IGNORE INTO push_delivery_attempts
-          (event_id,occurrence_id,medication_id,schedule_version,user_id,subscription_id,event_type,scheduled_at,attempted_at,outcome,retry_count)
-         VALUES (?,?,?,?,?,?,?,?,NOW(),'CLAIMED',0)`,
-        [eventId, event.occurrenceId, event.medicationId, event.scheduleVersion, event.userId, sub.id, event.eventType, dose.scheduled_at_utc]);
-      let claimed = Number(insert.affectedRows) === 1;
-      if (!claimed) {
-        const [retryClaim] = await query<any>(db,
-          "UPDATE push_delivery_attempts SET outcome='CLAIMED',attempted_at=NOW() WHERE event_id=? AND subscription_id=? AND outcome='RETRY' AND next_attempt_at<=NOW()",
-          [eventId, sub.id]);
-        claimed = Number(retryClaim.affectedRows) === 1;
-      }
-      if (!claimed) continue;
-      await db.beginTransaction();
+      const claim = await claimDeliveryAttempt(db, event, Number(sub.id), dose.scheduled_at_utc);
+      if (!claim) continue;
+      let dispatchStarted = false;
       try {
-        // Medication mutations lock the medication row before invalidating attempts. Taking
-        // the same lock here makes final dispatch and edit/delete mutually exclusive.
+        // Persist the recovery boundary first. A failure after this commit must remain
+        // UNCERTAIN rather than being automatically sent again.
+        await db.beginTransaction();
         if (!await occurrenceIsCurrent(db, event, true)) {
-          await query(db, "UPDATE push_delivery_attempts SET outcome='OBSOLETE',next_attempt_at=NULL WHERE event_id=? AND subscription_id=? AND outcome='CLAIMED'", [eventId, sub.id]);
+          await obsoleteClaim(db, claim);
           await db.commit();
           continue;
         }
-        const [attempts] = await query<any[]>(db,
-          "SELECT id FROM push_delivery_attempts WHERE event_id=? AND subscription_id=? AND outcome='CLAIMED' FOR UPDATE",
-          [eventId, sub.id]);
-        if (attempts.length !== 1) {
+        dispatchStarted = await startDeliveryDispatch(db, claim);
+        await db.commit();
+        if (!dispatchStarted) continue;
+
+        // Reacquire and retain the medication row lock through provider submission.
+        // A mutation that won the interval before this lock is revalidated out; one
+        // arriving afterwards blocks until the final outcome has been persisted.
+        await db.beginTransaction();
+        if (!await occurrenceIsCurrent(db, event, true)) {
+          await obsoleteClaim(db, claim);
           await db.commit();
           continue;
         }
@@ -2972,26 +3002,26 @@ const worker = {
           icon: "/favicon.ico", badge: "/favicon.ico", tag: `missed-${eventId}`,
           data: { type: "missed-dose", doseId: eventId, userId: event.userId, medicationId: event.medicationId, url: "/" }
         };
-        try {
-          const result = await sendWebPush(JSON.parse(sub.subscription_data) as PushSubscriptionData, payload, vapidConfig(env));
-          if (result.expired) {
-            await query(db, "UPDATE push_subscriptions SET active=0 WHERE id=?", [sub.id]);
-            await query(db, "UPDATE push_delivery_attempts SET outcome='EXPIRED',provider_status=?,next_attempt_at=NULL WHERE event_id=? AND subscription_id=? AND outcome='CLAIMED'", [result.status, eventId, sub.id]);
-          } else if (result.ok) {
-            await query(db, "UPDATE push_delivery_attempts SET outcome='SENT',provider_status=?,next_attempt_at=NULL WHERE event_id=? AND subscription_id=? AND outcome='CLAIMED'", [result.status, eventId, sub.id]);
-          } else if (result.retryable) {
-            await query(db, "UPDATE push_delivery_attempts SET outcome='RETRY',provider_status=?,retry_count=retry_count+1,next_attempt_at=DATE_ADD(NOW(),INTERVAL 5 MINUTE) WHERE event_id=? AND subscription_id=? AND outcome='CLAIMED'", [result.status, eventId, sub.id]);
-          } else {
-            await query(db, "UPDATE push_delivery_attempts SET outcome='FAILED',provider_status=?,next_attempt_at=NULL WHERE event_id=? AND subscription_id=? AND outcome='CLAIMED'", [result.status, eventId, sub.id]);
-          }
-        } catch (error) {
-          await query(db, "UPDATE push_delivery_attempts SET outcome='RETRY',error_category='transport',retry_count=retry_count+1,next_attempt_at=DATE_ADD(NOW(),INTERVAL 5 MINUTE) WHERE event_id=? AND subscription_id=? AND outcome='CLAIMED'", [eventId, sub.id]);
-          console.error(`[Web Push] Delivery failed for event ${eventId}`);
+        const result = await sendWebPush(JSON.parse(sub.subscription_data) as PushSubscriptionData, payload, vapidConfig(env));
+        if (result.expired) {
+          await query(db, "UPDATE push_subscriptions SET active=0 WHERE id=?", [sub.id]);
+          await finalizeDelivery(db, claim, "EXPIRED", result.status);
+        } else if (result.ok) {
+          await finalizeDelivery(db, claim, "SENT", result.status);
+        } else if (result.retryable) {
+          await finalizeDelivery(db, claim, "RETRY", result.status, "provider");
+        } else {
+          await finalizeDelivery(db, claim, "FAILED", result.status, "provider");
         }
         await db.commit();
       } catch (error) {
-        await db.rollback();
-        throw error;
+        try { await db.rollback(); } catch {}
+        // A persisted dispatch boundary means provider acceptance is unknowable.
+        try {
+          if (dispatchStarted) await finalizeDelivery(db, claim, "UNCERTAIN", undefined, "dispatch-uncertain");
+          else await releaseUnstartedClaim(db, claim, "pre-dispatch");
+        } catch {}
+        console.error(`[Web Push] Delivery failed for event ${eventId}`);
       }
     }
   }

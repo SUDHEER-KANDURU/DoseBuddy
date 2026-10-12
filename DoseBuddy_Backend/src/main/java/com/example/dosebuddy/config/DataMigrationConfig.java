@@ -4,6 +4,7 @@ import com.example.dosebuddy.model.User;
 import com.example.dosebuddy.repository.UserRepository;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
@@ -18,6 +19,7 @@ import java.util.List;
  *      Anything else is treated as plaintext and re-hashed.
  */
 @Component
+@Profile("!test")
 public class DataMigrationConfig implements ApplicationRunner {
 
     private final JdbcTemplate    jdbcTemplate;

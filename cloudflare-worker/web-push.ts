@@ -157,12 +157,26 @@ export async function prepareWebPush(
   const contentKey = await hkdfExpand(prk, encoder.encode("Content-Encoding: aes128gcm\0"), 16);
   const nonce = await hkdfExpand(prk, encoder.encode("Content-Encoding: nonce\0"), 12);
   const plaintext = typeof payload === "string" ? encoder.encode(payload) : payload;
-  const record = concat(plaintext, new Uint8Array([2]));
+  const recordSizeValue = 4096;
+  const maxRecordPayload = recordSizeValue - 17;
   const aesKey = await crypto.subtle.importKey("raw", contentKey, "AES-GCM", false, ["encrypt"]);
-  const ciphertext = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce }, aesKey, record));
+  const records: Uint8Array[] = [];
+  for (let offset = 0; offset < plaintext.length || (plaintext.length === 0 && offset === 0); offset += maxRecordPayload) {
+    const chunk = plaintext.slice(offset, offset + maxRecordPayload);
+    const final = offset + chunk.length >= plaintext.length;
+    const record = concat(chunk, new Uint8Array([final ? 2 : 1]));
+    const recordNonce = new Uint8Array(nonce);
+    let sequence = records.length;
+    for (let index = recordNonce.length - 1; sequence > 0 && index >= 0; index--) {
+      recordNonce[index] ^= sequence & 0xff;
+      sequence = Math.floor(sequence / 256);
+    }
+    records.push(new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv: recordNonce }, aesKey, record)));
+    if (final) break;
+  }
   const recordSize = new Uint8Array(4);
-  new DataView(recordSize.buffer).setUint32(0, 4096);
-  const body = concat(salt, recordSize, new Uint8Array([senderPublic.length]), senderPublic, ciphertext);
+  new DataView(recordSize.buffer).setUint32(0, recordSizeValue);
+  const body = concat(salt, recordSize, new Uint8Array([senderPublic.length]), senderPublic, ...records);
   const vapidToken = await createVapidToken(vapid, subscription.endpoint, options.now);
   return {
     body,

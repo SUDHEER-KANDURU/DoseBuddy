@@ -1,0 +1,6 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "dosebuddy-web-push-runtime-test",
+  "main": "workers/web-push-runtime.worker.ts",
+  "compatibility_date": "2026-09-22"
+}
