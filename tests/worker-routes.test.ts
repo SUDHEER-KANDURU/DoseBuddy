@@ -10,6 +10,7 @@ class RouteDbAdapter {
   actor = patient;
   medication = { id: 7, user_id: 1, name: "Current med", dosage: "5mg", instructions: null, start_date: "2026-01-01", end_date: "2026-12-31", active: 1, schedule_version: 3 };
   failMedicationInsert?: Error;
+  failTimeZoneUpdate?: Error;
   medicationInsertFailures = 0;
   commits = 0;
   rollbacks = 0;
@@ -17,6 +18,7 @@ class RouteDbAdapter {
   async query(statement: string, values: unknown[] = []): Promise<any> {
     this.calls.push([statement, values]);
     if (statement.startsWith("INSERT INTO medications") && this.failMedicationInsert && this.medicationInsertFailures++ === 0) throw this.failMedicationInsert;
+    if (statement.startsWith("UPDATE users SET time_zone") && this.failTimeZoneUpdate) throw this.failTimeZoneUpdate;
     if (statement.includes("FROM users WHERE email=?")) {
       const user = String(values[0]) === caregiver.email ? caregiver : patient;
       return [[user], undefined];
@@ -118,6 +120,35 @@ test("medication ownership is enforced by the production update route", async ()
   const response = await worker.fetch(authorized("/api/medications/7", accessToken, "PUT", { dosage: "changed" }), env(db));
   assert.equal(response.status, 403);
   assert.equal(db.calls.some(([sql]) => sql.startsWith("UPDATE medications SET")), false);
+});
+test("time-zone API saves valid zones and rejects invalid input", async () => {
+  const db = new RouteDbAdapter();
+  const { accessToken } = await login(db);
+  const saved = await worker.fetch(authorized("/api/user/time-zone", accessToken, "PUT", { timeZone: "America/New_York" }), env(db));
+  assert.equal(saved.status, 200);
+  assert.equal((await saved.json() as any).timeZone, "America/New_York");
+  const invalid = await worker.fetch(authorized("/api/user/time-zone", accessToken, "PUT", { timeZone: "not/a-zone" }), env(db));
+  assert.equal(invalid.status, 400);
+});
+
+test("time-zone API reports missing schema without assigning a fallback zone", async () => {
+  const db = new RouteDbAdapter();
+  db.failTimeZoneUpdate = Object.assign(new Error("Unknown column 'time_zone' in 'field list'"), { code: "ER_BAD_FIELD_ERROR" });
+  const { accessToken } = await login(db);
+  const response = await worker.fetch(authorized("/api/user/time-zone", accessToken, "PUT", { timeZone: "Asia/Kolkata" }), env(db));
+  assert.equal(response.status, 409);
+  assert.deepEqual(await response.json(), {
+    timeZone: null, schedulingAvailable: false, needsTimeZoneSetup: true,
+    message: "Time-zone storage is not available yet; medication reminders cannot be scheduled until setup is completed."
+  });
+});
+
+test("time-zone API preserves unrelated database errors", async () => {
+  const db = new RouteDbAdapter();
+  db.failTimeZoneUpdate = Object.assign(new Error("Database unavailable"), { code: "ER_CON_COUNT_ERROR" });
+  const { accessToken } = await login(db);
+  const response = await worker.fetch(authorized("/api/user/time-zone", accessToken, "PUT", { timeZone: "UTC" }), env(db));
+  assert.equal(response.status, 500);
 });
 
 test("protected routes reject missing authorization before database writes", async () => {

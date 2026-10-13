@@ -19,6 +19,13 @@ test("medication range uses the user's local calendar", () => {
   assert.equal(addLocalDays("2026-12-31", 1), "2027-01-01");
 });
 
+test("22:00 local scheduling converts across UTC date boundaries", () => {
+  assert.equal(resolveLocalOccurrence("2026-01-15", "22:00", "America/New_York").toISOString(), "2026-01-16T03:00:00.000Z");
+  assert.equal(dueOccurrencesAtInstant([{
+    medication_id: 1, time_zone: "America/New_York", time_str: "22:00", start_date: "2026-01-15", end_date: "2026-01-15"
+  }], new Date("2026-01-16T03:00:20Z")).length, 1);
+});
+
 test("DST gap shifts forward and repeated time chooses earlier instant", () => {
   assert.equal(resolveLocalOccurrence("2026-03-08", "02:30", "America/New_York").toISOString(), "2026-03-08T07:00:00.000Z");
   assert.equal(resolveLocalOccurrence("2026-11-01", "01:30", "America/New_York").toISOString(), "2026-11-01T05:30:00.000Z");

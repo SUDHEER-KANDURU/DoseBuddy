@@ -75,7 +75,7 @@ test("notification migration converges twice from the legacy ledger", { skip: !u
     assert.equal((await save({
       userId: 999, name: "Example (generic)", dosage: "10mg", instructions: "with food", startDate: "2026-10-12", endDate: "2026-11-11", times: ["08:00", "13:00", "18:00"]
     })).status, 200);
-    const [legacyMeds]: any = await db.query("SELECT user_id,name,dosage,instructions,start_date,end_date FROM medications WHERE id > 1 ORDER BY id");
+    const [legacyMeds]: any = await db.query("SELECT user_id,name,dosage,instructions,DATE_FORMAT(start_date,'%Y-%m-%d') AS start_date,DATE_FORMAT(end_date,'%Y-%m-%d') AS end_date FROM medications WHERE id > 1 ORDER BY id");
     assert.deepEqual(legacyMeds, [
       { user_id: 1, name: "test", dosage: "1231", instructions: "", start_date: "2026-10-12", end_date: "2026-10-12" },
       { user_id: 1, name: "Example (generic)", dosage: "10mg", instructions: "with food", start_date: "2026-10-12", end_date: "2026-11-11" }

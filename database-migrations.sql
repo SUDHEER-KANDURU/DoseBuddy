@@ -133,13 +133,29 @@ WHERE id IN (
 -- Idempotent indexes and integrity constraints. The foreign keys intentionally
 -- fail rather than deleting orphaned user data; complete the documented preflight
 -- and repair any reported orphan records before an authorized migration run.
-CREATE INDEX IF NOT EXISTS idx_medications_user_active ON medications (user_id, active);
-CREATE INDEX IF NOT EXISTS idx_medication_times_med ON medication_times (medication_id);
-CREATE INDEX IF NOT EXISTS idx_intake_logs_user_date ON intake_logs (marker_user_id, date);
-CREATE INDEX IF NOT EXISTS idx_intake_logs_med_date_time ON intake_logs (medication_id, date, time);
-CREATE INDEX IF NOT EXISTS idx_push_attempt_event ON push_delivery_attempts (event_id);
-CREATE INDEX IF NOT EXISTS idx_push_attempt_user_time ON push_delivery_attempts (user_id, attempted_at);
-CREATE INDEX IF NOT EXISTS idx_push_attempt_recovery ON push_delivery_attempts (outcome, lease_expires_at);
+-- MySQL 8 does not support `CREATE INDEX IF NOT EXISTS`; guard each index via
+-- information_schema.statistics so re-runs stay idempotent.
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='medications' AND index_name='idx_medications_user_active')=0,
+  'CREATE INDEX idx_medications_user_active ON medications (user_id, active)', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='medication_times' AND index_name='idx_medication_times_med')=0,
+  'CREATE INDEX idx_medication_times_med ON medication_times (medication_id)', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='intake_logs' AND index_name='idx_intake_logs_user_date')=0,
+  'CREATE INDEX idx_intake_logs_user_date ON intake_logs (marker_user_id, date)', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='intake_logs' AND index_name='idx_intake_logs_med_date_time')=0,
+  'CREATE INDEX idx_intake_logs_med_date_time ON intake_logs (medication_id, date, time)', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='push_delivery_attempts' AND index_name='idx_push_attempt_event')=0,
+  'CREATE INDEX idx_push_attempt_event ON push_delivery_attempts (event_id)', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='push_delivery_attempts' AND index_name='idx_push_attempt_user_time')=0,
+  'CREATE INDEX idx_push_attempt_user_time ON push_delivery_attempts (user_id, attempted_at)', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='push_delivery_attempts' AND index_name='idx_push_attempt_recovery')=0,
+  'CREATE INDEX idx_push_attempt_recovery ON push_delivery_attempts (outcome, lease_expires_at)', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 SET @sql = IF((SELECT COUNT(*) FROM information_schema.table_constraints WHERE constraint_schema=DATABASE() AND table_name='push_delivery_attempts' AND constraint_name='uq_delivery_event_subscription')=0,
   'ALTER TABLE push_delivery_attempts ADD CONSTRAINT uq_delivery_event_subscription UNIQUE (event_id, subscription_id)', 'DO 0');

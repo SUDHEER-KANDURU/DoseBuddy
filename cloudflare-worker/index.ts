@@ -205,6 +205,12 @@ function medicationSchemaNotReady(error: unknown) {
   return e.code === "ER_BAD_FIELD_ERROR" && /\b(active|schedule_version)\b/i.test(message);
 }
 
+function timeZoneSchemaNotReady(error: unknown) {
+  const e = error as { code?: unknown; message?: unknown; sqlMessage?: unknown };
+  const message = [e.message, e.sqlMessage].filter(value => typeof value === "string").join(" ");
+  return e.code === "ER_BAD_FIELD_ERROR" && /\btime_zone\b/i.test(message);
+}
+
 function logSignupFailure(phase: string, error: unknown) {
   const e = error as {
     name?: unknown;
@@ -2627,8 +2633,20 @@ const worker = {
         const { body: b } = await requestBody(request);
         const timeZone = canonicalTimeZone(b.timeZone);
         if (!timeZone) return json({ message: "A valid IANA time zone is required" }, 400);
-        await query(env, "UPDATE users SET time_zone=?,updated_at=NOW() WHERE id=?", [timeZone, actor.id]);
-        return json({ timeZone });
+        try {
+          await query(env, "UPDATE users SET time_zone=?,updated_at=NOW() WHERE id=?", [timeZone, actor.id]);
+          return json({ timeZone });
+        } catch (error) {
+          if (!timeZoneSchemaNotReady(error)) throw error;
+          // Do not guess UTC/India: this deployment's schema cannot persist a zone,
+          // so server scheduling remains unavailable until the additive column exists.
+          return json({
+            timeZone: null,
+            schedulingAvailable: false,
+            needsTimeZoneSetup: true,
+            message: "Time-zone storage is not available yet; medication reminders cannot be scheduled until setup is completed."
+          }, 409);
+        }
       }
 
       if (path === "/api/push/subscribe" && request.method === "POST") {
@@ -3103,7 +3121,7 @@ const worker = {
   },
 
   async processMissedDoses(env: Env, now: Date): Promise<void> {
-    const cutoff = mysqlDateTime(new Date(now.getTime() - 60_000));
+    const cutoff = mysqlDateTime(new Date(now.getTime() - 60 * 60_000));
     const [rows] = await query<any[]>(env,
       `SELECT o.id AS occurrence_id,o.medication_id,o.user_id,o.schedule_version,
               DATE_FORMAT(o.local_date,'%Y-%m-%d') AS local_date,TIME_FORMAT(o.local_time,'%H:%i') AS time_str,
