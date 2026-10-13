@@ -229,3 +229,51 @@ test("(10) with an empty medication list the personal path never fabricates a me
   }
   assert.ok(typeof payload.message === "string" && payload.message.length > 0);
 });
+
+const SEVERITY_QUESTION = "How would you describe the severity";
+
+test("(14) symptom + duration + severity in one message does NOT re-ask severity (no meds)", async () => {
+  // User says everything up front: symptom (stomach pain), duration (2 days), severity (mild).
+  // With no medications on file the flow should jump straight to the final analysis,
+  // never asking "How would you describe the severity?".
+  const db = new ChatDbAdapter();
+  const token = await login(db);
+  const { payload } = await chat(db, token, {
+    message: "hey i am feeling stomach pain since 2 days it was mild",
+    conversationId: "c14"
+  });
+  assert.equal(payload.intent, "SYMPTOM_CHECK");
+  assert.ok(!String(payload.message).includes(SEVERITY_QUESTION), "must not re-ask severity when already given");
+  assert.notEqual(payload.currentQuestion ?? payload.conversationState?.currentQuestion, "severity");
+  // No medications -> flow completes with a RESPONSE rather than another question.
+  assert.equal(payload.messageType, "RESPONSE");
+  assert.equal(payload.conversationState?.severity ?? payload.conversationState?.extractedFacts?.severity, "mild");
+});
+
+test("(15) symptom + duration + severity in one message skips to medication-timing (with meds)", async () => {
+  // Same up-front message, but the user has medications. The flow should advance to the
+  // medication-timing question, NOT re-ask severity.
+  const meds = [{ id: 7, name: "Lisinopril", dosage: "10mg", times: [{ id: 1, timeOfDay: "08:00:00" }] }];
+  const db = new ChatDbAdapter(meds);
+  const token = await login(db);
+  const { payload } = await chat(db, token, {
+    message: "hey i am feeling stomach pain since 2 days it was mild",
+    conversationId: "c15"
+  });
+  assert.equal(payload.intent, "SYMPTOM_CHECK");
+  assert.ok(!String(payload.message).includes(SEVERITY_QUESTION), "must not re-ask severity when already given");
+  assert.equal(payload.conversationState?.currentQuestion, "medication-timing");
+  assert.ok(String(payload.message).toLowerCase().includes("before or after"), "asks the medication-timing question");
+});
+
+test("(16) a medicine name routes to MEDICINE_INFO and carries the name, not a symptom flow", async () => {
+  // Regression for "paniclips" being misread as panic/anxiety: an unknown single-token
+  // name must still be handled as a medicine query (MEDICINE_INFO), not a symptom check,
+  // and the medicine name must be carried through to the handler.
+  const db = new ChatDbAdapter();
+  const token = await login(db);
+  const { payload } = await chat(db, token, { message: "paniclips", conversationId: "c16" });
+  assert.equal(payload.intent, "MEDICINE_INFO");
+  assert.notEqual(payload.intent, "SYMPTOM_CHECK");
+  assert.equal(payload.medicineName, "paniclips");
+});

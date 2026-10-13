@@ -1031,7 +1031,23 @@ function detectIntent(message: string, userMedications: any[]): string {
       return "SYMPTOM_CHECK";
     }
     
-    // Default single-word to general for clarification
+    // Greetings / filler / bare question words stay GENERAL.
+    const nonMedicineWords = ['hi', 'hello', 'hey', 'thanks', 'thank', 'yes', 'no', 'ok', 'okay', 'help', 'please', 'what', 'why', 'how', 'who', 'when', 'where'];
+    if (nonMedicineWords.includes(word)) {
+      return "GENERAL";
+    }
+
+    // A single alphabetic token typed on its own is almost always a medicine/
+    // supplement NAME the user wants to look up (e.g. "paniclips", "saridon").
+    // Route it to MEDICINE_INFO instead of GENERAL; otherwise it dead-ended in the
+    // general handler and the AI free-associated on the characters (reading
+    // "paniclips" as panic/anxiety). processMedicineInfoIntent handles unknown
+    // names gracefully (asks to confirm spelling, no fabrication).
+    if (/^[a-z][a-z0-9'\-]*$/.test(word)) {
+      return "MEDICINE_INFO";
+    }
+
+    // Anything else (punctuation, numerics) stays GENERAL for clarification.
     return "GENERAL";
   }
   
@@ -1109,6 +1125,22 @@ function detectIntent(message: string, userMedications: any[]): string {
   if (lowerMessage.includes('prescription') || lowerMessage.includes('prescribed') || 
       lowerMessage.includes('doctor said') || lowerMessage.includes('instructions')) {
     return "PRESCRIPTION";
+  }
+
+  // Bare medicine-name query (reached for 2-word messages; single words are
+  // handled in the single-word block above): a short alphabetic phrase with no
+  // question/greeting/symptom signals is a MEDICINE_INFO lookup rather than a
+  // GENERAL fallback. Example: "vitamin d", "saridon tablet". This prevents the
+  // AI from free-associating on an unrecognized name.
+  const trimmed = lowerMessage.trim();
+  const nonMedicineWords = ['hi', 'hello', 'hey', 'thanks', 'thank', 'yes', 'no', 'ok', 'okay', 'help', 'please'];
+  const isPlausibleMedicineName =
+    words.length >= 1 && words.length <= 2 &&
+    /^[a-z][a-z0-9'’\- ]*$/.test(trimmed) &&
+    !nonMedicineWords.includes(trimmed) &&
+    !hasSymptom && !hasIndicator && !hasTemporal;
+  if (isPlausibleMedicineName) {
+    return "MEDICINE_INFO";
   }
 
   return "GENERAL";
@@ -1321,6 +1353,10 @@ async function processMedicineInfoIntent(env: Env, message: string, conversation
       const potentialMedicine = words.slice(2).join(' ');
       finalMedicineName = potentialMedicine;
     }
+    // Single bare word routed here by detectIntent is the medicine name itself.
+    else if (words.length === 1 && /^[a-z][a-z0-9'\-]*$/.test(lowerMessage)) {
+      finalMedicineName = message.trim();
+    }
   }
   
   // Only show personal medication selection if:
@@ -1366,8 +1402,19 @@ async function processMedicineInfoIntent(env: Env, message: string, conversation
     return response;
   }
   
-  // Provide medicine information using existing callAi function
-  const prompt = `Provide concise medication information, uses, common side effects, and safety guidance for: ${finalMedicineName}`;
+  // Provide medicine information using existing callAi function.
+  // Treat the input strictly as the NAME of a medicine/supplement. Do not
+  // reinterpret, split, or free-associate on the characters (e.g. do not read
+  // an unknown name as unrelated words or symptoms). If the name is not a
+  // recognized medicine, say so plainly instead of inventing an unrelated topic.
+  const prompt =
+    `The following is the NAME of a medicine or supplement the user asked about: "${finalMedicineName}".\n` +
+    `Provide concise information about this medicine: what it is, common uses, common side effects, and safety guidance. ` +
+    `Treat "${finalMedicineName}" strictly as a medicine/supplement name — do not split it into other words, ` +
+    `do not interpret it as a symptom or emotion, and do not answer about an unrelated topic. ` +
+    `If you do not recognize "${finalMedicineName}" as a known medicine or supplement, say clearly that you don't ` +
+    `recognize it, ask the user to double-check the spelling or provide the brand/generic name, and do not fabricate details. ` +
+    `Keep it concise and non-diagnostic, and remind the user to confirm with their pharmacist or healthcare provider.`;
   const aiResponse = await callAi(env, prompt);
   const medicineInfo = await aiResponse.text();
   
@@ -1378,6 +1425,37 @@ async function processMedicineInfoIntent(env: Env, message: string, conversation
   response.conversationState = conversationState;
   
   return response;
+}
+
+// After severity is known, advance the symptom flow: ask about medication
+// timing when the user has medications, otherwise produce the final analysis.
+// Shared by the "severity" question handler and the first-interaction fast path
+// (when symptom + duration + severity were all supplied in one message), so we
+// never re-ask a question the user already answered.
+async function advanceAfterSeverity(env: Env, response: any, conversationState: any, conversationId: string, userMedications: any[]): Promise<any> {
+  if (userMedications.length > 0) {
+    conversationState.currentQuestion = "medication-timing";
+
+    response.messageType = "QUESTION";
+    response.message = "Did this symptom start before or after you began taking any medicine?";
+    response.questionType = "SINGLE_SELECT";
+
+    response.questions = [
+      createOption("before", "Before I started any medicine", ""),
+      createOption("after-dose", "Soon after taking a dose", ""),
+      createOption("hours-after", "Several hours after taking medicine", ""),
+      createOption("independent", "It happens even when I don't take medicine", ""),
+      createOption("not-sure", "I'm not sure about the timing", ""),
+      createOption("custom", "Let me explain the timing", "")
+    ];
+
+    response.conversationState = conversationState;
+    return response;
+  }
+
+  // No medications on file: proceed straight to the final analysis.
+  conversationState.completed = true;
+  return await generateSymptomAnalysis(env, conversationState, conversationId, userMedications);
 }
 
 async function processSymptomCheckIntent(env: Env, message: string, conversationId: string, conversationState: any, userMedications: any[]): Promise<any> {
@@ -1406,11 +1484,20 @@ async function processSymptomCheckIntent(env: Env, message: string, conversation
     // First interaction - extract what we can, then ask for missing info
     const symptom = extractedFacts.symptom || extractSymptom(message);
     const duration = extractedFacts.duration || extractedFacts.durationParsed;
+    const severity = extractedFacts.severity;
     
     conversationState.reportedSymptom = symptom || message;
-    
+
+    // If the user already gave symptom + duration + severity in one message
+    // (e.g. "I have mild stomach pain since 2 days"), do NOT re-ask what we
+    // already know. Advance straight to medication-timing (or the final
+    // analysis if they have no medications) so the flow isn't redundant.
+    if (symptom && duration && severity) {
+      conversationState.severity = severity;
+      return advanceAfterSeverity(env, response, conversationState, conversationId, userMedications);
+    }
     // If we have both symptom and duration, ask about severity
-    if (symptom && duration) {
+    else if (symptom && duration) {
       conversationState.currentQuestion = "severity";
       
       const durationText = extractedFacts.duration || `for ${extractedFacts.durationDays} days`;
@@ -1510,31 +1597,8 @@ async function processSymptomCheckIntent(env: Env, message: string, conversation
   if (currentQuestion === "severity") {
     conversationState.severity = message;
     conversationState.extractedFacts.severity = message;
-    
-    // Check if user has medications that might be relevant
-    if (userMedications.length > 0) {
-      conversationState.currentQuestion = "medication-timing";
-      
-      response.messageType = "QUESTION";
-      response.message = "I see you take medications. Did this symptom start before or after you began taking any medicine?";
-      response.questionType = "SINGLE_SELECT";
-      
-      response.questions = [
-        createOption("before", "Before I started any medicine", ""),
-        createOption("after-dose", "Soon after taking a dose", ""),
-        createOption("hours-after", "Several hours after taking medicine", ""),
-        createOption("independent", "It happens even when I don't take medicine", ""),
-        createOption("not-sure", "I'm not sure about the timing", ""),
-        createOption("custom", "Let me explain the timing", "")
-      ];
-      
-      response.conversationState = conversationState;
-      return response;
-    } else {
-      // No medications, proceed to final analysis
-      conversationState.completed = true;
-      return await generateSymptomAnalysis(env, conversationState, conversationId, userMedications);
-    }
+
+    return advanceAfterSeverity(env, response, conversationState, conversationId, userMedications);
   }
   
   if (currentQuestion === "duration") {
