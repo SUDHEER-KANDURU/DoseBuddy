@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -81,6 +82,7 @@ public class MedicationController {
 
     @GetMapping("/today/{userId}")
     public ResponseEntity<?> getToday(@PathVariable Long userId,
+                                      @RequestParam("date") String date,
                                       @AuthenticationPrincipal UserPrincipal principal) {
         User user = userRepo.findById(userId).orElse(null);
         if (user == null) {
@@ -90,10 +92,15 @@ public class MedicationController {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body("Access denied");
         }
 
-        LocalDate today = LocalDate.now();
+        LocalDate targetDate;
+        try {
+            targetDate = LocalDate.parse(date);
+        } catch (DateTimeParseException e) {
+            return ResponseEntity.badRequest().body("Invalid date; use YYYY-MM-DD");
+        }
 
         List<Medication> meds = medRepo.findByUserAndStartDateLessThanEqualAndEndDateGreaterThanEqual(
-                user, today, today
+                user, targetDate, targetDate
         );
 
         return ResponseEntity.ok(meds);
@@ -101,6 +108,7 @@ public class MedicationController {
 
     @GetMapping("/today-by-email/{email}")
     public ResponseEntity<?> getTodayByEmail(@PathVariable String email,
+                                             @RequestParam("date") String date,
                                              @AuthenticationPrincipal UserPrincipal principal) {
         User user = userRepo.findByEmail(email.toLowerCase()).orElse(null);
         if (user == null) {
@@ -110,10 +118,15 @@ public class MedicationController {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body("Access denied");
         }
 
-        LocalDate today = LocalDate.now();
+        LocalDate targetDate;
+        try {
+            targetDate = LocalDate.parse(date);
+        } catch (DateTimeParseException e) {
+            return ResponseEntity.badRequest().body("Invalid date; use YYYY-MM-DD");
+        }
 
         List<Medication> meds = medRepo.findByUserAndStartDateLessThanEqualAndEndDateGreaterThanEqual(
-                user, today, today
+                user, targetDate, targetDate
         );
 
         return ResponseEntity.ok(meds);

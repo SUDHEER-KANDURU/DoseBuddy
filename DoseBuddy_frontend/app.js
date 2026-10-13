@@ -1860,9 +1860,21 @@ async function syncBrowserTimeZone() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ timeZone })
         });
-        if (!res.ok) return;
-        const saved = await res.json();
+        const saved = await res.json().catch(() => null);
+        if (saved?.schedulingAvailable === false && saved?.needsTimeZoneSetup === true) {
+            // A legacy schema cannot persist this zone. Keep the current zone
+            // unchanged and retain the explicit server state for Preferences.
+            currentUser.schedulingAvailable = false;
+            currentUser.schedulingStatusMessage = saved.message ||
+                "Medication reminders cannot be scheduled until time-zone setup is completed.";
+            saveToLS(LS_CURRENT_USER_KEY, currentUser);
+            showToast(currentUser.schedulingStatusMessage, "warning", 6000);
+            return;
+        }
+        if (!res.ok || !saved || typeof saved.timeZone !== "string") return;
         currentUser.timeZone = saved.timeZone;
+        delete currentUser.schedulingAvailable;
+        delete currentUser.schedulingStatusMessage;
         saveToLS(LS_CURRENT_USER_KEY, currentUser);
     } catch (e) {
         console.warn("Time zone sync failed (non-fatal):", e.message);
@@ -2098,19 +2110,28 @@ function setupMedicineForm() {
                 return;
             }
 
+            const firstTime = times[0] || "";
+
+            // Reload the dashboard BEFORE confirming success. renderDashboard()
+            // returns false if today's medication fetch failed, in which case we
+            // must not tell the user the save "succeeded" while showing an empty
+            // schedule — report the reload failure instead.
+            invalidateDataCache("/medications/", "/logs/summary/", "/logs/adherence/", "/streaks/");
+            const dashboardOk = await renderDashboard();
+            await refreshActivityFeed();
+
+            if (!dashboardOk) {
+                errorText.textContent =
+                    "Medicine saved, but the dashboard could not be refreshed. Please reload.";
+                return;
+            }
+
             medForm.reset();
             startInput.value = todayStr;
             endInput.value = todayStr;
             successText.textContent = "Medicine saved successfully!";
             setTimeout(() => (successText.textContent = ""), 2000);
             showToast("Medicine saved successfully!", "success");
-
-          
-            const firstTime = times[0] || "";
-
-            invalidateDataCache("/medications/", "/logs/summary/", "/logs/adherence/", "/streaks/");
-            await renderDashboard();
-            await refreshActivityFeed();
         } catch (err) {
             errorText.textContent = err.message || "Network error. Please try again.";
         } finally {
@@ -2280,7 +2301,8 @@ async function renderDashboard() {
         const todayLogs = (logsRes.status === "fulfilled" && Array.isArray(logsRes.value)) ? logsRes.value : [];
         logs = todayLogs;
 
-        const meds = (medsRes.status === "fulfilled" && Array.isArray(medsRes.value)) ? medsRes.value : [];
+        const medsLoadOk = (medsRes.status === "fulfilled" && Array.isArray(medsRes.value));
+        const meds = medsLoadOk ? medsRes.value : [];
         console.log(`[FEAT-001 DEBUG] renderDashboard: fetched ${meds.length} medications:`, meds);
         console.log(`[FEAT-001 DEBUG] Updating medsCache from ${medsCache ? medsCache.length : 'null'} to ${meds.length} items`);
         medsCache = meds;
@@ -2519,12 +2541,18 @@ async function renderDashboard() {
         // fire a POST /streaks/recalculate simultaneously created a race where
         // two concurrent mutations could overwrite each other.
         renderReports(logs).catch(e => console.warn("[Dashboard] weekly-chart renderReports error:", e));
+
+        // Report whether today's medications actually loaded. Callers (e.g. the
+        // add-medicine flow) use this to avoid showing a successful-but-empty
+        // schedule when the medication fetch itself failed.
+        return medsLoadOk;
     } catch (err) {
         console.error(err);
         noMedsMsg.style.display = "block";
         noMedsMsg.textContent = "Could not load medicines from server.";
         scheduleTable.style.display = "none";
         clearScheduledTimeouts();
+        return false;
     }
 }
 function updateMissedDoseNotifications(meds, todayStr) {
@@ -7249,6 +7277,14 @@ function updateNotifPermissionStatus() {
     const statusText  = document.getElementById("notif-perm-status-text");
     const enableBtn   = document.getElementById("notif-perm-enable-btn");
     if (!statusRow || !statusText || !enableBtn) return;
+
+    if (currentUser?.schedulingAvailable === false) {
+        statusText.textContent = currentUser.schedulingStatusMessage ||
+            "Medication reminders cannot be scheduled until time-zone setup is completed.";
+        statusText.className = "notif-perm-text notif-perm-denied";
+        enableBtn.style.display = "none";
+        return;
+    }
 
     if (!("Notification" in window)) {
         statusText.textContent  = "Not supported in this browser.";
