@@ -3,7 +3,7 @@
 
 CREATE TABLE IF NOT EXISTS push_subscriptions (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    user_id INT NOT NULL,
+    user_id BIGINT NOT NULL,
     endpoint TEXT NOT NULL,
     subscription_data TEXT NOT NULL,
     active BOOLEAN DEFAULT TRUE,

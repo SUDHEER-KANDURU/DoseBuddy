@@ -10,6 +10,7 @@ If either column is absent, the route rolls back the failed notification-era ins
 
 Before an authorized rollout, inspect a staging or disposable MySQL 8 schema for:
 
+- `users.id` and `medications.id` primary-key types. This migration expects them to be `BIGINT`, and declares the related `user_id` and `medication_id` columns as `BIGINT` so the foreign keys are type-compatible. If a target schema differs, stop and prepare a schema-specific migration rather than applying this file unchanged;
 - `medications.active` and `medications.schedule_version` (required for medication create, reads, edits, and scheduled delivery). The durable production change adds them as `NOT NULL` fields with defaults of `1`, so existing medication rows are backfilled by MySQL to active revision `1`; verify those values before switching notification-era Worker behavior on;
 - `users.time_zone` (required for user-local occurrence scheduling);
 - `push_subscriptions`, `dose_occurrences`, and `push_delivery_attempts`, including the additive ledger columns, indexes, and foreign keys in `database-migrations.sql`.

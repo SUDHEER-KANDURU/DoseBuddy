@@ -3,7 +3,7 @@
 CREATE TABLE IF NOT EXISTS push_delivery_attempts (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     event_id VARCHAR(191) NOT NULL,
-    user_id INT NOT NULL,
+    user_id BIGINT NOT NULL,
     subscription_id INT NOT NULL,
     event_created_at DATETIME(3) NULL,
     scheduled_at DATETIME(3) NULL,

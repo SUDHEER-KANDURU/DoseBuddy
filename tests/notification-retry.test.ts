@@ -72,7 +72,7 @@ test("stale-token completion cannot overwrite a reclaimed delivery", async () =>
   assert.deepEqual(calls[0].slice(-4), ["event", 12, "stale", 1]);
 });
 
-test("scheduled handler runs due discovery before one-hour overdue processing", async () => {
+test("scheduled handler runs due discovery before missed-dose processing", async () => {
   const mutableWorker: any = worker;
   const originalDue = mutableWorker.processDueReminders;
   const originalMissed = mutableWorker.processMissedDoses;
@@ -88,7 +88,7 @@ test("scheduled handler runs due discovery before one-hour overdue processing", 
   }
 });
 
-test("one-hour missed selection preserves TAKEN occurrences", async () => {
+test("one-minute missed selection preserves TAKEN occurrences", async () => {
   const queries: Array<[string, unknown[]]> = [];
   const db: any = {
     query: async (sql: string, values: unknown[] = []) => {
@@ -108,7 +108,7 @@ test("one-hour missed selection preserves TAKEN occurrences", async () => {
   let sends = 0;
   mutableWorker.sendDoseNotification = async () => { sends++; };
   try {
-    await mutableWorker.processMissedDoses({ TEST_DB_FACTORY: async () => db } as any, new Date("2026-01-01T11:00:00Z"));
+    await mutableWorker.processMissedDoses({ TEST_DB_FACTORY: async () => db } as any, new Date("2026-01-01T10:01:00Z"));
     assert.equal(queries[0][1][0], "2026-01-01 10:00:00.000");
     assert.equal(sends, 0);
   } finally {

@@ -5,7 +5,7 @@
 -- Base notification tables for fresh installations.
 CREATE TABLE IF NOT EXISTS push_subscriptions (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    user_id INT NOT NULL,
+    user_id BIGINT NOT NULL,
     endpoint TEXT NOT NULL,
     subscription_data TEXT NOT NULL,
     active BOOLEAN DEFAULT TRUE,
@@ -18,8 +18,8 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
 
 CREATE TABLE IF NOT EXISTS dose_occurrences (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    medication_id INT NOT NULL,
-    user_id INT NOT NULL,
+    medication_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
     schedule_version BIGINT NOT NULL,
     local_date DATE NOT NULL,
     local_time TIME NOT NULL,
@@ -39,9 +39,9 @@ CREATE TABLE IF NOT EXISTS push_delivery_attempts (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     event_id VARCHAR(191) NOT NULL,
     occurrence_id BIGINT NULL,
-    medication_id INT NULL,
+    medication_id BIGINT NULL,
     schedule_version BIGINT NOT NULL DEFAULT 0,
-    user_id INT NOT NULL,
+    user_id BIGINT NOT NULL,
     subscription_id INT NOT NULL,
     event_type VARCHAR(16) NOT NULL DEFAULT 'REMINDER',
     event_created_at DATETIME(3) NULL,
@@ -92,7 +92,7 @@ SET @sql = IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schem
   'ALTER TABLE push_delivery_attempts ADD COLUMN occurrence_id BIGINT NULL', 'DO 0');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 SET @sql = IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='push_delivery_attempts' AND column_name='medication_id')=0,
-  'ALTER TABLE push_delivery_attempts ADD COLUMN medication_id INT NULL', 'DO 0');
+  'ALTER TABLE push_delivery_attempts ADD COLUMN medication_id BIGINT NULL', 'DO 0');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 SET @sql = IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='push_delivery_attempts' AND column_name='schedule_version')=0,
   'ALTER TABLE push_delivery_attempts ADD COLUMN schedule_version BIGINT NOT NULL DEFAULT 0', 'DO 0');
@@ -119,6 +119,24 @@ SET @sql = IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schem
   'ALTER TABLE push_delivery_attempts ADD COLUMN uncertain_at DATETIME(3) NULL', 'DO 0');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
+-- Normalize columns in tables created by earlier standalone notification SQL.
+-- The application schema uses signed BIGINT primary keys for users/medications.
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='push_subscriptions' AND column_name='user_id' AND column_type='bigint')=0,
+  'ALTER TABLE push_subscriptions MODIFY COLUMN user_id BIGINT NOT NULL', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='dose_occurrences' AND column_name='medication_id' AND column_type='bigint')=0,
+  'ALTER TABLE dose_occurrences MODIFY COLUMN medication_id BIGINT NOT NULL', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='dose_occurrences' AND column_name='user_id' AND column_type='bigint')=0,
+  'ALTER TABLE dose_occurrences MODIFY COLUMN user_id BIGINT NOT NULL', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='push_delivery_attempts' AND column_name='medication_id' AND column_type='bigint')=0,
+  'ALTER TABLE push_delivery_attempts MODIFY COLUMN medication_id BIGINT NULL', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='push_delivery_attempts' AND column_name='user_id' AND column_type='bigint')=0,
+  'ALTER TABLE push_delivery_attempts MODIFY COLUMN user_id BIGINT NOT NULL', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
 -- Preserve all legacy history while making duplicate old ledger keys unique.
 UPDATE push_delivery_attempts
 SET event_id = CONCAT(LEFT(event_id, 170), ':legacy:', id)
@@ -135,6 +153,12 @@ WHERE id IN (
 -- and repair any reported orphan records before an authorized migration run.
 -- MySQL 8 does not support `CREATE INDEX IF NOT EXISTS`; guard each index via
 -- information_schema.statistics so re-runs stay idempotent.
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='push_subscriptions' AND index_name='idx_user_active')=0,
+  'CREATE INDEX idx_user_active ON push_subscriptions (user_id, active)', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='push_subscriptions' AND index_name='idx_endpoint')=0,
+  'CREATE INDEX idx_endpoint ON push_subscriptions (endpoint(255))', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 SET @sql = IF((SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='medications' AND index_name='idx_medications_user_active')=0,
   'CREATE INDEX idx_medications_user_active ON medications (user_id, active)', 'DO 0');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
@@ -160,15 +184,24 @@ PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 SET @sql = IF((SELECT COUNT(*) FROM information_schema.table_constraints WHERE constraint_schema=DATABASE() AND table_name='push_delivery_attempts' AND constraint_name='uq_delivery_event_subscription')=0,
   'ALTER TABLE push_delivery_attempts ADD CONSTRAINT uq_delivery_event_subscription UNIQUE (event_id, subscription_id)', 'DO 0');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-SET @sql = IF((SELECT COUNT(*) FROM information_schema.table_constraints WHERE constraint_schema=DATABASE() AND table_name='push_delivery_attempts' AND constraint_name='fk_delivery_occurrence')=0,
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.key_column_usage WHERE constraint_schema=DATABASE() AND table_name='push_subscriptions' AND column_name='user_id' AND referenced_table_name='users' AND referenced_column_name='id')=0,
+  'ALTER TABLE push_subscriptions ADD CONSTRAINT fk_push_subscriptions_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.key_column_usage WHERE constraint_schema=DATABASE() AND table_name='dose_occurrences' AND column_name='medication_id' AND referenced_table_name='medications' AND referenced_column_name='id')=0,
+  'ALTER TABLE dose_occurrences ADD CONSTRAINT fk_occurrence_medication FOREIGN KEY (medication_id) REFERENCES medications(id) ON DELETE CASCADE', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.key_column_usage WHERE constraint_schema=DATABASE() AND table_name='dose_occurrences' AND column_name='user_id' AND referenced_table_name='users' AND referenced_column_name='id')=0,
+  'ALTER TABLE dose_occurrences ADD CONSTRAINT fk_occurrence_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.key_column_usage WHERE constraint_schema=DATABASE() AND table_name='push_delivery_attempts' AND column_name='occurrence_id' AND referenced_table_name='dose_occurrences' AND referenced_column_name='id')=0,
   'ALTER TABLE push_delivery_attempts ADD CONSTRAINT fk_delivery_occurrence FOREIGN KEY (occurrence_id) REFERENCES dose_occurrences(id) ON DELETE CASCADE', 'DO 0');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-SET @sql = IF((SELECT COUNT(*) FROM information_schema.table_constraints WHERE constraint_schema=DATABASE() AND table_name='push_delivery_attempts' AND constraint_name='fk_delivery_medication')=0,
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.key_column_usage WHERE constraint_schema=DATABASE() AND table_name='push_delivery_attempts' AND column_name='medication_id' AND referenced_table_name='medications' AND referenced_column_name='id')=0,
   'ALTER TABLE push_delivery_attempts ADD CONSTRAINT fk_delivery_medication FOREIGN KEY (medication_id) REFERENCES medications(id) ON DELETE CASCADE', 'DO 0');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-SET @sql = IF((SELECT COUNT(*) FROM information_schema.table_constraints WHERE constraint_schema=DATABASE() AND table_name='push_delivery_attempts' AND constraint_name='fk_delivery_user')=0,
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.key_column_usage WHERE constraint_schema=DATABASE() AND table_name='push_delivery_attempts' AND column_name='user_id' AND referenced_table_name='users' AND referenced_column_name='id')=0,
   'ALTER TABLE push_delivery_attempts ADD CONSTRAINT fk_delivery_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE', 'DO 0');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-SET @sql = IF((SELECT COUNT(*) FROM information_schema.table_constraints WHERE constraint_schema=DATABASE() AND table_name='push_delivery_attempts' AND constraint_name='fk_delivery_subscription')=0,
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.key_column_usage WHERE constraint_schema=DATABASE() AND table_name='push_delivery_attempts' AND column_name='subscription_id' AND referenced_table_name='push_subscriptions' AND referenced_column_name='id')=0,
   'ALTER TABLE push_delivery_attempts ADD CONSTRAINT fk_delivery_subscription FOREIGN KEY (subscription_id) REFERENCES push_subscriptions(id) ON DELETE CASCADE', 'DO 0');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;

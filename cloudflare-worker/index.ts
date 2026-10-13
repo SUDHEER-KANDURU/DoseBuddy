@@ -2410,11 +2410,25 @@ const worker = {
         // Honor the client-provided ?date=; only derive from the stored zone when no date is sent.
         // A missing/invalid time zone must NOT hide the medication list (it stays available for scheduling).
         const medsDateStr = reqDate ?? (targetZone ? zonedParts(Date.now(), targetZone).date : new Date().toISOString().slice(0, 10));
-        const [rows] = await query<Json[]>(
-          env,
-          "SELECT m.*,JSON_ARRAYAGG(JSON_OBJECT('id',mt.id,'timeOfDay',TIME_FORMAT(mt.time_of_day,'%H:%i:%s'))) times FROM medications m LEFT JOIN medication_times mt ON mt.medication_id=m.id WHERE m.user_id=? AND m.active=1 AND m.start_date<=? AND m.end_date>=? GROUP BY m.id",
-          [target.id, medsDateStr, medsDateStr]
-        );
+        let rows: Json[];
+        try {
+          [rows] = await query<Json[]>(
+            env,
+            "SELECT m.*,JSON_ARRAYAGG(JSON_OBJECT('id',mt.id,'timeOfDay',TIME_FORMAT(mt.time_of_day,'%H:%i:%s'))) times FROM medications m LEFT JOIN medication_times mt ON mt.medication_id=m.id WHERE m.user_id=? AND m.active=1 AND m.start_date<=? AND m.end_date>=? GROUP BY m.id",
+            [target.id, medsDateStr, medsDateStr]
+          );
+        } catch (error) {
+          // Older production schemas predate the additive `active` flag. The
+          // create route already supports that schema; list reads must as well
+          // or a successful save is followed by a dashboard 500. Legacy rows
+          // have no soft-delete flag, so include their date-matching records.
+          if (!medicationSchemaNotReady(error)) throw error;
+          [rows] = await query<Json[]>(
+            env,
+            "SELECT m.*,JSON_ARRAYAGG(JSON_OBJECT('id',mt.id,'timeOfDay',TIME_FORMAT(mt.time_of_day,'%H:%i:%s'))) times FROM medications m LEFT JOIN medication_times mt ON mt.medication_id=m.id WHERE m.user_id=? AND m.start_date<=? AND m.end_date>=? GROUP BY m.id",
+            [target.id, medsDateStr, medsDateStr]
+          );
+        }
         return json(
           rows.map(x => ({
             ...x,
@@ -3130,7 +3144,9 @@ const worker = {
   },
 
   async processMissedDoses(env: Env, now: Date): Promise<void> {
-    const cutoff = mysqlDateTime(new Date(now.getTime() - 60 * 60_000));
+    // Product grace period is one minute. Cron runs every minute, so the
+    // observed transition can be up to roughly one scheduler interval late.
+    const cutoff = mysqlDateTime(new Date(now.getTime() - 60_000));
     const [rows] = await query<any[]>(env,
       `SELECT o.id AS occurrence_id,o.medication_id,o.user_id,o.schedule_version,
               DATE_FORMAT(o.local_date,'%Y-%m-%d') AS local_date,TIME_FORMAT(o.local_time,'%H:%i') AS time_str,

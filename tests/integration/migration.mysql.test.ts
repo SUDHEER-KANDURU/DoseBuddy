@@ -14,19 +14,19 @@ test("notification migration converges twice from the legacy ledger", { skip: !u
   try {
     await db.query("SET FOREIGN_KEY_CHECKS=0; DROP TABLE IF EXISTS push_delivery_attempts,dose_occurrences,push_subscriptions,intake_logs,activities,medication_times,medications,users; SET FOREIGN_KEY_CHECKS=1");
     await db.query(`
-      CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(50), email VARCHAR(255) NOT NULL UNIQUE, password_hash VARCHAR(255) NOT NULL, role VARCHAR(32) NOT NULL, time_zone VARCHAR(64) NULL, accepted_terms TINYINT NOT NULL DEFAULT 1);
-      CREATE TABLE medications (id INT PRIMARY KEY AUTO_INCREMENT, user_id INT NOT NULL, name VARCHAR(255) NOT NULL, dosage VARCHAR(255) NOT NULL, instructions TEXT NULL, start_date DATE NOT NULL, end_date DATE NOT NULL);
-      CREATE TABLE medication_times (id INT PRIMARY KEY AUTO_INCREMENT, medication_id INT NOT NULL, time_of_day TIME NOT NULL);
-      CREATE TABLE activities (id INT PRIMARY KEY AUTO_INCREMENT, user_id INT NOT NULL, type VARCHAR(64) NOT NULL, message TEXT NOT NULL, related_entity_type VARCHAR(64) NOT NULL, related_entity_id INT NOT NULL, created_at DATETIME NOT NULL);
+      CREATE TABLE users (id BIGINT PRIMARY KEY, name VARCHAR(50), email VARCHAR(255) NOT NULL UNIQUE, password_hash VARCHAR(255) NOT NULL, role VARCHAR(32) NOT NULL, time_zone VARCHAR(64) NULL, accepted_terms TINYINT NOT NULL DEFAULT 1);
+      CREATE TABLE medications (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, name VARCHAR(255) NOT NULL, dosage VARCHAR(255) NOT NULL, instructions TEXT NULL, start_date DATE NOT NULL, end_date DATE NOT NULL);
+      CREATE TABLE medication_times (id BIGINT PRIMARY KEY AUTO_INCREMENT, medication_id BIGINT NOT NULL, time_of_day TIME NOT NULL);
+      CREATE TABLE activities (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, type VARCHAR(64) NOT NULL, message TEXT NOT NULL, related_entity_type VARCHAR(64) NOT NULL, related_entity_id BIGINT NOT NULL, created_at DATETIME NOT NULL);
       CREATE TABLE dose_occurrences (
         id BIGINT PRIMARY KEY AUTO_INCREMENT, medication_id INT NOT NULL, user_id INT NOT NULL, schedule_version BIGINT NOT NULL,
         local_date DATE NOT NULL, local_time TIME NOT NULL, scheduled_at_utc DATETIME(3) NOT NULL, state VARCHAR(16) NOT NULL DEFAULT 'PENDING',
         created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3), updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3)
       );
-      CREATE TABLE intake_logs (id BIGINT PRIMARY KEY AUTO_INCREMENT, marker_user_id INT, medication_id INT, date DATE, time TIME);
+      CREATE TABLE intake_logs (id BIGINT PRIMARY KEY AUTO_INCREMENT, marker_user_id BIGINT, medication_id BIGINT, date DATE, time TIME);
       CREATE TABLE push_subscriptions (id INT PRIMARY KEY AUTO_INCREMENT, user_id INT NOT NULL, endpoint TEXT NOT NULL, subscription_data TEXT NOT NULL, active BOOLEAN, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP);
       CREATE TABLE push_delivery_attempts (
-        id BIGINT PRIMARY KEY AUTO_INCREMENT,event_id VARCHAR(191) NOT NULL,user_id INT NOT NULL,subscription_id INT NOT NULL,
+        id BIGINT PRIMARY KEY AUTO_INCREMENT,event_id VARCHAR(191) NOT NULL,user_id INT NOT NULL,subscription_id INT NOT NULL,medication_id INT NULL,
         event_created_at DATETIME(3) NULL,scheduled_at DATETIME(3) NULL,attempted_at DATETIME(3) NOT NULL,
         provider_status SMALLINT NULL,outcome VARCHAR(32) NOT NULL,processing_lag_ms INT NOT NULL,
         delivery_latency_ms INT NOT NULL,retry_count INT NOT NULL DEFAULT 0,error_category VARCHAR(100) NULL
@@ -88,6 +88,16 @@ test("notification migration converges twice from the legacy ledger", { skip: !u
 
     const [columns]: any = await db.query("SELECT COLUMN_NAME AS column_name,IS_NULLABLE AS is_nullable FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='push_delivery_attempts' AND column_name IN ('schedule_version','event_type')");
     assert.deepEqual(new Map(columns.map((row: any) => [row.column_name, row.is_nullable])), new Map([["event_type", "NO"], ["schedule_version", "NO"]]));
+    const [foreignKeyTypes]: any = await db.query(`
+      SELECT TABLE_NAME AS table_name,COLUMN_NAME AS column_name,COLUMN_TYPE AS column_type
+      FROM information_schema.columns
+      WHERE table_schema=DATABASE() AND (
+        (TABLE_NAME='push_subscriptions' AND COLUMN_NAME='user_id') OR
+        (TABLE_NAME='dose_occurrences' AND COLUMN_NAME IN ('medication_id','user_id')) OR
+        (TABLE_NAME='push_delivery_attempts' AND COLUMN_NAME IN ('medication_id','user_id'))
+      )
+    `);
+    for (const row of foreignKeyTypes) assert.equal(row.column_type, "bigint", `${row.table_name}.${row.column_name} must match the existing BIGINT ids`);
     const [occurrenceColumns]: any = await db.query("SELECT COLUMN_NAME AS column_name,IS_NULLABLE AS is_nullable FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='dose_occurrences' AND column_name IN ('taken_at','missed_at')");
     assert.deepEqual(new Map(occurrenceColumns.map((row: any) => [row.column_name, row.is_nullable])), new Map([["missed_at", "YES"], ["taken_at", "YES"]]));
     const [inserted]: any = await db.query("INSERT INTO dose_occurrences (medication_id,user_id,schedule_version,local_date,local_time,scheduled_at_utc,state) VALUES (1,1,1,'2026-06-01','08:00:00','2026-06-01 08:00:00.000','PENDING')");
@@ -101,9 +111,18 @@ test("notification migration converges twice from the legacy ledger", { skip: !u
     assert.equal(taken[0].state, "TAKEN");
     assert.notEqual(taken[0].taken_at, null);
     assert.equal(taken[0].missed_at, null);
-    const [constraints]: any = await db.query("SELECT CONSTRAINT_NAME AS constraint_name FROM information_schema.table_constraints WHERE constraint_schema=DATABASE() AND table_name='push_delivery_attempts'");
-    const names = new Set(constraints.map((row: any) => row.constraint_name));
-    for (const name of ["uq_delivery_event_subscription", "fk_delivery_occurrence", "fk_delivery_medication", "fk_delivery_user", "fk_delivery_subscription"]) assert.ok(names.has(name), name);
+    const [constraints]: any = await db.query("SELECT TABLE_NAME AS table_name,CONSTRAINT_NAME AS constraint_name FROM information_schema.table_constraints WHERE constraint_schema=DATABASE() AND TABLE_NAME IN ('push_subscriptions','dose_occurrences','push_delivery_attempts')");
+    const names = new Set(constraints.map((row: any) => `${row.table_name}.${row.constraint_name}`));
+    for (const key of [
+      "push_delivery_attempts.uq_delivery_event_subscription",
+      "push_delivery_attempts.fk_delivery_occurrence",
+      "push_delivery_attempts.fk_delivery_medication",
+      "push_delivery_attempts.fk_delivery_user",
+      "push_delivery_attempts.fk_delivery_subscription",
+      "push_subscriptions.fk_push_subscriptions_user",
+      "dose_occurrences.fk_occurrence_medication",
+      "dose_occurrences.fk_occurrence_user"
+    ]) assert.ok(names.has(key), key);
     const [events]: any = await db.query("SELECT event_id FROM push_delivery_attempts ORDER BY id");
     assert.equal(new Set(events.map((row: any) => row.event_id)).size, 2);
   } finally {

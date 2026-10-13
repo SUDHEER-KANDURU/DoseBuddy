@@ -150,6 +150,20 @@ test("time-zone API saves valid zones and rejects invalid input", async () => {
   assert.equal(invalid.status, 400);
 });
 
+test("time-zone synchronization is idempotent and accepts a later valid zone change", async () => {
+  const db = new RouteDbAdapter();
+  const { accessToken } = await login(db);
+  const canonicalKolkata = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Kolkata" }).resolvedOptions().timeZone;
+  for (const timeZone of ["Asia/Kolkata", "Asia/Kolkata", "America/New_York"]) {
+    const response = await worker.fetch(authorized("/api/user/time-zone", accessToken, "PUT", { timeZone }), env(db));
+    assert.equal(response.status, 200);
+    assert.equal((await response.json() as any).timeZone, timeZone === "Asia/Kolkata" ? canonicalKolkata : timeZone);
+  }
+  const writes = db.calls.filter(([sql]) => sql.startsWith("UPDATE users SET time_zone"));
+  assert.deepEqual(writes.map(([, values]) => values[0]), [canonicalKolkata, canonicalKolkata, "America/New_York"]);
+  assert.ok(writes.every(([, values]) => values[1] === patient.id));
+});
+
 test("time-zone API reports missing schema without assigning a fallback zone", async () => {
   const db = new RouteDbAdapter();
   db.failTimeZoneUpdate = Object.assign(new Error("Unknown column 'time_zone' in 'field list'"), { code: "ER_BAD_FIELD_ERROR" });
@@ -257,6 +271,60 @@ test("today route honors ?date= and no longer hides the list when time_zone is N
 
   const badFormat = await worker.fetch(authorized("/api/medications/today/1?date=13-10-2026", accessToken), env(db));
   assert.equal(badFormat.status, 400);
+});
+
+test("today route falls back to legacy medication schema after a successful add", async () => {
+  class LegacyMedicationSchemaAdapter extends RouteDbAdapter {
+    createdMedication: any = null;
+    createdTimes: string[] = [];
+    async query(statement: string, values: unknown[] = []): Promise<any> {
+      if (statement.includes("JSON_ARRAYAGG") && statement.includes("m.active=1")) {
+        this.calls.push([statement, values]);
+        throw Object.assign(new Error("Unknown column 'm.active' in 'where clause'"), { code: "ER_BAD_FIELD_ERROR" });
+      }
+      if (statement.startsWith("INSERT INTO medications") && statement.includes("schedule_version")) {
+        this.calls.push([statement, values]);
+        throw Object.assign(new Error("Unknown column 'schedule_version' in 'field list'"), { code: "ER_BAD_FIELD_ERROR" });
+      }
+      if (statement.startsWith("INSERT INTO medications")) {
+        const result = await super.query(statement, values);
+        this.createdMedication = {
+          id: 8, user_id: values[0], name: values[1], dosage: values[2], instructions: values[3],
+          start_date: values[4], end_date: values[5], times: []
+        };
+        return result;
+      }
+      if (statement.startsWith("INSERT INTO medication_times")) {
+        this.createdTimes.push(String(values[1]));
+        return super.query(statement, values);
+      }
+      if (statement.includes("JSON_ARRAYAGG") && !statement.includes("m.active=1")) {
+        this.calls.push([statement, values]);
+        const compareDate = String(values[1]);
+        const baseInRange = this.medication.start_date <= compareDate && compareDate <= this.medication.end_date;
+        const created = this.createdMedication && this.createdMedication.start_date <= compareDate && compareDate <= this.createdMedication.end_date
+          ? [{ ...this.createdMedication, times: this.createdTimes.map((time, index) => ({ id: index + 2, timeOfDay: `${time}:00` })) }]
+          : [];
+        return [[...(baseInRange ? [{ ...this.medication, times: [{ id: 1, timeOfDay: "08:00:00" }] }] : []), ...created], undefined];
+      }
+      return super.query(statement, values);
+    }
+  }
+
+  const db = new LegacyMedicationSchemaAdapter();
+  const { accessToken } = await login(db);
+  const add = await worker.fetch(authorized("/api/medications/add", accessToken, "POST", {
+    name: "Legacy test med", dosage: "1 tablet", startDate: "2026-10-14", endDate: "2026-10-14", times: ["23:59"]
+  }), env(db));
+  assert.equal(add.status, 200);
+  const response = await worker.fetch(authorized("/api/medications/today/1?date=2026-10-14", accessToken), env(db));
+  assert.equal(response.status, 200);
+  const body = await response.json() as any[];
+  assert.equal(body.filter(med => med.id === 8).length, 1);
+  assert.equal(body.find(med => med.id === 8).times[0].timeOfDay, "23:59:00");
+  assert.ok(db.calls.some(([sql]) => sql.startsWith("INSERT INTO medications") && sql.includes("schedule_version")));
+  assert.ok(db.calls.some(([sql]) => sql.startsWith("INSERT INTO medications") && !sql.includes("schedule_version")));
+  assert.ok(db.calls.some(([sql, values]) => sql.includes("JSON_ARRAYAGG") && !sql.includes("m.active=1") && values[1] === "2026-10-14"));
 });
 
 test("GET /api/user/time-zone returns the stored zone instead of a 500", async () => {

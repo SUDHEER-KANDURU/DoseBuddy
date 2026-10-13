@@ -96,10 +96,9 @@ async function authFetch(url, options = {}) {
         ...(token ? { "Authorization": `Bearer ${token}` } : {})
     };
 
-    // Add timeout for UI operations (add medicine, mark taken)
-    const timeoutMs = options.timeout || (
-        (url.includes('/medications/add') || url.includes('/logs/mark')) ? 5000 : 15000
-    );
+    // Allow database-backed medication changes enough time to complete before
+    // the client gives up. The previous 5s cutoff could abort a valid write.
+    const timeoutMs = options.timeout || 15000;
     
     const controller = new AbortController();
     const timeoutId = setTimeout(() => {
@@ -172,33 +171,46 @@ async function authFetch(url, options = {}) {
 
 const _jsonCache = new Map();
 const _jsonInflight = new Map();
+const _jsonCacheEpoch = new Map();
 
 async function fetchJsonCached(url, ttlMs = 15000) {
     const cached = _jsonCache.get(url);
     if (cached && Date.now() - cached.at < ttlMs) return cached.data;
     if (_jsonInflight.has(url)) return _jsonInflight.get(url);
 
+    const epoch = _jsonCacheEpoch.get(url) || 0;
     const request = authFetch(url)
         .then(async res => {
             if (res.status === 404) {
                 // Expected empty state for optional resources (e.g. /bmi/latest/:id before first calculation)
                 const emptyData = null;
-                _jsonCache.set(url, { data: emptyData, at: Date.now() });
+                if ((_jsonCacheEpoch.get(url) || 0) === epoch) {
+                    _jsonCache.set(url, { data: emptyData, at: Date.now() });
+                }
                 return emptyData;
             }
             if (!res.ok) throw new Error(`Request failed (${res.status})`);
             const data = await res.json();
-            _jsonCache.set(url, { data, at: Date.now() });
+            if ((_jsonCacheEpoch.get(url) || 0) === epoch) {
+                _jsonCache.set(url, { data, at: Date.now() });
+            }
             return data;
         })
-        .finally(() => _jsonInflight.delete(url));
+        .finally(() => {
+            if (_jsonInflight.get(url) === request) _jsonInflight.delete(url);
+        });
     _jsonInflight.set(url, request);
     return request;
 }
 
 function invalidateDataCache(...fragments) {
-    for (const key of _jsonCache.keys()) {
-        if (fragments.some(fragment => key.includes(fragment))) _jsonCache.delete(key);
+    const keys = new Set([..._jsonCache.keys(), ..._jsonInflight.keys()]);
+    for (const key of keys) {
+        if (fragments.some(fragment => key.includes(fragment))) {
+            _jsonCache.delete(key);
+            _jsonInflight.delete(key);
+            _jsonCacheEpoch.set(key, (_jsonCacheEpoch.get(key) || 0) + 1);
+        }
     }
 }
 
@@ -458,8 +470,9 @@ async function renderRecentActivity() {
                 lastGroup = group;
             }
 
-            const clickable = activity.relatedEntityType ? "activity-item--clickable" : "";
-            const viewAttr = getViewForEntityType(activity.relatedEntityType);
+            const relatedType = String(activity.relatedEntityType || "").toUpperCase();
+            const clickable = getViewForEntityType(relatedType) ? "activity-item--clickable" : "";
+            const viewAttr = getViewForEntityType(relatedType);
             const navAttr = viewAttr ? `data-view="${viewAttr}" role="button" tabindex="0"` : "";
 
             html += `
@@ -511,7 +524,9 @@ async function refreshActivityFeed() {
 
 function getViewForEntityType(entityType) {
     const mapping = {
-        "MEDICATION": "medicines-view",
+        // There is no separate medicine detail/list view. Open the existing
+        // dashboard, which contains today's medication schedule.
+        "MEDICATION": "dashboard-view",
         "INTAKE_LOG": "history-view",
         "BMI_RECORD": "bmi-view",
         "USER": "profile-view",
@@ -745,7 +760,7 @@ function switchView(viewId) {
     if (!currentUser) return;
 
     if (viewId === "dashboard-view") {
-        renderDashboard();
+        return renderDashboard();
     } else if (viewId === "history-view") {
         renderHistory();
     } else if (viewId === "reports-view") {
@@ -1871,13 +1886,22 @@ async function syncBrowserTimeZone() {
             showToast(currentUser.schedulingStatusMessage, "warning", 6000);
             return;
         }
-        if (!res.ok || !saved || typeof saved.timeZone !== "string") return;
+        if (!res.ok) {
+            console.warn("Time-zone sync was rejected:", res.status, saved?.message || "No server detail provided");
+            showToast(saved?.message || "Could not save your time zone. Medication reminder timing may be affected.", "warning", 6000);
+            return;
+        }
+        if (!saved || typeof saved.timeZone !== "string") {
+            showToast("The server returned an invalid time-zone response. Please try again.", "warning", 6000);
+            return;
+        }
         currentUser.timeZone = saved.timeZone;
         delete currentUser.schedulingAvailable;
         delete currentUser.schedulingStatusMessage;
         saveToLS(LS_CURRENT_USER_KEY, currentUser);
     } catch (e) {
         console.warn("Time zone sync failed (non-fatal):", e.message);
+        showToast("Could not sync your time zone. Medication reminder timing may be affected.", "warning", 6000);
     }
 }
 
@@ -2110,28 +2134,21 @@ function setupMedicineForm() {
                 return;
             }
 
-            const firstTime = times[0] || "";
-
-            // Reload the dashboard BEFORE confirming success. renderDashboard()
-            // returns false if today's medication fetch failed, in which case we
-            // must not tell the user the save "succeeded" while showing an empty
-            // schedule — report the reload failure instead.
+            // The POST response confirms the save. Invalidate even older
+            // in-flight GETs so they cannot repopulate the cache with stale data.
             invalidateDataCache("/medications/", "/logs/summary/", "/logs/adherence/", "/streaks/");
-            const dashboardOk = await renderDashboard();
-            await refreshActivityFeed();
-
-            if (!dashboardOk) {
-                errorText.textContent =
-                    "Medicine saved, but the dashboard could not be refreshed. Please reload.";
-                return;
-            }
-
             medForm.reset();
             startInput.value = todayStr;
             endInput.value = todayStr;
             successText.textContent = "Medicine saved successfully!";
             setTimeout(() => (successText.textContent = ""), 2000);
             showToast("Medicine saved successfully!", "success");
+
+            document.querySelectorAll(".nav-btn").forEach(btn => btn.classList.remove("active"));
+            document.querySelector('.nav-btn[data-view="dashboard-view"]')?.classList.add("active");
+            Promise.resolve(switchView("dashboard-view")).then(ok => {
+                if (ok === false) showToast("Medicine was saved, but today’s list could not refresh. Use the dashboard refresh and try again.", "warning", 5000);
+            }).catch(err => console.warn("Dashboard refresh after medication save failed:", err));
         } catch (err) {
             errorText.textContent = err.message || "Network error. Please try again.";
         } finally {
@@ -2253,7 +2270,7 @@ async function renderDashboard() {
     const scheduleTable = document.getElementById("schedule-table");
     const statsElem = document.getElementById("today-stats");
 
-    if (!dateElem || !tbody || !scheduleTable || !noMedsMsg) return;
+    if (!dateElem || !tbody || !scheduleTable || !noMedsMsg) return false;
 
     const today = new Date();
     // Use LOCAL date (not UTC via toISOString) so the date string matches the
@@ -2302,17 +2319,19 @@ async function renderDashboard() {
         logs = todayLogs;
 
         const medsLoadOk = (medsRes.status === "fulfilled" && Array.isArray(medsRes.value));
-        const meds = medsLoadOk ? medsRes.value : [];
+        if (!medsLoadOk) {
+            console.error("Failed to fetch medications:", medsRes.status === "rejected" ? medsRes.reason : medsRes.value);
+            noMedsMsg.style.display = "block";
+            noMedsMsg.textContent = "Could not load medicines from server. Your saved medicines are unchanged. Please try again.";
+            return false;
+        }
+        const meds = medsRes.value;
         console.log(`[FEAT-001 DEBUG] renderDashboard: fetched ${meds.length} medications:`, meds);
         console.log(`[FEAT-001 DEBUG] Updating medsCache from ${medsCache ? medsCache.length : 'null'} to ${meds.length} items`);
         medsCache = meds;
         medsCacheDate = todayStr;
         console.log(`[FEAT-001 DEBUG] medsCache updated successfully, length: ${medsCache.length}`);
         console.log(`[FEAT-001 DEBUG] medsCacheDate set to: ${medsCacheDate}`);
-
-        if (medsRes.status === "rejected") {
-            console.error("Failed to fetch medications:", medsRes.reason);
-        }
 
         if (meds.length === 0) {
             tbody.innerHTML = "";
@@ -2333,7 +2352,7 @@ async function renderDashboard() {
             loadLatestBmi();
             renderRecentActivity();
             renderReports(logs).catch(e => console.warn("[Dashboard] weekly-chart renderReports error:", e));
-            return;
+            return true;
         }
 
         tbody.innerHTML = "";
@@ -2408,16 +2427,19 @@ async function renderDashboard() {
                 } else {
                     btn.textContent = "Mark taken";
                     btn.className = "action-btn action-btn-take";
-                    btn.addEventListener("click", async () => {
-                        await markDoseTaken(
+                    btn.addEventListener("click", async (event) => {
+                        const clickedButton = event.currentTarget;
+                        const saved = await markDoseTaken(
                             currentUser.id,
                             med.id,
                             todayStr,
                             displayTime,
-                            med.name
+                            med.name,
+                            clickedButton
                         );
-                        await renderDashboard();
-                        await refreshActivityFeed();
+                        if (saved) {
+                            renderDashboard().catch(err => console.warn("Dashboard refresh after dose update failed:", err));
+                        }
                     });
                 }
 
@@ -2545,9 +2567,10 @@ async function renderDashboard() {
         // Report whether today's medications actually loaded. Callers (e.g. the
         // add-medicine flow) use this to avoid showing a successful-but-empty
         // schedule when the medication fetch itself failed.
-        return medsLoadOk;
+        return true;
     } catch (err) {
         console.error(err);
+        if (renderId !== _dashboardRenderId) return null;
         noMedsMsg.style.display = "block";
         noMedsMsg.textContent = "Could not load medicines from server.";
         scheduleTable.style.display = "none";
@@ -2758,7 +2781,7 @@ function getDoseStatus(userId, medId, dateStr, timeStr) {
     return "PENDING";
 }
 
-async function markDoseTaken(userId, medId, dateStr, timeStr, medName = "") {
+async function markDoseTaken(userId, medId, dateStr, timeStr, medName = "", targetButton = null) {
     stopReminderAudio();
 
     const body = {
@@ -2768,15 +2791,6 @@ async function markDoseTaken(userId, medId, dateStr, timeStr, medName = "") {
         time: timeStr,
         status: "TAKEN",
     };
-
-    // Find and update the button to show loading state
-    const buttons = document.querySelectorAll('.action-btn-take');
-    let targetButton = null;
-    buttons.forEach(btn => {
-        if (btn.textContent === "Mark taken" && !btn.disabled) {
-            targetButton = btn;
-        }
-    });
 
     if (targetButton) {
         targetButton.textContent = "Marking...";
@@ -2790,12 +2804,14 @@ async function markDoseTaken(userId, medId, dateStr, timeStr, medName = "") {
             body: JSON.stringify(body),
         });
         if (!res.ok) {
-            console.error("Failed to save log");
+            const detail = await res.text().catch(() => "");
+            console.error("Failed to save dose status:", res.status, detail);
             if (targetButton) {
                 targetButton.textContent = "Mark taken";
                 targetButton.disabled = false;
             }
             showToast("Failed to mark dose as taken. Please try again.", "error");
+            return false;
         } else {
             invalidateDataCache("/logs/today/", "/logs/summary/", "/logs/adherence/", "/streaks/");
             if (medName) {
@@ -2809,6 +2825,7 @@ async function markDoseTaken(userId, medId, dateStr, timeStr, medName = "") {
                 targetButton.textContent = "Taken";
                 targetButton.className = "action-btn action-btn-taken";
             }
+            return true;
         }
     } catch (err) {
         console.error(err);
@@ -2817,6 +2834,7 @@ async function markDoseTaken(userId, medId, dateStr, timeStr, medName = "") {
             targetButton.disabled = false;
         }
         showToast("Network error. Please try again.", "error");
+        return false;
     }
 }
 
@@ -7233,18 +7251,20 @@ function showNotifPermissionBanner() {
     // Animate in
     requestAnimationFrame(() => banner.classList.add("notif-banner-visible"));
 
-    document.getElementById("notif-banner-allow-btn").addEventListener("click", () => {
-        requestNotificationPermission().then(permission => {
+    document.getElementById("notif-banner-allow-btn").addEventListener("click", async event => {
+        const button = event.currentTarget;
+        button.disabled = true;
+        try {
+            await enableDoseBuddyPush();
             banner.classList.remove("notif-banner-visible");
             setTimeout(() => banner.remove(), 300);
-            if (permission === "granted") {
-                showToast("Notifications enabled! You'll get dose reminders on time.", "success", 5000);
-                // Re-schedule now that we have permission
-                scheduleMedicineReminders();
-            } else if (permission === "denied") {
-                showToast("Notifications blocked. To enable, click the lock icon in your browser's address bar.", "warning", 8000);
-            }
-        });
+            showToast("Background push subscription is active on this device.", "success", 5000);
+            scheduleMedicineReminders();
+        } catch (error) {
+            showToast(error.message || "Could not enable background notifications.", "warning", 8000);
+        } finally {
+            button.disabled = false;
+        }
     });
 
     document.getElementById("notif-banner-dismiss-btn").addEventListener("click", () => {
@@ -7271,6 +7291,54 @@ function requestNotificationPermission() {
     });
 }
 
+function decodeVapidPublicKey(value) {
+    const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
+    const binary = atob(normalized + "=".repeat((4 - normalized.length % 4) % 4));
+    return Uint8Array.from(binary, char => char.charCodeAt(0));
+}
+
+// Must be invoked from an explicit user gesture so permission prompts and
+// PushManager.subscribe are allowed by browsers.
+async function enableDoseBuddyPush() {
+    if (!currentUser) throw new Error("Please sign in before enabling reminders.");
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+        throw new Error("Background push is not supported by this browser.");
+    }
+    const permission = await requestNotificationPermission();
+    if (permission !== "granted") throw new Error(permission === "denied"
+        ? "Notifications are blocked in browser settings. Allow them for this site first."
+        : "Notification permission was not granted.");
+
+    const registration = await navigator.serviceWorker.ready;
+    const keyResponse = await authFetch(`${API_BASE}/push/vapid-key`);
+    const keyData = await keyResponse.json().catch(() => ({}));
+    if (!keyResponse.ok || !keyData.publicKey) {
+        throw new Error(keyData.message || "Push notifications are not configured on the server yet.");
+    }
+    let subscription = await registration.pushManager.getSubscription();
+    if (!subscription) {
+        subscription = await registration.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: decodeVapidPublicKey(keyData.publicKey)
+        });
+    }
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const response = await authFetch(`${API_BASE}/push/subscribe`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subscription: subscription.toJSON(), timeZone: zone })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+        if (data.schedulingAvailable === false || data.needsTimeZoneSetup) {
+            currentUser.schedulingAvailable = false;
+            currentUser.schedulingStatusMessage = data.message;
+        }
+        throw new Error(data.message || `Could not register push subscription (${response.status}).`);
+    }
+    return subscription;
+}
+
 // Updates the permission status row inside the Notification Preferences modal.
 function updateNotifPermissionStatus() {
     const statusRow   = document.getElementById("notif-perm-status-row");
@@ -7295,9 +7363,9 @@ function updateNotifPermissionStatus() {
 
     const perm = Notification.permission;
     if (perm === "granted") {
-        statusText.textContent  = "✓ Enabled — you will receive dose reminders.";
+        statusText.textContent  = "Permission granted. Background delivery still needs an active push subscription.";
         statusText.className    = "notif-perm-text notif-perm-granted";
-        enableBtn.style.display = "none";
+        enableBtn.style.display = "inline-flex";
     } else if (perm === "denied") {
         statusText.textContent  = "✕ Blocked — enable notifications in your browser settings to receive dose reminders.";
         statusText.className    = "notif-perm-text notif-perm-denied";
@@ -7679,20 +7747,22 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     // "Enable Notifications" button inside the preferences modal
-    document.getElementById("notif-perm-enable-btn")?.addEventListener("click", () => {
-        requestNotificationPermission().then(permission => {
+    document.getElementById("notif-perm-enable-btn")?.addEventListener("click", async event => {
+        const button = event.currentTarget;
+        button.disabled = true;
+        try {
+            await enableDoseBuddyPush();
             updateNotifPermissionStatus();
-            if (permission === "granted") {
-                showToast("Notifications enabled! You'll get dose reminders on time.", "success", 5000);
-                // Remove the banner if it was showing
-                const banner = document.getElementById("notif-permission-banner");
-                if (banner) { banner.classList.remove("notif-banner-visible"); setTimeout(() => banner.remove(), 300); }
-                // Re-schedule now that we have permission
-                scheduleMedicineReminders();
-            } else if (permission === "denied") {
-                showToast("Notifications blocked. Click the lock icon in your browser's address bar to allow them.", "warning", 8000);
-            }
-        });
+            showToast("Background push subscription is active on this device.", "success", 5000);
+            const banner = document.getElementById("notif-permission-banner");
+            if (banner) { banner.classList.remove("notif-banner-visible"); setTimeout(() => banner.remove(), 300); }
+            scheduleMedicineReminders();
+        } catch (error) {
+            updateNotifPermissionStatus();
+            showToast(error.message || "Could not enable background notifications.", "warning", 8000);
+        } finally {
+            button.disabled = false;
+        }
     });
 
     // "Enable Reminder Sounds" button — unlocks audio on mobile/desktop
