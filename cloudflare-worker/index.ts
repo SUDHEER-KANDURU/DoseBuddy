@@ -2078,7 +2078,9 @@ const worker = {
           name = String(b.name ?? "").trim(),
           role = String(b.role || "PATIENT").toUpperCase(),
           patientEmail = role === "CAREGIVER" ? String(b.patientEmail ?? "").trim().toLowerCase() : null,
-          acceptedTerms = b.acceptedTerms !== undefined ? Boolean(b.acceptedTerms) : true;
+          acceptedTerms = b.acceptedTerms !== undefined ? Boolean(b.acceptedTerms) : true,
+          // Default a non-null time zone so no user is left NULL; honor the signup body's zone if valid.
+          signupZone = canonicalTimeZone(b.timeZone) ?? "UTC";
 
         if (!email || !password || !name) return json({ message: "Name, email and password are required" }, 400);
         if (b.acceptedTerms === false) return json({ message: "You must accept the Terms & Conditions to create an account" }, 400);
@@ -2099,8 +2101,8 @@ const worker = {
           phase = "insert_user";
           const [result] = await query<{ insertId: number }>(
             db,
-            "INSERT INTO users (name,email,password_hash,role,patient_email,phone,dob,gender,emergency_contact,accepted_terms,accepted_terms_timestamp,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,NOW(),NOW(),NOW())",
-            [name, email, passwordHash, role, patientEmail, b.phone || null, b.dob || null, b.gender || null, b.emergencyContact || null, acceptedTerms]
+            "INSERT INTO users (name,email,password_hash,role,patient_email,phone,dob,gender,emergency_contact,accepted_terms,time_zone,accepted_terms_timestamp,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,NOW(),NOW(),NOW())",
+            [name, email, passwordHash, role, patientEmail, b.phone || null, b.dob || null, b.gender || null, b.emergencyContact || null, acceptedTerms, signupZone]
           );
 
           phase = "fetch_created_user";
@@ -2402,9 +2404,12 @@ const worker = {
           : (await query<User[]>(env, "SELECT * FROM users WHERE email=? LIMIT 1", [decodeURIComponent(medsEmail![1]).toLowerCase()]))[0][0];
         if (!target) return plain(medsId ? "User not found" : "Patient not found", 400);
         if (!accessible(actor, target)) return plain("Access denied", 403);
+        const reqDate = url.searchParams.get("date");
+        if (reqDate !== null && !/^\d{4}-\d{2}-\d{2}$/.test(reqDate)) return json({ message: "date must be in YYYY-MM-DD format" }, 400);
         const targetZone = canonicalTimeZone(target.time_zone);
-        if (!targetZone) return json([]);
-        const medsDateStr = zonedParts(Date.now(), targetZone).date;
+        // Honor the client-provided ?date=; only derive from the stored zone when no date is sent.
+        // A missing/invalid time zone must NOT hide the medication list (it stays available for scheduling).
+        const medsDateStr = reqDate ?? (targetZone ? zonedParts(Date.now(), targetZone).date : new Date().toISOString().slice(0, 10));
         const [rows] = await query<Json[]>(
           env,
           "SELECT m.*,JSON_ARRAYAGG(JSON_OBJECT('id',mt.id,'timeOfDay',TIME_FORMAT(mt.time_of_day,'%H:%i:%s'))) times FROM medications m LEFT JOIN medication_times mt ON mt.medication_id=m.id WHERE m.user_id=? AND m.active=1 AND m.start_date<=? AND m.end_date>=? GROUP BY m.id",
@@ -2629,6 +2634,10 @@ const worker = {
       }
 
       // ── Push Subscriptions ──────────────────────────────────────────────────
+      if (path === "/api/user/time-zone" && request.method === "GET") {
+        return json({ timeZone: canonicalTimeZone(actor.time_zone) });
+      }
+
       if (path === "/api/user/time-zone" && request.method === "PUT") {
         const { body: b } = await requestBody(request);
         const timeZone = canonicalTimeZone(b.timeZone);
