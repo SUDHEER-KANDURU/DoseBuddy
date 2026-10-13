@@ -199,6 +199,90 @@ test("medication create rejects malformed schedules before database writes", asy
   }
 });
 
+test("today route honors ?date= and no longer hides the list when time_zone is NULL", async () => {
+  // Reproduces the production bug: a user whose stored time_zone is NULL used to get [].
+  const nullZonePatient = { id: 1, email: "patient@example.test", password_hash: "password123", name: "Patient", role: "PATIENT", time_zone: null, accepted_terms: 1 };
+  class NullZoneAdapter extends RouteDbAdapter {
+    medication = { id: 7, user_id: 1, name: "Current med", dosage: "5mg", instructions: null, start_date: "2026-10-13", end_date: "2026-10-13", active: 1, schedule_version: 3 };
+    async query(statement: string, values: unknown[] = []): Promise<any> {
+      if (statement.includes("FROM users WHERE email=?") || statement.includes("FROM users WHERE id=?")) {
+        this.calls.push([statement, values]);
+        return [[nullZonePatient], undefined];
+      }
+      if (statement.includes("JSON_ARRAYAGG") && statement.includes("FROM medications")) {
+        this.calls.push([statement, values]);
+        // Honor the date comparison the handler passes so an out-of-range date yields [].
+        const compareDate = String(values[1]);
+        const inRange = this.medication.start_date <= compareDate && compareDate <= this.medication.end_date;
+        return [inRange ? [{ ...this.medication, times: [{ id: 1, timeOfDay: "08:00:00" }] }] : [], undefined];
+      }
+      return super.query(statement, values);
+    }
+  }
+
+  const db = new NullZoneAdapter();
+  const { accessToken } = await login(db);
+
+  const inRange = await worker.fetch(authorized("/api/medications/today/1?date=2026-10-13", accessToken), env(db));
+  assert.equal(inRange.status, 200);
+  const inRangeBody = await inRange.json() as any[];
+  assert.equal(inRangeBody.length, 1);
+  assert.equal(inRangeBody[0].id, 7);
+  // The date reached the SQL comparison params.
+  const todayCall = db.calls.find(([sql]) => sql.includes("JSON_ARRAYAGG"));
+  assert.deepEqual(todayCall?.[1], [1, "2026-10-13", "2026-10-13"]);
+
+  const outOfRange = await worker.fetch(authorized("/api/medications/today/1?date=2026-10-12", accessToken), env(db));
+  assert.equal(outOfRange.status, 200);
+  assert.deepEqual(await outOfRange.json(), []);
+
+  const badFormat = await worker.fetch(authorized("/api/medications/today/1?date=13-10-2026", accessToken), env(db));
+  assert.equal(badFormat.status, 400);
+});
+
+test("GET /api/user/time-zone returns the stored zone instead of a 500", async () => {
+  const db = new RouteDbAdapter();
+  const { accessToken } = await login(db);
+  const response = await worker.fetch(authorized("/api/user/time-zone", accessToken), env(db));
+  assert.equal(response.status, 200);
+  assert.equal((await response.json() as any).timeZone, "UTC");
+});
+
+test("signup defaults time_zone to UTC and honors a valid body zone", async () => {
+  // The signup path first checks for an existing email; this adapter reports none so the INSERT runs.
+  class SignupAdapter extends RouteDbAdapter {
+    async query(statement: string, values: unknown[] = []): Promise<any> {
+      if (statement.startsWith("SELECT id FROM users WHERE email=?")) {
+        this.calls.push([statement, values]);
+        return [[], undefined];
+      }
+      if (statement.startsWith("SELECT * FROM users WHERE id=?")) {
+        this.calls.push([statement, values]);
+        return [[{ ...patient, id: 42, time_zone: String(values[0]) }], undefined];
+      }
+      return super.query(statement, values);
+    }
+  }
+
+  const db = new SignupAdapter();
+  const defaulted = await worker.fetch(new Request("https://dosebuddy.test/api/auth/signup", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name: "New", email: "new@example.test", password: "password123" })
+  }), env(db));
+  assert.equal(defaulted.status, 200);
+  const defaultInsert = db.calls.find(([sql]) => sql.startsWith("INSERT INTO users"));
+  assert.equal(defaultInsert?.[1][10], "UTC");
+
+  const db2 = new SignupAdapter();
+  const zoned = await worker.fetch(new Request("https://dosebuddy.test/api/auth/signup", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name: "New", email: "new2@example.test", password: "password123", timeZone: "America/New_York" })
+  }), env(db2));
+  assert.equal(zoned.status, 200);
+  const zonedInsert = db2.calls.find(([sql]) => sql.startsWith("INSERT INTO users"));
+  assert.equal(zonedInsert?.[1][10], "America/New_York");
+});
+
 test("medication create retries with the legacy schema after notification-column failure", async () => {
   const db = new RouteDbAdapter();
   db.failMedicationInsert = Object.assign(new Error("Unknown column 'active' in 'field list'"), { code: "ER_BAD_FIELD_ERROR" });
