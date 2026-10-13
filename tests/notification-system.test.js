@@ -9,10 +9,14 @@
  * - Subscription management
  */
 
+// Dummy, non-secret test fixture. NOT a real VAPID key — it is only shaped like one
+// (valid base64url that decodes to 32 bytes) so the length check in testVapidKeyValidation passes.
+const TEST_VAPID_PRIVATE_KEY_FIXTURE = "TEST_FAKE_VAPID_PRIVATE_KEY_NOT_A_REAL_KEYx";
+
 // Mock data for testing
 const mockEnv = {
   VAPID_PUBLIC_KEY: "BPyb997Xi8LPO3lO0CbXIMjl1WVDt9UqMjW1MndPNPbKuJ2KJRySoIsefzxyzn5GLi4TI02WyQKq0LSCOitAmUw",
-  VAPID_PRIVATE_KEY: "6XeEhdwN95Y3egD_shkwdscwgD3BvKt8-6-SaU5hXSk", 
+  VAPID_PRIVATE_KEY: TEST_VAPID_PRIVATE_KEY_FIXTURE,
   VAPID_EMAIL: "test@dosebuddy.com",
   HYPERDRIVE: {
     host: "localhost",

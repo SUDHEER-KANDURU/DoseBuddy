@@ -12,3 +12,10 @@ worker-configuration.d.ts
 
 # Git worktrees
 .worktrees/
+
+# Generated notification/agent report artifacts (keep out of version control)
+NOTIFICATION_*.md
+*_IMPLEMENTATION_REPORT.md
+*_TEST_PLAN.md
+*_RELEASE_GATE.md
+*_DEPLOYMENT_SUMMARY.md
