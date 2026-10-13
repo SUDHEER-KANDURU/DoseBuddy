@@ -1042,6 +1042,23 @@ function detectIntent(message: string, userMedications: any[]): string {
   const hasMedicineKeyword = medicineKeywords.some(keyword => lowerMessage.includes(keyword));
   const hasMedicineAction = medicineActions.some(action => lowerMessage.includes(action));
   
+  // Strong, schedule-specific phrasing classifies as SCHEDULE on its own, even
+  // without "take"/"taking" (e.g. "Show me today's medicine schedule"). These
+  // triggers are scoped to schedule-specific wording so generic "time"/"when"
+  // usage ("what time does ibuprofen peak") is NOT captured here.
+  const schedulePhrases = [
+    'my schedule', 'medicine schedule', 'medication schedule', 'dose schedule',
+    "today's schedule", 'todays schedule', 'review my schedule', 'my medication list schedule'
+  ];
+  const hasSchedulePhrase = schedulePhrases.some(phrase => lowerMessage.includes(phrase));
+  const hasScheduleWord = lowerMessage.includes('schedule');
+  const hasShowVerb = ['show', 'see', 'view'].some(v => lowerMessage.includes(v));
+  if (hasSchedulePhrase ||
+      (hasScheduleWord && (hasShowVerb || lowerMessage.includes('today'))) ||
+      lowerMessage.includes('when do i take') || lowerMessage.includes('when should i take')) {
+    return "SCHEDULE";
+  }
+  
   if (hasMedicineKeyword && (hasMedicineAction || lowerMessage.includes('what is') || lowerMessage.includes('tell me'))) {
     return "MEDICINE_INFO";
   }
@@ -1052,7 +1069,7 @@ function detectIntent(message: string, userMedications: any[]): string {
   }
   
   // Enhanced symptom detection - handle complex phrases like "headache body pains"
-  const symptomKeywords = ['pain', 'pains', 'ache', 'aches', 'hurt', 'sore', 'sick', 'nausea', 'dizzy', 'fever', 'headache', 'stomach', 'chest', 'back', 'joint', 'muscle', 'body'];
+  const symptomKeywords = ['symptom', 'symptoms', 'pain', 'pains', 'ache', 'aches', 'hurt', 'sore', 'sick', 'nausea', 'dizzy', 'fever', 'headache', 'stomach', 'chest', 'back', 'joint', 'muscle', 'body'];
   const symptomIndicators = ['feel', 'feeling', 'have', 'having', 'experiencing', 'suffering', 'getting', 'been'];
   const temporalIndicators = ['for', 'since', 'from', 'days', 'hours', 'weeks', 'yesterday', 'today', 'ago'];
   
@@ -1623,14 +1640,23 @@ async function processSideEffectIntent(env: Env, message: string, conversationId
     return response;
   }
   
-  // Continue with side effect analysis
-  const analysis = "Based on your description, this could potentially be related to your medication. " +
-    "However, I cannot definitively determine if this is a side effect. " +
-    "Please contact your healthcare provider or pharmacist to discuss this concern. " +
-    "If symptoms are severe or worsening, seek medical attention promptly.";
+  // The user has indicated which medicine (or "not sure"/"any"). Produce a real
+  // AI-backed, concise answer with safety framing instead of a static deflection.
+  let sideEffectContext = `User's side-effect concern: ${message}\n`;
+  if (userMedications.length > 0) {
+    const medNames = userMedications.map(med => `${med.name} ${med.dosage || ""}`.trim());
+    sideEffectContext += `Current medications: ${medNames.join(", ")}\n`;
+  }
+  const sideEffectPrompt =
+    `A patient is concerned about a possible medication side effect. ${sideEffectContext}` +
+    `Give a concise (2-4 sentences), non-diagnostic answer about whether this is a commonly reported side effect ` +
+    `and what to watch for. Do not diagnose or prescribe. Advise consulting their pharmacist or healthcare provider, ` +
+    `and to seek urgent medical care if symptoms are severe or worsening.`;
+  const sideEffectResp = await callAi(env, sideEffectPrompt);
+  const sideEffectAnalysis = await sideEffectResp.text();
   
   response.messageType = "RESPONSE";
-  response.message = analysis;
+  response.message = sideEffectAnalysis;
   conversationState.completed = true;
   response.conversationState = conversationState;
   
@@ -1644,14 +1670,18 @@ async function processInteractionIntent(env: Env, message: string, conversationI
     messageType: "RESPONSE"
   };
 
-  let analysis = "For medication interaction questions, I recommend consulting with your pharmacist " +
-    "or healthcare provider who can check your complete medication list against reliable " +
-    "drug interaction databases. They can provide personalized advice based on your " +
-    "specific medications, dosages, and health conditions.";
-  
+  let interactionContext = `User's interaction question: ${message}\n`;
   if (userMedications.length > 0) {
-    analysis = `I see you're currently taking ${userMedications.length} medication(s). ${analysis}`;
+    const medNames = userMedications.map(med => `${med.name} ${med.dosage || ""}`.trim());
+    interactionContext += `Current medications: ${medNames.join(", ")}\n`;
   }
+  const interactionPrompt =
+    `A patient is asking about a possible medication interaction. ${interactionContext}` +
+    `Give a concise (2-4 sentences), non-diagnostic answer about general interaction considerations. ` +
+    `Do not diagnose or prescribe. Recommend confirming with their pharmacist or healthcare provider, ` +
+    `who can check their full medication list against reliable interaction databases.`;
+  const interactionResp = await callAi(env, interactionPrompt);
+  const analysis = await interactionResp.text();
   
   response.message = analysis;
   conversationState.completed = true;
@@ -1703,11 +1733,13 @@ async function processPrescriptionIntent(env: Env, message: string, conversation
     messageType: "RESPONSE"
   };
 
-  const analysis = "For prescription-related questions, I recommend:\n\n" +
-    "• Contact your prescribing healthcare provider for clarification\n" +
-    "• Speak with your pharmacist about dosage or administration questions\n" +
-    "• Use DoseBuddy's prescription upload feature to help organize your medications\n\n" +
-    "Always follow the instructions provided by your healthcare provider and pharmacist.";
+  const prescriptionPrompt =
+    `A patient has a prescription-related question: ${message}\n` +
+    `Give a concise (2-4 sentences), non-diagnostic answer. Do not diagnose or prescribe. ` +
+    `Advise them to follow the instructions from their prescribing healthcare provider and pharmacist, ` +
+    `and to contact them for clarification on dosage or administration.`;
+  const prescriptionResp = await callAi(env, prescriptionPrompt);
+  const analysis = await prescriptionResp.text();
   
   response.message = analysis;
   conversationState.completed = true;
@@ -1723,9 +1755,13 @@ async function processGeneralHealthIntent(env: Env, message: string, conversatio
     messageType: "RESPONSE"
   };
 
-  const analysis = "I'm here to help with medicine information, symptom questions, and medication management. " +
-    "For general health questions, please consult with qualified healthcare professionals. " +
-    "Is there something specific about your medications or symptoms I can help you with?";
+  const generalPrompt =
+    `You are DoseBuddy's health assistant. A user sent this message: ${message}\n` +
+    `Give a concise (2-4 sentences), helpful, non-diagnostic answer. Do not diagnose or prescribe. ` +
+    `If the question is outside medicine information, symptoms, or medication management, briefly guide them ` +
+    `and recommend consulting a qualified healthcare professional for personal medical advice.`;
+  const generalResp = await callAi(env, generalPrompt);
+  const analysis = await generalResp.text();
   
   response.message = analysis;
   conversationState.completed = true;
@@ -1766,17 +1802,20 @@ async function processUnifiedChat(env: Env, message: string, conversationId: str
     currentIntent = previousIntent;
   } else {
     currentIntent = detected;
-    // When switching the stored intent AWAY from a symptom flow to a
-    // non-symptom intent, clear symptom-flow state so the new topic starts
-    // clean and no stale symptom data leaks. Staying in or switching INTO
-    // SYMPTOM_CHECK preserves symptom context for follow-ups.
-    if (previousIntent === "SYMPTOM_CHECK" && currentIntent !== "SYMPTOM_CHECK") {
-      delete conversationState.currentQuestion;
+    // This is a fresh, re-classified message (not a mid-flow continuation), so
+    // reset the per-flow transient state before dispatching. This guarantees a
+    // brand-new message after a "completed" turn (SIDE_EFFECT, SCHEDULE,
+    // INTERACTION, etc.) is handled fresh and never dead-ends on the same canned
+    // reply. We clear the in-flight question and completion flag for every intent
+    // switch; symptom-specific context is additionally cleared when the new intent
+    // is NOT SYMPTOM_CHECK so symptom follow-ups ("Since yesterday") still work.
+    delete conversationState.currentQuestion;
+    delete conversationState.completed;
+    if (currentIntent !== "SYMPTOM_CHECK") {
       delete conversationState.reportedSymptom;
       delete conversationState.severity;
       delete conversationState.duration;
       delete conversationState.medicationTiming;
-      delete conversationState.completed;
       delete conversationState.extractedFacts;
     }
     conversationState.currentIntent = currentIntent;

@@ -288,6 +288,12 @@ function registerServiceWorker() {
     });
 }
 
+// Branded notification icon. The app ships no /favicon.ico file (the page icon is
+// an inline data: SVG in index.html), so pointing notification icon/badge at
+// "/favicon.ico" caused a failing network request for every notification. Reuse
+// the same inline SVG here to keep the branded icon with zero network requests.
+const NOTIFICATION_ICON = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2300A19B'/%3E%3Cg transform='translate(16%2C16) scale(0.9) translate(-12%2C-12)'%3E%3Cpath d='M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/g%3E%3C/svg%3E";
+
 /**
  * Show a system (browser) notification using the Service Worker.
  * Falls back to direct 'new Notification()' if service worker fails.
@@ -325,8 +331,8 @@ async function showDoseBuddySystemNotification(title, options = {}) {
                     console.log("[DoseBuddy Notifications] Using Service Worker registration:", reg.scope);
                     
                     await reg.showNotification(title, {
-                        icon:  "/favicon.ico",
-                        badge: "/favicon.ico",
+                        icon:  NOTIFICATION_ICON,
+                        badge: NOTIFICATION_ICON,
                         ...options,
                     });
                     
@@ -348,8 +354,8 @@ async function showDoseBuddySystemNotification(title, options = {}) {
             console.log("[DoseBuddy Notifications] Using fallback: direct 'new Notification()'");
             
             const notification = new Notification(title, {
-                icon: "/favicon.ico",
-                badge: "/favicon.ico",
+                icon: NOTIFICATION_ICON,
+                badge: NOTIFICATION_ICON,
                 ...options,
             });
             
@@ -4498,7 +4504,7 @@ function triggerDoseNotification(med, dateStr, displayTime) {
     // ── System notification via Service Worker with fallback ─────────────────────
     showDoseBuddySystemNotification("DoseBuddy Reminder", {
         body:  `Time to take ${med.name} (${med.dosage})`,
-        icon:  "/favicon.ico",
+        icon:  NOTIFICATION_ICON,
         tag:   key,
         data:  { url: self?.location?.origin || "/" },
         requireInteraction: false,

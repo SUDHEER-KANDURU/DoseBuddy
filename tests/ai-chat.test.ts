@@ -155,6 +155,69 @@ test("(7) a fresh typed symptom report is not overridden by stale intent without
   assert.equal(payload.intent, "SYMPTOM_CHECK");
 });
 
+test("(11) 'Show me today's medicine schedule' routes to SCHEDULE", async () => {
+  const meds = [{ id: 7, name: "Lisinopril", dosage: "10mg", times: [{ id: 1, timeOfDay: "08:00:00" }] }];
+  const db = new ChatDbAdapter(meds);
+  const token = await login(db);
+  const { payload } = await chat(db, token, { message: "Show me today's medicine schedule", conversationId: "c11" });
+  assert.equal(payload.intent, "SCHEDULE");
+  assert.ok(typeof payload.message === "string" && payload.message.length > 0, "non-empty schedule message");
+});
+
+test("(12) all four welcome-screen starter prompts route to the intended handler", async () => {
+  const meds = [{ id: 7, name: "Lisinopril", dosage: "10mg", times: [{ id: 1, timeOfDay: "08:00:00" }] }];
+  const cases: Array<[string, string]> = [
+    ["Tell me about one of my medicines", "MEDICINE_INFO"],
+    ["I'm experiencing some symptoms", "SYMPTOM_CHECK"],
+    ["I think I'm having a side effect", "SIDE_EFFECT"],
+    ["Show me today's medicine schedule", "SCHEDULE"]
+  ];
+  let i = 0;
+  for (const [message, expected] of cases) {
+    const db = new ChatDbAdapter(meds);
+    const token = await login(db);
+    const { payload } = await chat(db, token, { message, conversationId: `c12-${i++}` });
+    assert.equal(payload.intent, expected, `"${message}" should route to ${expected}`);
+  }
+});
+
+test("(13) after a completed SIDE_EFFECT turn, a new unrelated message re-classifies and does not get stuck", async () => {
+  const meds = [{ id: 7, name: "Lisinopril", dosage: "10mg", times: [{ id: 1, timeOfDay: "08:00:00" }] }];
+  const db = new ChatDbAdapter(meds);
+  const token = await login(db);
+
+  // 1) Enter the side-effect flow -> asks which medicine.
+  const first = await chat(db, token, { message: "I think I'm having a side effect", conversationId: "c13" });
+  assert.equal(first.payload.intent, "SIDE_EFFECT");
+  assert.equal(first.payload.messageType, "QUESTION");
+  const stateAfterQuestion = first.payload.conversationState;
+
+  // 2) Answer the "which medicine" question (option selection) -> completes the flow with a real answer.
+  const answered = await chat(db, token, {
+    message: "Lisinopril",
+    conversationId: "c13",
+    conversationState: stateAfterQuestion,
+    isOptionSelection: true
+  });
+  assert.equal(answered.payload.intent, "SIDE_EFFECT");
+  assert.equal(answered.payload.messageType, "RESPONSE");
+  assert.ok(answered.payload.conversationState.completed === true, "side-effect flow completes");
+  const stateAfterAnswer = answered.payload.conversationState;
+
+  // 3) A brand-new unrelated message must re-classify, not dead-end on the side-effect handler.
+  // (In the keyless test env callAi returns the same generic "unavailable" notice for every
+  // prompt, so the meaningful anti-stuck signal is the re-classified intent and the cleared
+  // in-flight question state, not the exact AI wording.)
+  const next = await chat(db, token, {
+    message: "zinc",
+    conversationId: "c13",
+    conversationState: stateAfterAnswer
+  });
+  assert.equal(next.payload.intent, "MEDICINE_INFO", "new typed message re-classifies away from SIDE_EFFECT");
+  assert.equal(next.payload.medicineName, "zinc", "the new message is handled fresh by the medicine handler");
+  assert.notEqual(next.payload.conversationState.currentIntent, "SIDE_EFFECT", "stored intent advances, not stuck");
+});
+
 test("(10) with an empty medication list the personal path never fabricates a medicine", async () => {
   const db = new ChatDbAdapter([]);
   const token = await login(db);
