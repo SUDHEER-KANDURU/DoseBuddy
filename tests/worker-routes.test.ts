@@ -31,6 +31,9 @@ class RouteDbAdapter {
     if (statement.includes("JSON_ARRAYAGG") && statement.includes("FROM medications")) {
       return [[{ ...this.medication, times: [{ id: 1, timeOfDay: "08:00:00" }] }], undefined];
     }
+    if (statement.includes("FROM intake_logs l JOIN medications m")) {
+      return [[{ id: 4, date: "2026-10-13", time: "09:00", medicationId: 7, medicineName: this.medication.name, dosage: this.medication.dosage, status: "MISSED" }], undefined];
+    }
     if (statement.startsWith("INSERT INTO medications")) return [{ insertId: 8, affectedRows: 1 }, undefined];
     if (statement.startsWith("INSERT INTO dose_occurrences")) return [{ insertId: 9, affectedRows: 1 }, undefined];
     if (statement.startsWith("UPDATE dose_occurrences")) return [{ affectedRows: 1 }, undefined];
@@ -83,6 +86,22 @@ test("auth routes execute their existing response contracts", async () => {
   }), env(db));
   assert.equal(refresh.status, 200);
   assert.ok((await refresh.json() as any).accessToken);
+});
+
+test("history route returns the medicineName field used by the UI", async () => {
+  const db = new RouteDbAdapter();
+  const { accessToken } = await login(db);
+  const response = await worker.fetch(authorized("/api/logs/history/1?page=0&size=100", accessToken), env(db));
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), [{
+    id: 4,
+    date: "2026-10-13",
+    time: "09:00",
+    medicationId: 7,
+    medicineName: "Current med",
+    dosage: "5mg",
+    status: "MISSED"
+  }]);
 });
 
 test("medication, push, and TAKEN routes execute through the database adapter", async () => {

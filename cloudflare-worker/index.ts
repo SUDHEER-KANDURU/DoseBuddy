@@ -2732,7 +2732,7 @@ const worker = {
 
         const [rows] = await query<Json[]>(
           env,
-          "SELECT l.id, DATE_FORMAT(l.date,'%Y-%m-%d') AS date, TIME_FORMAT(l.time,'%H:%i') AS time, l.medication_id AS medicationId, m.name AS medicationName, m.dosage, l.status FROM intake_logs l JOIN medications m ON m.id=l.medication_id WHERE l.marker_user_id=? ORDER BY l.date DESC, l.time DESC LIMIT ? OFFSET ?",
+          "SELECT l.id, DATE_FORMAT(l.date,'%Y-%m-%d') AS date, TIME_FORMAT(l.time,'%H:%i') AS time, l.medication_id AS medicationId, m.name AS medicineName, m.dosage, l.status FROM intake_logs l JOIN medications m ON m.id=l.medication_id WHERE l.marker_user_id=? ORDER BY l.date DESC, l.time DESC LIMIT ? OFFSET ?",
           [target.id, size, offset]
         );
         return json(rows);
