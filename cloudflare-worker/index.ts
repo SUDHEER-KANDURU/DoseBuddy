@@ -2642,8 +2642,14 @@ const worker = {
             if (!med) throw new Error("Medication or current schedule not found");
             const owner = await getUser(db, Number(med.user_id));
             if (!owner || !accessible(actor, owner)) throw new Error("Access denied");
-            const zone = canonicalTimeZone(owner.time_zone);
-            if (!zone) throw new Error("User time zone is not configured");
+            // The zone is used only to compute the occurrence's scheduled_at_utc
+            // for the notification ledger. A deployment whose schema predates the
+            // users.time_zone column (or a user who never set one) must still be
+            // able to record adherence: fall back to UTC for the occurrence
+            // timestamp rather than failing the whole mark. Server notification
+            // scheduling is already unavailable on such a schema, so this does
+            // not affect notification correctness.
+            const zone = canonicalTimeZone(owner.time_zone) ?? "UTC";
             // dose_occurrences is the authoritative dose-state ledger for the
             // notification system. On a legacy deployment that never ran
             // database-migrations.sql the table is absent — and so is server

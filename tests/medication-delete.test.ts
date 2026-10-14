@@ -332,3 +332,33 @@ test("Mark as Taken does NOT report success when dose_occurrences fails for an u
   assert.equal(db.rollbacks, 1);
   assert.equal(db.calls.some(([sql]) => sql.startsWith("INSERT INTO intake_logs")), false);
 });
+
+test("Mark as Taken still records adherence when the user has no stored time zone", async () => {
+  // Reproduces the deployed legacy schema with no users.time_zone column:
+  // getUser returns a row whose time_zone is undefined/null. The mark used to
+  // throw "User time zone is not configured" -> HTTP 400. It must now succeed.
+  class NoTimeZone extends DeleteDbAdapter {
+    intakeInsert: unknown[] | null = null;
+    async query(statement: string, values: unknown[] = []): Promise<any> {
+      if (statement.includes("FROM users WHERE id=?")) {
+        this.calls.push([statement, values]);
+        return [[{ ...patient, time_zone: null }], undefined];
+      }
+      if (statement.includes("dose_occurrences")) {
+        this.calls.push([statement, values]);
+        throw noSuchTable("dose_occurrences");
+      }
+      if (statement.startsWith("INSERT INTO intake_logs")) {
+        this.intakeInsert = values;
+      }
+      return super.query(statement, values);
+    }
+  }
+  const db = new NoTimeZone();
+  const token = await login(db);
+  const res = await worker.fetch(mark(token, MARK_BODY), env(db));
+  assert.equal(res.status, 200);
+  assert.equal((await res.json() as any).success, true);
+  assert.equal(db.commits, 1);
+  assert.ok(db.intakeInsert, "intake_logs insert must run even without a stored time zone");
+});
