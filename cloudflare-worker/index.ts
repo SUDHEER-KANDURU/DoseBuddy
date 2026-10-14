@@ -1,6 +1,6 @@
 import { createConnection } from "mysql2/promise";
 import bcrypt from "bcryptjs";
-import { addLocalDays, canonicalTimeZone, dueOccurrencesAtInstant, resolveLocalOccurrence, zonedParts } from "./scheduling.ts";
+import { addLocalDays, canonicalTimeZone, occurrencesThroughInstant, resolveLocalOccurrence, zonedParts } from "./scheduling.ts";
 import { markOccurrenceMissed, markOccurrenceTaken, transact, upsertOccurrence } from "./dose-occurrences.ts";
 import { buildDoseNotificationPayload, claimDeliveryAttempt, finalizeDelivery, notificationEventId, obsoleteClaim, occurrenceIsCurrent, releaseUnstartedClaim, startDeliveryDispatch, type DeliveryClaim, type DeliveryOccurrence } from "./notification-delivery.ts";
 import { sendWebPush, type PushSubscriptionData } from "./web-push.ts";
@@ -211,6 +211,12 @@ function timeZoneSchemaNotReady(error: unknown) {
   return e.code === "ER_BAD_FIELD_ERROR" && /\btime_zone\b/i.test(message);
 }
 
+function columnMissing(error: unknown, column: string) {
+  const e = error as { code?: unknown; message?: unknown; sqlMessage?: unknown };
+  const message = [e.message, e.sqlMessage].filter(value => typeof value === "string").join(" ");
+  return e.code === "ER_BAD_FIELD_ERROR" && new RegExp(`\\b${column}\\b`, "i").test(message);
+}
+
 // True ONLY when `error` confirms the named optional notification-era table is
 // absent (legacy deployments that never ran database-migrations.sql). This
 // deliberately matches a single table name so a genuine SQL failure against an
@@ -241,14 +247,85 @@ function medicationColumnMissing(error: unknown) {
  */
 async function recordMissedOccurrence(db: any, dose: Json): Promise<boolean> {
   if (!await markOccurrenceMissed(db, Number(dose.occurrence_id))) return false;
-  const [log] = await query<{ insertId: number }>(db,
-    `INSERT INTO intake_logs (occurrence_id,marker_user_id,medication_id,date,time,status,scheduled_time,missed_time,created_at,updated_at)
-     VALUES (?,?,?,?,?,'MISSED',?,NOW(),NOW(),NOW())
-     ON DUPLICATE KEY UPDATE status=IF(status='TAKEN','TAKEN','MISSED'),missed_time=IF(status='TAKEN',missed_time,NOW()),id=LAST_INSERT_ID(id)`,
-    [dose.occurrence_id, dose.user_id, dose.medication_id, dose.local_date, dose.time_str, dose.scheduled_at_utc]);
+  const log = await upsertIntakeLog(db, {
+    occurrenceId: dose.occurrence_id,
+    userId: dose.user_id,
+    medicationId: dose.medication_id,
+    date: dose.local_date,
+    time: dose.time_str,
+    scheduledAt: dose.scheduled_at_utc,
+    status: "MISSED"
+  });
   await query(db, "INSERT INTO activities (user_id,type,message,related_entity_type,related_entity_id,created_at) VALUES (?,'DOSE_MISSED',?,'INTAKE_LOG',?,NOW())",
     [dose.user_id, `Missed ${dose.medication_name} (${dose.dosage}) scheduled for ${dose.time_str}`, log.insertId]);
   return true;
+}
+
+/** Writes the adherence row on both migrated and pre-notification schemas. */
+async function upsertIntakeLog(db: any, row: {
+  occurrenceId: number | null;
+  userId: number;
+  medicationId: number;
+  date: string;
+  time: string;
+  scheduledAt: unknown;
+  status: "TAKEN" | "MISSED";
+}): Promise<{ insertId: number }> {
+  const [existingLogs] = await query<any[]>(db,
+    "SELECT id FROM intake_logs WHERE marker_user_id=? AND medication_id=? AND date=? AND TIME_FORMAT(time,'%H:%i')=? ORDER BY id DESC LIMIT 1 FOR UPDATE",
+    [row.userId, row.medicationId, row.date, row.time]);
+  const existingId = Number(existingLogs?.[0]?.id || 0);
+  if (existingId) {
+    const update = async (includeOccurrenceId: boolean) => {
+      const setOccurrence = includeOccurrenceId ? "occurrence_id=?," : "";
+      const values = includeOccurrenceId
+        ? [row.occurrenceId, row.status, row.status, row.status, row.date, row.time, existingId]
+        : [row.status, row.status, row.status, row.date, row.time, existingId];
+      await query(db,
+        `UPDATE intake_logs SET ${setOccurrence}status=IF(?='TAKEN','TAKEN',IF(status='TAKEN','TAKEN','MISSED')),
+           taken_time=IF(?='TAKEN',NOW(),taken_time),
+           missed_time=IF(?='TAKEN',NULL,IF(status='TAKEN',NULL,NOW())),
+           scheduled_time=CONCAT(?,' ',?),updated_at=NOW() WHERE id=?`, values);
+    };
+    if (row.occurrenceId == null) {
+      await update(false);
+    } else {
+      try { await update(true); }
+      catch (error) {
+        if (!columnMissing(error, "occurrence_id")) throw error;
+        await update(false);
+      }
+    }
+    return { insertId: existingId };
+  }
+
+  const execute = async (includeOccurrenceId: boolean) => {
+    const columns = includeOccurrenceId
+      ? "occurrence_id,marker_user_id,medication_id,date,time,status,scheduled_time,taken_time,missed_time,created_at,updated_at"
+      : "marker_user_id,medication_id,date,time,status,scheduled_time,taken_time,missed_time,created_at,updated_at";
+    const valuesSql = includeOccurrenceId
+      ? "?,?,?,?,?,?,CONCAT(?,' ',?),IF(?='TAKEN',NOW(),NULL),IF(?='MISSED',NOW(),NULL),NOW(),NOW()"
+      : "?,?,?,?,?,CONCAT(?,' ',?),IF(?='TAKEN',NOW(),NULL),IF(?='MISSED',NOW(),NULL),NOW(),NOW()";
+    const values = includeOccurrenceId
+      ? [row.occurrenceId, row.userId, row.medicationId, row.date, row.time, row.status, row.date, row.time, row.status, row.status]
+      : [row.userId, row.medicationId, row.date, row.time, row.status, row.date, row.time, row.status, row.status];
+    const [result] = await query<{ insertId: number }>(db,
+      `INSERT INTO intake_logs (${columns}) VALUES (${valuesSql})
+       ON DUPLICATE KEY UPDATE status=IF(VALUES(status)='TAKEN','TAKEN',status),
+         taken_time=IF(VALUES(status)='TAKEN',NOW(),taken_time),
+         missed_time=IF(VALUES(status)='TAKEN',NULL,IF(status='TAKEN',NULL,NOW())),
+         updated_at=NOW(),id=LAST_INSERT_ID(id)`, values);
+    return result;
+  };
+  if (row.occurrenceId == null) return execute(false);
+  try {
+    return await execute(true);
+  } catch (error) {
+    // A partially migrated production schema may already have notification
+    // tables while intake_logs still lacks its nullable occurrence link.
+    if (!columnMissing(error, "occurrence_id")) throw error;
+    return execute(false);
+  }
 }
 
 // Cleans up a medication's auxiliary notification-era rows prior to deleting the
@@ -2699,11 +2776,15 @@ const worker = {
               if (!optionalTableMissing(occErr, "dose_occurrences")) throw occErr;
               occurrenceId = null;
             }
-            const [logResult] = await query<{ insertId: number }>(db,
-              `INSERT INTO intake_logs (occurrence_id,marker_user_id,medication_id,date,time,status,scheduled_time,taken_time,missed_time,created_at,updated_at)
-               VALUES (?,?,?,?,?,?,CONCAT(?,' ',?),IF(?='TAKEN',NOW(),NULL),IF(?='MISSED',NOW(),NULL),NOW(),NOW())
-               ON DUPLICATE KEY UPDATE status=IF(VALUES(status)='TAKEN','TAKEN',status),taken_time=IF(VALUES(status)='TAKEN',NOW(),taken_time),missed_time=IF(status='TAKEN',NULL,NOW()),updated_at=NOW(),id=LAST_INSERT_ID(id)`,
-              [occurrenceId, actor.id, b.medicationId, b.date, localTime, status, b.date, localTime, status, status]);
+            const logResult = await upsertIntakeLog(db, {
+              occurrenceId,
+              userId: Number(actor.id),
+              medicationId: Number(med.id),
+              date: b.date,
+              time: localTime,
+              scheduledAt: `${b.date} ${localTime}`,
+              status
+            });
             if (changed) {
               const activityMsg = status === "TAKEN"
                 ? `Took ${med.name} (${med.dosage}) at ${localTime}`
@@ -2716,8 +2797,18 @@ const worker = {
           return json(result);
         } catch (error) {
           const message = error instanceof Error ? error.message : "Unable to mark dose";
-          const statusCode = message === "Access denied" ? 403 : 400;
-          return json({ message }, statusCode);
+          if (message === "Access denied") return json({ message }, 403);
+          if (message === "Medication or current schedule not found") return json({ message }, 404);
+          const dbError = error as { code?: unknown; errno?: unknown; sqlState?: unknown };
+          // Do not report database/schema failures as a client-side 400. The
+          // client should distinguish a bad request from a failed persistence
+          // operation, while the log retains only safe error identifiers.
+          console.error("[Dose Mark] Persistence failed", {
+            code: typeof dbError?.code === "string" ? dbError.code : undefined,
+            errno: typeof dbError?.errno === "number" ? dbError.errno : undefined,
+            sqlState: typeof dbError?.sqlState === "string" ? dbError.sqlState : undefined
+          });
+          return json({ message: "Dose status could not be saved because of a server error. Please try again." }, 500);
         } finally {
           if (db) await db.end();
         }
@@ -2863,6 +2954,87 @@ const worker = {
           return json({ message: "VAPID not configured" }, 500);
         }
         return json({ publicKey: env.VAPID_PUBLIC_KEY });
+      }
+
+      if (path === "/api/push/test" && request.method === "POST") {
+        if (!env.VAPID_PUBLIC_KEY || !env.VAPID_PRIVATE_KEY || !env.VAPID_EMAIL) {
+          return json({
+            code: "VAPID_NOT_CONFIGURED",
+            message: "Background push is unavailable because the Worker is missing its VAPID configuration."
+          }, 503);
+        }
+        let db: any = null;
+        try {
+          db = await getDbConnection(env);
+          const [subscriptions] = await query<any[]>(db,
+            "SELECT id,endpoint,subscription_data FROM push_subscriptions WHERE user_id=? AND active=1", [actor.id]);
+          if (!subscriptions.length) {
+            return json({ code: "PUSH_SUBSCRIPTION_MISSING", message: "This account has no active background push subscription. Enable reminders first." }, 409);
+          }
+
+          const eventId = `TEST:${actor.id}:${crypto.randomUUID()}`;
+          const payload = {
+            title: "DoseBuddy Background Push Test",
+            body: "This was sent by the DoseBuddy Worker through your saved push subscription.",
+            tag: `dosebuddy-${eventId}`,
+            data: { type: "push-test", eventId, url: "/" }
+          };
+          const attempts: Array<{ outcome: string; providerStatus: number | null; errorCategory: string | null; latencyMs: number; ledgerRecorded: boolean }> = [];
+          for (const subscription of subscriptions) {
+            const startedAt = Date.now();
+            let outcome = "FAILED", providerStatus: number | null = null, errorCategory: string | null = null;
+            try {
+              const result = await sendWebPush(
+                JSON.parse(subscription.subscription_data) as PushSubscriptionData,
+                payload,
+                vapidConfig(env)
+              );
+              providerStatus = result.status;
+              outcome = result.expired ? "EXPIRED" : result.ok ? "SENT" : result.retryable ? "RETRY" : "FAILED";
+              if (result.expired) await query(db, "UPDATE push_subscriptions SET active=0 WHERE id=?", [subscription.id]);
+              if (!result.ok) errorCategory = result.expired ? "expired-subscription" : result.retryable ? "provider-retryable" : "provider-rejected";
+            } catch {
+              errorCategory = "push-preparation-failed";
+            }
+            const latencyMs = Date.now() - startedAt;
+            let ledgerRecorded = false;
+            try {
+              await query(db,
+                `INSERT INTO push_delivery_attempts
+                  (event_id,occurrence_id,medication_id,schedule_version,user_id,subscription_id,event_type,scheduled_at,attempted_at,provider_status,outcome,processing_lag_ms,delivery_latency_ms,retry_count,error_category)
+                 VALUES (?,NULL,NULL,0,?,?, 'TEST',NULL,NOW(3),?,?,0,?,0,?)`,
+                [eventId, actor.id, subscription.id, providerStatus, outcome, latencyMs, errorCategory]);
+              ledgerRecorded = true;
+            } catch (error) {
+              // Provider acceptance is still reported accurately if diagnostics
+              // persistence fails; never claim the attempt ledger was recorded.
+              console.error("[Push Test] Delivery-attempt ledger write failed", {
+                code: (error as any)?.code,
+                errno: (error as any)?.errno
+              });
+            }
+            attempts.push({ outcome, providerStatus, errorCategory, latencyMs, ledgerRecorded });
+          }
+          const accepted = attempts.filter(attempt => attempt.outcome === "SENT").length;
+          return json({
+            success: accepted > 0,
+            providerAcceptedCount: accepted,
+            attemptCount: attempts.length,
+            attempts,
+            message: accepted > 0
+              ? "The push service accepted the test. This does not confirm that the device displayed it."
+              : "The push service did not accept the test. See the attempt outcome for details."
+          }, accepted > 0 ? 200 : 502);
+        } catch (error) {
+          if (optionalTableMissing(error, "push_subscriptions")) {
+            return json({ code: "PUSH_STORAGE_NOT_CONFIGURED", message: "Push subscription storage is not installed. Apply the notification database migration." }, 503);
+          }
+          const dbError = error as { code?: unknown; errno?: unknown };
+          console.error("[Push Test] Request failed", { code: dbError?.code, errno: dbError?.errno });
+          return json({ code: "PUSH_TEST_FAILED", message: "The server could not run the push test." }, 500);
+        } finally {
+          if (db) await db.end();
+        }
       }
 
       const logsHistory = path.match(/^\/api\/logs\/history\/(\d+)$/);
@@ -3234,7 +3406,10 @@ const worker = {
 
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     console.log("[DoseBuddy Cron] Starting zone-aware occurrence processing");
-    const now = new Date(event.scheduledTime || Date.now());
+    // scheduledTime is the nominal trigger time and can be older than the
+    // actual invocation when the platform is delayed. Use execution time so
+    // late runs classify past-grace doses as MISSED instead of REMINDER.
+    const now = new Date();
     // Keep the two loops isolated: a due-discovery/schema error must not prevent
     // recovery and MISSED dispatch for occurrences that were already persisted.
     try { await this.processDueReminders(env, now); }
@@ -3249,25 +3424,49 @@ const worker = {
               m.schedule_version,u.time_zone,TIME_FORMAT(mt.time_of_day,'%H:%i') AS time_str
        FROM medications m JOIN medication_times mt ON mt.medication_id=m.id JOIN users u ON u.id=m.user_id
        WHERE m.active=1 AND u.time_zone IS NOT NULL`);
-    for (const dose of dueOccurrencesAtInstant(dueRows.map(dose => ({
+    for (const scheduled of occurrencesThroughInstant(dueRows.map(dose => ({
       ...dose,
       start_date: mysqlDate(dose.start_date),
       end_date: mysqlDate(dose.end_date)
     })), now)) {
       const db = await getDbConnection(env);
       try {
-        const occurrenceId = await upsertOccurrence(db, {
-          medicationId: Number(dose.medication_id), userId: Number(dose.user_id), scheduleVersion: Number(dose.schedule_version),
-          localDate: dose.localDate, localTime: dose.localTime, scheduledAtUtc: mysqlDateTime(dose.scheduledAtUtc)
+        const dose: any = {
+          ...scheduled.row,
+          localDate: scheduled.localDate,
+          localTime: scheduled.localTime,
+          scheduledAtUtc: scheduled.scheduledAtUtc
+        };
+        const delivery = await transact(db, async () => {
+          const occurrenceId = await upsertOccurrence(db, {
+            medicationId: Number(dose.medication_id), userId: Number(dose.user_id), scheduleVersion: Number(dose.schedule_version),
+            localDate: scheduled.localDate, localTime: scheduled.localTime, scheduledAtUtc: mysqlDateTime(scheduled.scheduledAtUtc)
+          });
+          const occurrenceDose = {
+            ...dose,
+            occurrence_id: occurrenceId,
+            local_date: scheduled.localDate,
+            time_str: scheduled.localTime,
+            scheduled_at_utc: mysqlDateTime(scheduled.scheduledAtUtc),
+            event_type: scheduled.eventType
+          };
+
+          // Preserve legacy TAKEN history that predates dose_occurrences. This
+          // prevents a reconciliation run after migration from turning an old
+          // intake row into a false reminder or missed dose.
+          const [existingLogs] = await query<Json[]>(db,
+            "SELECT status FROM intake_logs WHERE marker_user_id=? AND medication_id=? AND date=? AND TIME_FORMAT(time,'%H:%i')=? ORDER BY id DESC LIMIT 1",
+            [dose.user_id, dose.medication_id, scheduled.localDate, scheduled.localTime]);
+          if (String(existingLogs[0]?.status || "").toUpperCase() === "TAKEN") {
+            await markOccurrenceTaken(db, occurrenceId);
+            return null;
+          }
+          if (scheduled.eventType === "MISSED") {
+            return await recordMissedOccurrence(db, occurrenceDose) ? occurrenceDose : null;
+          }
+          return occurrenceDose;
         });
-        await this.sendDoseNotification(env, db, {
-          ...dose,
-          occurrence_id: occurrenceId,
-          local_date: dose.localDate,
-          time_str: dose.localTime,
-          scheduled_at_utc: mysqlDateTime(dose.scheduledAtUtc),
-          event_type: "REMINDER"
-        });
+        if (delivery) await this.sendDoseNotification(env, db, delivery);
       } finally {
         await db.end();
       }
@@ -3378,11 +3577,19 @@ const worker = {
     };
     const eventId = notificationEventId(event);
     const [subscriptions] = await query<any[]>(db, "SELECT * FROM push_subscriptions WHERE user_id=? AND active=1", [event.userId]);
+    if (!subscriptions.length) {
+      console.warn(`[Web Push] No active subscription for event ${eventId}`);
+      return;
+    }
     for (const sub of subscriptions) {
       const claim = await claimDeliveryAttempt(db, event, Number(sub.id), dose.scheduled_at_utc);
       if (!claim) continue;
       let dispatchStarted = false;
       try {
+        // Validate local configuration before crossing the uncertain-delivery
+        // boundary. Missing/malformed VAPID credentials mean no provider
+        // request could have been sent, so this claim is safe to retry.
+        const pushConfig = vapidConfig(env);
         // Persist the recovery boundary first. A failure after this commit must remain
         // UNCERTAIN rather than being automatically sent again.
         await db.beginTransaction();
@@ -3408,7 +3615,7 @@ const worker = {
           medicationName: String(dose.medication_name),
           dosage: String(dose.dosage)
         });
-        const result = await sendWebPush(JSON.parse(sub.subscription_data) as PushSubscriptionData, payload, vapidConfig(env));
+        const result = await sendWebPush(JSON.parse(sub.subscription_data) as PushSubscriptionData, payload, pushConfig);
         if (result.expired) {
           await query(db, "UPDATE push_subscriptions SET active=0 WHERE id=?", [sub.id]);
           await finalizeDelivery(db, claim, "EXPIRED", result.status);

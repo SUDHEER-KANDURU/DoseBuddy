@@ -17,7 +17,10 @@ test("notification migration converges twice from the legacy ledger", { skip: !u
   const db = await createConnection({ ...mysqlConfig!, multipleStatements: true });
   const migration = await readFile(new URL("../../database-migrations.sql", import.meta.url), "utf8");
   try {
-    await db.query("SET FOREIGN_KEY_CHECKS=0; DROP TABLE IF EXISTS push_delivery_attempts,dose_occurrences,push_subscriptions,intake_logs,activities,medication_times,medications,users; SET FOREIGN_KEY_CHECKS=1");
+    // This fixture drops its own tables in finally. Never let an integration
+    // run erase pre-existing data, even when the URL allowlist was satisfied.
+    const [preexistingTables]: any = await db.query("SHOW TABLES");
+    assert.equal(preexistingTables.length, 0, "Refusing destructive fixture: dosebuddy_test must be empty before this test");
     await db.query(`
       CREATE TABLE users (id BIGINT PRIMARY KEY, name VARCHAR(50), email VARCHAR(255) NOT NULL UNIQUE, password_hash VARCHAR(255) NOT NULL, role VARCHAR(32) NOT NULL, accepted_terms TINYINT NOT NULL DEFAULT 1, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP);
       CREATE TABLE medications (id BIGINT PRIMARY KEY AUTO_INCREMENT, user_id BIGINT NOT NULL, name VARCHAR(255) NOT NULL, dosage VARCHAR(255) NOT NULL, instructions TEXT NULL, start_date DATE NOT NULL, end_date DATE NOT NULL);
@@ -87,6 +90,42 @@ test("notification migration converges twice from the legacy ledger", { skip: !u
     ]);
     const [legacyTimes]: any = await db.query("SELECT mt.time_of_day FROM medication_times mt JOIN medications m ON m.id=mt.medication_id WHERE m.id > 1 ORDER BY mt.medication_id,mt.id");
     assert.deepEqual(legacyTimes.map((row: any) => String(row.time_of_day).slice(0, 5)), ["19:07", "08:00", "13:00", "18:00"]);
+
+    // Exercise the real authenticated mark endpoint and dashboard read against
+    // a partially migrated legacy schema: users.time_zone and medication
+    // scheduling columns are absent, dose_occurrences exists without optional
+    // timestamps, and intake_logs has no occurrence_id. This reproduces the
+    // production failure where Mark as Taken used to fail on occurrence_id.
+    const [legacyLinkColumns]: any = await db.query("SELECT COLUMN_NAME FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='intake_logs' AND column_name='occurrence_id'");
+    assert.deepEqual(legacyLinkColumns, [], "legacy fixture must exercise the missing intake_logs.occurrence_id fallback");
+    const [[legacyMedicationId]]: any = await db.query("SELECT id FROM medications WHERE name='Example (generic)' ORDER BY id DESC LIMIT 1");
+    const legacyMedId = Number(legacyMedicationId.id);
+    const legacyNow = new Date();
+    const legacySlot = zonedParts(new Date(legacyNow.getTime() - 30 * 60_000), "Asia/Kolkata");
+    await db.query("INSERT INTO medication_times (medication_id,time_of_day) VALUES (?,?)", [legacyMedId, `${legacySlot.time}:00`]);
+    const markLegacy = () => worker.fetch(new Request("https://dosebuddy.test/api/logs/mark", {
+      method: "POST",
+      headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ userId: 999, medicationId: legacyMedId, date: legacySlot.date, time: legacySlot.time, status: "TAKEN" })
+    }), workerEnv as any);
+    const legacyMark = await markLegacy();
+    assert.equal(legacyMark.status, 200);
+    assert.equal((await legacyMark.json() as any).success, true);
+    const [legacyTaken]: any = await db.query("SELECT status FROM intake_logs WHERE marker_user_id=1 AND medication_id=? AND date=? AND TIME_FORMAT(time,'%H:%i')=?", [legacyMedId, legacySlot.date, legacySlot.time]);
+    assert.deepEqual(legacyTaken, [{ status: "TAKEN" }]);
+    const [legacyOccurrenceState]: any = await db.query("SELECT state FROM dose_occurrences WHERE medication_id=? AND schedule_version=1 AND local_date=? AND TIME_FORMAT(local_time,'%H:%i')=?", [legacyMedId, legacySlot.date, legacySlot.time]);
+    assert.deepEqual(legacyOccurrenceState, [{ state: "TAKEN" }], "the authoritative occurrence must persist TAKEN despite the missing optional intake link");
+    const legacyReload = await worker.fetch(new Request(`https://dosebuddy.test/api/logs/today/1?date=${legacySlot.date}`, {
+      headers: { authorization: `Bearer ${accessToken}` }
+    }), workerEnv as any);
+    assert.equal(legacyReload.status, 200);
+    const legacyDoses = await legacyReload.json() as any[];
+    assert.equal(legacyDoses.find((dose: any) => Number(dose.medicationId) === legacyMedId && dose.time === legacySlot.time)?.status, "TAKEN");
+    assert.equal((await markLegacy()).status, 200);
+    const [legacyDuplicateCount]: any = await db.query("SELECT COUNT(*) AS count FROM intake_logs WHERE marker_user_id=1 AND medication_id=? AND date=? AND TIME_FORMAT(time,'%H:%i')=?", [legacyMedId, legacySlot.date, legacySlot.time]);
+    assert.equal(Number(legacyDuplicateCount[0].count), 1, "repeated legacy mark requests must reuse one intake row");
+    const [legacyOccurrenceCount]: any = await db.query("SELECT COUNT(*) AS count FROM dose_occurrences WHERE medication_id=? AND schedule_version=1 AND local_date=? AND TIME_FORMAT(local_time,'%H:%i')=?", [legacyMedId, legacySlot.date, legacySlot.time]);
+    assert.equal(Number(legacyOccurrenceCount[0].count), 1, "repeated requests must reuse one occurrence even before the unique index exists");
 
     await db.query(migration);
     await db.query(migration);
@@ -161,6 +200,41 @@ test("notification migration converges twice from the legacy ledger", { skip: !u
     ]) assert.ok(names.has(key), key);
     const [intakeIndexes]: any = await db.query("SELECT NON_UNIQUE AS non_unique FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='intake_logs' AND index_name='uq_intake_logs_occurrence'");
     assert.ok(intakeIndexes.length > 0 && intakeIndexes.every((row: any) => Number(row.non_unique) === 0), "intake occurrence link must be unique for idempotent history writes");
+    const [occurrenceIndexes]: any = await db.query("SELECT NON_UNIQUE AS non_unique FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='dose_occurrences' AND index_name='uq_dose_occurrence_schedule'");
+    assert.ok(occurrenceIndexes.length > 0 && occurrenceIndexes.every((row: any) => Number(row.non_unique) === 0), "dose occurrence schedule identity must be unique");
+
+    // Verify the modern MISSED -> late TAKEN correction through the Worker,
+    // the persisted occurrence + intake row, duplicate request handling, and
+    // the same dashboard response used after a refresh.
+    const correctionSlot = zonedParts(new Date(Date.now() - 20 * 60_000), expectedTimeZone!);
+    const correctionAt = resolveLocalOccurrence(correctionSlot.date, correctionSlot.time, expectedTimeZone!);
+    await db.query("INSERT INTO medication_times (medication_id,time_of_day) VALUES (?,?)", [legacyMedId, `${correctionSlot.time}:00`]);
+    const [correctionOccurrence]: any = await db.query(
+      "INSERT INTO dose_occurrences (medication_id,user_id,schedule_version,local_date,local_time,scheduled_at_utc,state,missed_at) VALUES (?,1,1,?,?,?,'MISSED',NOW(3))",
+      [legacyMedId, correctionSlot.date, `${correctionSlot.time}:00`, correctionAt.toISOString().slice(0, 23).replace("T", " ")]
+    );
+    const markLateTaken = () => worker.fetch(new Request("https://dosebuddy.test/api/logs/mark", {
+      method: "POST",
+      headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ userId: 999, medicationId: legacyMedId, date: correctionSlot.date, time: correctionSlot.time, status: "TAKEN" })
+    }), workerEnv as any);
+    const lateMark = await markLateTaken();
+    assert.equal(lateMark.status, 200);
+    assert.equal((await lateMark.json() as any).success, true);
+    const [corrected]: any = await db.query("SELECT state,taken_at,missed_at FROM dose_occurrences WHERE id=?", [correctionOccurrence.insertId]);
+    assert.equal(corrected[0].state, "TAKEN");
+    assert.notEqual(corrected[0].taken_at, null);
+    assert.equal(corrected[0].missed_at, null);
+    assert.equal((await markLateTaken()).status, 200);
+    const [correctionLogs]: any = await db.query("SELECT status,occurrence_id FROM intake_logs WHERE occurrence_id=?", [correctionOccurrence.insertId]);
+    assert.deepEqual(correctionLogs, [{ status: "TAKEN", occurrence_id: correctionOccurrence.insertId }]);
+    const modernReload = await worker.fetch(new Request(`https://dosebuddy.test/api/logs/today/1?date=${correctionSlot.date}`, {
+      headers: { authorization: `Bearer ${accessToken}` }
+    }), workerEnv as any);
+    assert.equal(modernReload.status, 200);
+    const modernDoses = await modernReload.json() as any[];
+    assert.equal(modernDoses.find((dose: any) => Number(dose.medicationId) === legacyMedId && dose.time === correctionSlot.time)?.status, "TAKEN");
+
     // Exercise the production scheduler and real Web Push crypto against MySQL.
     // The provider is intercepted locally, so this proves transition/ledger and
     // provider-response handling, not receipt by a browser or push service.

@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import worker from "../cloudflare-worker/index.ts";
+import { webPushFixture } from "./web-push-fixture.ts";
 
 const patient = { id: 1, email: "patient@example.test", password_hash: "password123", name: "Patient", role: "PATIENT", time_zone: "UTC", accepted_terms: 1 };
 const caregiver = { id: 2, email: "caregiver@example.test", password_hash: "password123", name: "Caregiver", role: "CAREGIVER", patient_email: patient.email, time_zone: "UTC", accepted_terms: 1 };
@@ -11,14 +12,17 @@ class RouteDbAdapter {
   medication = { id: 7, user_id: 1, name: "Current med", dosage: "5mg", instructions: null, start_date: "2026-01-01", end_date: "2026-12-31", active: 1, schedule_version: 3 };
   failMedicationInsert?: Error;
   failTimeZoneUpdate?: Error;
+  failIntakeLogInsert?: Error;
   medicationInsertFailures = 0;
   commits = 0;
   rollbacks = 0;
+  activePushSubscriptions: any[] = [];
 
   async query(statement: string, values: unknown[] = []): Promise<any> {
     this.calls.push([statement, values]);
     if (statement.startsWith("INSERT INTO medications") && this.failMedicationInsert && this.medicationInsertFailures++ === 0) throw this.failMedicationInsert;
     if (statement.startsWith("UPDATE users SET time_zone") && this.failTimeZoneUpdate) throw this.failTimeZoneUpdate;
+    if (statement.startsWith("INSERT INTO intake_logs") && this.failIntakeLogInsert) throw this.failIntakeLogInsert;
     if (statement.includes("FROM users WHERE email=?")) {
       const user = String(values[0]) === caregiver.email ? caregiver : patient;
       return [[user], undefined];
@@ -26,6 +30,7 @@ class RouteDbAdapter {
     if (statement.includes("FROM users WHERE id=?")) {
       return [[Number(values[0]) === caregiver.id ? caregiver : patient], undefined];
     }
+    if (statement.includes("SELECT id,endpoint,subscription_data FROM push_subscriptions")) return [this.activePushSubscriptions, undefined];
     if (statement.includes("SELECT * FROM medications WHERE id=? FOR UPDATE")) return [[this.medication], undefined];
     if (statement.includes("SELECT m.* FROM medications m JOIN medication_times")) return [[this.medication], undefined];
     if (statement.includes("JSON_ARRAYAGG") && statement.includes("FROM medications")) {
@@ -46,8 +51,8 @@ class RouteDbAdapter {
   async end() {}
 }
 
-function env(db: RouteDbAdapter): any {
-  return { JWT_SECRET: "route-test-secret", TEST_DB_FACTORY: async () => db };
+function env(db: RouteDbAdapter, additions: Record<string, unknown> = {}): any {
+  return { ...additions, JWT_SECRET: "route-test-secret", TEST_DB_FACTORY: async () => db };
 }
 
 async function login(db: RouteDbAdapter, email = patient.email) {
@@ -131,6 +136,55 @@ test("medication, push, and TAKEN routes execute through the database adapter", 
 
   const remove = await worker.fetch(authorized("/api/medications/7", accessToken, "DELETE"), env(db));
   assert.equal(remove.status, 204);
+});
+
+test("Mark as Taken reports database persistence failures as server errors", async () => {
+  const db = new RouteDbAdapter();
+  db.failIntakeLogInsert = Object.assign(new Error("Unknown column 'occurrence_id' in 'field list'"), { code: "ER_BAD_FIELD_ERROR", errno: 1054 });
+  const { accessToken } = await login(db);
+  const response = await worker.fetch(authorized("/api/logs/mark", accessToken, "POST", {
+    medicationId: 7, date: "2026-06-01", time: "09:00", status: "TAKEN"
+  }), env(db));
+  assert.equal(response.status, 500);
+  assert.deepEqual(await response.json(), { message: "Dose status could not be saved because of a server error. Please try again." });
+});
+
+test("background push test reports missing VAPID configuration without claiming delivery", async () => {
+  const db = new RouteDbAdapter();
+  const { accessToken } = await login(db);
+  const response = await worker.fetch(authorized("/api/push/test", accessToken, "POST"), env(db));
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), {
+    code: "VAPID_NOT_CONFIGURED",
+    message: "Background push is unavailable because the Worker is missing its VAPID configuration."
+  });
+});
+
+test("background push test submits through VAPID and records provider acceptance separately", async () => {
+  const fixture = await webPushFixture();
+  const db = new RouteDbAdapter();
+  db.activePushSubscriptions = [{ id: 23, endpoint: fixture.subscription.endpoint, subscription_data: JSON.stringify(fixture.subscription) }];
+  const { accessToken } = await login(db);
+  const originalFetch = globalThis.fetch;
+  let providerCalls = 0;
+  globalThis.fetch = async (_input: any, init?: any) => {
+    providerCalls++;
+    assert.equal(init.method, "POST");
+    return new Response(null, { status: 201 });
+  };
+  try {
+    const response = await worker.fetch(authorized("/api/push/test", accessToken, "POST"), env(db, fixture.env));
+    assert.equal(response.status, 200);
+    const result = await response.json() as any;
+    assert.equal(result.providerAcceptedCount, 1);
+    assert.equal(result.attempts[0].outcome, "SENT");
+    assert.equal(result.attempts[0].providerStatus, 201);
+    assert.equal(result.attempts[0].ledgerRecorded, true);
+    assert.equal(providerCalls, 1);
+    assert.ok(db.calls.some(([sql]) => sql.includes("INSERT INTO push_delivery_attempts") && sql.includes("'TEST'")));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("today logs return a saved TAKEN dose for legacy schema without time_zone or medications.active", async () => {

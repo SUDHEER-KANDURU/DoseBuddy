@@ -2209,11 +2209,19 @@
                 <div class="pref-row" style="margin-top:4px;">
                     <div class="pref-info">
                         <p class="pref-title">Test Notification</p>
-                        <p class="pref-desc">Send a test system notification to verify your settings</p>
+                        <p class="pref-desc">Show a local test notification. This does not verify server or closed-browser dose delivery.</p>
                     </div>
-                    <button class="modal-btn-secondary" id="notif-test-btn" type="button" style="flex-shrink:0;">Send Test</button>
+                    <button class="modal-btn-secondary" id="notif-test-btn" type="button" style="flex-shrink:0;">Test Local</button>
                 </div>
                 <p id="notif-test-result" style="font-size:0.8rem;margin:4px 2px 0;display:none;"></p>
+                <div class="pref-row" style="margin-top:4px;">
+                    <div class="pref-info">
+                        <p class="pref-title">Test Background Push</p>
+                        <p class="pref-desc">Send a test through the Worker and saved browser subscription.</p>
+                    </div>
+                    <button class="modal-btn-secondary" id="notif-test-push-btn" type="button" style="flex-shrink:0;">Test Push</button>
+                </div>
+                <p id="notif-test-push-result" style="font-size:0.8rem;margin:4px 2px 0;display:none;"></p>
             </div>
             <!-- Dev-only: simulate a missed-dose alert. Hidden in production unless
                  localStorage flag "dosebuddy_dev" is set to "1". -->

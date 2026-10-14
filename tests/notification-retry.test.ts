@@ -51,6 +51,20 @@ test("pre-dispatch failure releases the lease without sending", async () => {
   } finally { globalThis.fetch = originalFetch; }
 });
 
+test("missing VAPID configuration is recorded as a safe retry, not uncertain delivery", async () => {
+  const fixture = await webPushFixture();
+  const originalFetch = globalThis.fetch;
+  let fetches = 0;
+  globalThis.fetch = async () => { fetches++; return new Response(null, { status: 201 }); };
+  try {
+    const { db, outcomes } = deliveryDb(fixture);
+    const env = { ...fixture.env, VAPID_PUBLIC_KEY: undefined, VAPID_PRIVATE_KEY: undefined, VAPID_EMAIL: undefined };
+    await worker.sendDoseNotification(env as any, db, dose);
+    assert.equal(fetches, 0, "no provider request is possible without VAPID credentials");
+    assert.deepEqual(outcomes, ["RETRY"], "pre-dispatch configuration failures must remain retryable");
+  } finally { globalThis.fetch = originalFetch; }
+});
+
 test("provider acceptance followed by final persistence failure becomes uncertain without resend", async () => {
   const fixture = await webPushFixture();
   const originalFetch = globalThis.fetch;
@@ -151,6 +165,7 @@ test("missed-dose processing dispatches one MISSED push only after the atomic tr
         state = "MISSED";
         return [{ affectedRows: 1 }, undefined];
       }
+      if (sql.includes("SELECT id FROM intake_logs")) return [[], undefined];
       if (sql.startsWith("INSERT INTO intake_logs")) return [{ insertId: 11 }, undefined];
       if (sql.startsWith("INSERT INTO activities")) return [{ affectedRows: 1 }, undefined];
       if (sql.includes("FROM push_delivery_attempts")) return [[], undefined];
@@ -203,6 +218,7 @@ test("scheduler reconciles a committed MISSED occurrence when first dispatch nev
         state = "MISSED";
         return [{ affectedRows: 1 }, undefined];
       }
+      if (sql.includes("SELECT id FROM intake_logs")) return [[], undefined];
       if (sql.startsWith("INSERT INTO intake_logs")) return [{ insertId: 17 }, undefined];
       if (sql.startsWith("INSERT INTO activities")) return [{ affectedRows: 1 }, undefined];
       if (sql.includes("FROM push_delivery_attempts")) return [[], undefined];

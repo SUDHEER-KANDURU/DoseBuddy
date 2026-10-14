@@ -14,19 +14,20 @@ Before an authorized rollout, inspect a staging or disposable MySQL 8 schema for
 - `medications.active` and `medications.schedule_version` (required for medication create, reads, edits, and scheduled delivery). The durable production change adds them as `NOT NULL` fields with defaults of `1`, so existing medication rows are backfilled by MySQL to active revision `1`; verify those values before switching notification-era Worker behavior on;
 - `users.time_zone` (required for user-local occurrence scheduling);
 - `push_subscriptions`, `dose_occurrences`, and `push_delivery_attempts`, including the additive ledger columns, indexes, and foreign keys in `database-migrations.sql`.
+- Duplicate `dose_occurrences` natural keys `(medication_id, schedule_version, local_date, local_time)`. The migration adds a unique index and stops if duplicates exist; review those rows before an authorized migration rather than deleting them automatically.
 
 The migration intentionally stops on incompatible orphan data when adding foreign keys. Repair decisions must be approved; do not delete user history to force a migration through.
 
 ## Safe authorized procedure
 
 1. Back up the target through the approved change process and rehearse on a disposable/staging MySQL 8 schema only.
-2. Create an isolated empty database and set only the dedicated test variable in the current shell (do **not** set `DB_URL`, Hyperdrive, or production credentials):
+2. Create an isolated empty database and set only the dedicated test variable in the current shell (do **not** set `DB_URL`, Hyperdrive, or production credentials). The integration runner is serial and refuses to run its destructive fixture unless the dedicated database has no tables:
    ```powershell
    $env:DOSEBUDDY_TEST_MYSQL_URL = "mysql://test_user:test_password@127.0.0.1:3306/dosebuddy_test"
    npm run test:integration
    Remove-Item Env:DOSEBUDDY_TEST_MYSQL_URL
    ```
-   The suite drops and creates its own fixture tables. The `notification migration converges twice from the legacy ledger` gate first recreates the legacy medication schema, confirms MySQL 8 returns `ER_BAD_FIELD_ERROR` for the missing `active` column, and sends both the manual and prescription/AI payloads through the Worker before applying the migration. The three required MySQL 8 gates are `two-connection TAKEN versus MISSED race`, `medication mutation serializes before the final dispatch boundary`, and `notification migration converges twice from the legacy ledger`.
+   The `notification migration converges twice from the legacy ledger` gate creates a deliberately partial legacy schema, confirms MySQL 8 returns `ER_BAD_FIELD_ERROR` for missing medication columns, runs Mark as Taken through the Worker and verifies the dashboard readback before migration, then applies the migration twice and verifies timezone persistence and push-ledger schema. It also verifies a late TAKEN correction after a persisted MISSED state and provider retry/idempotency through a local intercepted provider. Those provider checks do not prove browser receipt.
 3. Preflight columns, indexes, constraints, table engine, and orphan records against the reviewed SQL. Schedule a maintenance window and explicit rollback decision point.
 4. Apply the reviewed, idempotent migration only through the approved production change process. This task does not execute it, change secrets, or connect to/write production.
 5. Verify the schema and a non-production Worker with manual and prescription payloads. If rollback is needed, use the approved restore/schema rollback plan; do not blindly drop additive notification data.

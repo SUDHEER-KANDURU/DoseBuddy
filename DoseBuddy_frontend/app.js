@@ -1860,16 +1860,54 @@ function setupForgotPassword() {
     });
 }
 
+let _timeZoneSyncPromise = null;
+
 async function syncBrowserTimeZone() {
     if (!currentUser || !getAccessToken()) return;
+    // This can be invoked from both the auth restore and dashboard startup
+    // paths. Share one request so they cannot race two writes to the profile.
+    if (_timeZoneSyncPromise) return _timeZoneSyncPromise;
+
+    _timeZoneSyncPromise = (async () => {
     let timeZone = null;
     try {
         timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     } catch (e) {
         console.warn("Unable to resolve browser time zone");
     }
-    if (!timeZone || currentUser.timeZone === timeZone) return;
+    if (!timeZone) return;
     try {
+        // The local profile is only a cache. Read the persisted value first so
+        // a stale localStorage value cannot suppress a required server update.
+        const profileRes = await authFetch(`${API_BASE}/user/time-zone`);
+        const profile = await profileRes.json().catch(() => null);
+        if (!profileRes.ok) {
+            console.warn("Time-zone read was rejected:", profileRes.status, profile?.message || "No server detail provided");
+            showToast(profile?.message || "Could not check your saved time zone. Reminder timing may be affected.", "warning", 6000);
+            return;
+        }
+        if (profile?.schedulingAvailable === false && profile?.needsTimeZoneSetup === true) {
+            currentUser.schedulingAvailable = false;
+            currentUser.schedulingStatusMessage = profile.message ||
+                "Time-zone storage is not available yet; medication reminders cannot be scheduled until setup is completed.";
+            saveToLS(LS_CURRENT_USER_KEY, currentUser);
+            showToast(currentUser.schedulingStatusMessage, "warning", 6000);
+            return;
+        }
+        let persistedZone = null;
+        try {
+            persistedZone = profile?.timeZone
+                ? Intl.DateTimeFormat("en-US", { timeZone: profile.timeZone }).resolvedOptions().timeZone
+                : null;
+        } catch { /* invalid server data will be replaced by the browser's valid zone */ }
+        if (persistedZone === timeZone) {
+            currentUser.timeZone = profile.timeZone;
+            delete currentUser.schedulingAvailable;
+            delete currentUser.schedulingStatusMessage;
+            saveToLS(LS_CURRENT_USER_KEY, currentUser);
+            return;
+        }
+
         const res = await authFetch(`${API_BASE}/user/time-zone`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
@@ -1902,6 +1940,13 @@ async function syncBrowserTimeZone() {
     } catch (e) {
         console.warn("Time zone sync failed (non-fatal):", e.message);
         showToast("Could not sync your time zone. Medication reminder timing may be affected.", "warning", 6000);
+    }
+    })();
+
+    try {
+        await _timeZoneSyncPromise;
+    } finally {
+        _timeZoneSyncPromise = null;
     }
 }
 
@@ -2393,7 +2438,6 @@ async function renderDashboard() {
                 const statusCell = document.createElement("td");
                 const statusSpan = document.createElement("span");
                 statusSpan.classList.add("status-pill");
-                let isMissed = false;
                 const [h, m] = displayTime.split(":").map(Number);
                 const timeMinutes = h * 60 + m;
                 const diff = timeMinutes - nowMinutes;
@@ -2403,7 +2447,6 @@ async function renderDashboard() {
                 } else if (doseStatus === "MISSED") {
                     statusSpan.classList.add("status-missed");
                     statusSpan.textContent = "Missed";
-                    isMissed = true;
                 } else {
                     statusSpan.classList.add("status-pending");
                     if (Math.abs(diff) <= 30) {
@@ -2411,8 +2454,10 @@ async function renderDashboard() {
                     } else if (diff > 30) {
                         statusSpan.textContent = "Upcoming";
                     } else {
-                        statusSpan.textContent = "Missed";
-                        isMissed = true;
+                        // The browser's wall clock is not the authoritative
+                        // dose state. The server performs the MISSED transition;
+                        // keep late pending doses actionable until then.
+                        statusSpan.textContent = "Overdue";
                     }
                 }
                 statusCell.appendChild(statusSpan);
@@ -2420,12 +2465,14 @@ async function renderDashboard() {
                 const actionCell = document.createElement("td");
                 const btn = document.createElement("button");
 
-                if (doseStatus === "TAKEN" || isMissed) {
-                    btn.textContent = doseStatus === "TAKEN" ? "Taken" : "Missed";
+                if (doseStatus === "TAKEN") {
+                    btn.textContent = "Taken";
                     btn.className = "action-btn action-btn-disabled";
                     btn.disabled = true;
                 } else {
-                    btn.textContent = "Mark taken";
+                    // A MISSED dose can still be corrected if the patient did
+                    // take it late; the Worker serializes this against Cron.
+                    btn.textContent = doseStatus === "MISSED" ? "Mark taken late" : "Mark taken";
                     btn.className = "action-btn action-btn-take";
                     btn.addEventListener("click", async (event) => {
                         const clickedButton = event.currentTarget;
@@ -2768,16 +2815,18 @@ async function renderHistory() {
 }
 
 function getDoseStatus(userId, medId, dateStr, timeStr) {
-    const entry = logs.find(
+    const entries = logs.filter(
         (l) =>
             (l.medId === medId || l.medicationId === medId) &&
             l.date === dateStr &&
             l.time === timeStr
     );
-    if (!entry) return "PENDING";
-    const s = (entry.status || "").toUpperCase();
-    if (s === "TAKEN")  return "TAKEN";
-    if (s === "MISSED") return "MISSED";
+    // Older schemas may contain duplicate rows for one local dose. A late
+    // TAKEN correction must win over an earlier MISSED row regardless of API
+    // ordering.
+    const statuses = entries.map(entry => (entry.status || "").toUpperCase());
+    if (statuses.includes("TAKEN")) return "TAKEN";
+    if (statuses.includes("MISSED")) return "MISSED";
     return "PENDING";
 }
 
@@ -2810,7 +2859,12 @@ async function markDoseTaken(userId, medId, dateStr, timeStr, medName = "", targ
                 targetButton.textContent = "Mark taken";
                 targetButton.disabled = false;
             }
-            showToast("Failed to mark dose as taken. Please try again.", "error");
+            let message = "Failed to mark dose as taken. Please try again.";
+            try {
+                const body = JSON.parse(detail);
+                if (typeof body.message === "string" && body.message) message = body.message;
+            } catch { /* keep the safe generic message for non-JSON errors */ }
+            showToast(message, "error", 6000);
             return false;
         } else {
             invalidateDataCache("/logs/today/", "/logs/summary/", "/logs/adherence/", "/streaks/");
@@ -7876,6 +7930,41 @@ document.addEventListener("DOMContentLoaded", () => {
         }).finally(() => {
             if (btn) { btn.disabled = false; btn.textContent = "Send Test"; }
         });
+    });
+
+    // Unlike the local notification button above, this test goes through the
+    // authenticated Worker, VAPID signing, provider, and saved subscription.
+    document.getElementById("notif-test-push-btn")?.addEventListener("click", async () => {
+        const resultEl = document.getElementById("notif-test-push-result");
+        const btn = document.getElementById("notif-test-push-btn");
+        const showResult = (message, color) => {
+            if (!resultEl) return;
+            resultEl.textContent = message;
+            resultEl.style.color = color;
+            resultEl.style.display = "block";
+        };
+        if (!currentUser) {
+            showResult("Sign in before testing background push.", "var(--warning, #d97706)");
+            return;
+        }
+        if (btn) { btn.disabled = true; btn.textContent = "Sending…"; }
+        try {
+            const response = await authFetch(`${API_BASE}/push/test`, { method: "POST" });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                showResult(data.message || `Background push test failed (${response.status}).`, "var(--error, #e53e3e)");
+                return;
+            }
+            const accepted = Number(data.providerAcceptedCount || 0);
+            showResult(accepted > 0
+                ? `Push service accepted ${accepted} test message(s). Check the device notification area; acceptance is not proof of display.`
+                : (data.message || "The push service did not accept the test."),
+                accepted > 0 ? "var(--success, #16a34a)" : "var(--error, #e53e3e)");
+        } catch (error) {
+            showResult(`Background push test could not reach the server: ${error.message}`, "var(--error, #e53e3e)");
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = "Test Push"; }
+        }
     });
 
     // ── Dev-only "Test Missed Dose Alert" button ──────────────────────────

@@ -6,7 +6,7 @@
   "scripts": {
     "build": "tsc --noEmit",
     "test:unit": "node --experimental-strip-types --test tests/*.test.ts",
-    "test:integration": "node --experimental-strip-types --test tests/integration/*.mysql.test.ts",
+    "test:integration": "node --experimental-strip-types --test --test-concurrency=1 tests/integration/*.mysql.test.ts",
     "test:workerd": "powershell -ExecutionPolicy Bypass -File tests/run-web-push-runtime.ps1",
     "verify": "npm run test:unit && npm run build && npm run test:workerd && wrangler deploy --dry-run",
     "dev": "wrangler dev",

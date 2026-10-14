@@ -132,6 +132,14 @@ export interface ScheduledDoseRow {
   end_date?: string | null;
 }
 
+export interface ReconciledDose<T> {
+  row: T;
+  localDate: string;
+  localTime: string;
+  scheduledAtUtc: Date;
+  eventType: "REMINDER" | "MISSED";
+}
+
 /** Selects by the resolved UTC occurrence, including DST-gap shifts and the earlier overlap instant. */
 export function dueOccurrencesAtInstant<T extends ScheduledDoseRow>(rows: T[], instant: Date): Array<T & {
   localDate: string;
@@ -166,6 +174,45 @@ export function dueOccurrencesAtInstant<T extends ScheduledDoseRow>(rows: T[], i
     }
   }
   return due;
+}
+
+/**
+ * Reconciles today's and yesterday's schedules whenever Cron runs. Exact-minute
+ * discovery alone can lose a dose if a medication is saved just after that
+ * minute's Cron invocation or the Worker is briefly unavailable. Occurrence
+ * and delivery identities make this bounded replay idempotent.
+ */
+export function occurrencesThroughInstant<T extends ScheduledDoseRow>(
+  rows: T[],
+  instant: Date,
+  graceMs = 60_000
+): Array<ReconciledDose<T>> {
+  const result: Array<ReconciledDose<T>> = [];
+  const localDatesByZone = new Map<string, string>();
+  for (const row of rows) {
+    const zone = canonicalTimeZone(row.time_zone);
+    if (!zone) continue;
+    let localDate = localDatesByZone.get(zone);
+    if (!localDate) {
+      localDate = zonedParts(instant, zone).date;
+      localDatesByZone.set(zone, localDate);
+    }
+    const time = row.time_str.slice(0, 5);
+    for (const date of [localDate, addLocalDays(localDate, -1)]) {
+      if (!isDateInMedicationRange(date, row.start_date, row.end_date)) continue;
+      const scheduledAtUtc = resolveLocalOccurrence(date, time, zone);
+      const ageMs = instant.getTime() - scheduledAtUtc.getTime();
+      if (ageMs < 0) continue;
+      result.push({
+        row,
+        localDate: date,
+        localTime: time,
+        scheduledAtUtc,
+        eventType: ageMs >= graceMs ? "MISSED" : "REMINDER"
+      });
+    }
+  }
+  return result.sort((a, b) => a.scheduledAtUtc.getTime() - b.scheduledAtUtc.getTime());
 }
 
 export function addLocalDays(date: string, days: number): string {

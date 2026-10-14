@@ -165,6 +165,12 @@ PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 SET @sql = IF((SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='push_subscriptions' AND index_name='idx_endpoint')=0,
   'CREATE INDEX idx_endpoint ON push_subscriptions (endpoint(255))', 'DO 0');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+-- Stable occurrence identities are required for idempotent scheduler and API
+-- processing. Existing duplicates intentionally stop this migration so an
+-- operator can review them rather than silently deleting patient history.
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='dose_occurrences' AND index_name='uq_dose_occurrence_schedule')=0,
+  'CREATE UNIQUE INDEX uq_dose_occurrence_schedule ON dose_occurrences (medication_id,schedule_version,local_date,local_time)', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 SET @sql = IF((SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='medications' AND index_name='idx_medications_user_active')=0,
   'CREATE INDEX idx_medications_user_active ON medications (user_id, active)', 'DO 0');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;

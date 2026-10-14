@@ -258,9 +258,32 @@ test("Mark as Taken falls back to intake_logs when dose_occurrences is missing (
   assert.equal(res.status, 200);
   assert.equal((await res.json() as any).success, true);
   assert.equal(db.commits, 1);
-  // The adherence row was still written, with a NULL occurrence_id.
+  // The legacy insert omits the unavailable occurrence_id column.
   assert.ok(db.intakeInsert, "intake_logs insert must still run on legacy schema");
-  assert.equal(db.intakeInsert![0], null);
+  assert.equal(db.intakeInsert![0], patient.id);
+});
+
+test("Mark as Taken falls back when legacy intake_logs also lacks occurrence_id", async () => {
+  class LegacyNoOccurrenceColumn extends DeleteDbAdapter {
+    async query(statement: string, values: unknown[] = []): Promise<any> {
+      if (statement.includes("dose_occurrences")) {
+        this.calls.push([statement, values]);
+        throw noSuchTable("dose_occurrences");
+      }
+      if (statement.startsWith("INSERT INTO intake_logs") && statement.includes("occurrence_id")) {
+        this.calls.push([statement, values]);
+        throw badField("occurrence_id");
+      }
+      return super.query(statement, values);
+    }
+  }
+  const db = new LegacyNoOccurrenceColumn();
+  const token = await login(db);
+  const response = await worker.fetch(mark(token, MARK_BODY), env(db));
+  assert.equal(response.status, 200);
+  assert.equal((await response.json() as any).success, true);
+  assert.ok(db.calls.some(([sql]) => sql.startsWith("INSERT INTO intake_logs") && !sql.includes("occurrence_id")));
+  assert.equal(db.commits, 1);
 });
 
 test("Mark as Taken retries the medication lookup without the active column on a legacy schema", async () => {
@@ -295,7 +318,7 @@ test("Mark as Taken denies marking another user's dose (403) and writes nothing"
   assert.equal(db.calls.some(([sql]) => sql.startsWith("INSERT INTO intake_logs")), false);
 });
 
-test("Mark as Taken returns 400 when no active scheduled dose matches", async () => {
+test("Mark as Taken returns 404 when no active scheduled dose matches", async () => {
   class NoSchedule extends DeleteDbAdapter {
     async query(statement: string, values: unknown[] = []): Promise<any> {
       if (statement.includes("SELECT m.* FROM medications m JOIN medication_times")) {
@@ -308,7 +331,7 @@ test("Mark as Taken returns 400 when no active scheduled dose matches", async ()
   const db = new NoSchedule();
   const token = await login(db);
   const res = await worker.fetch(mark(token, MARK_BODY), env(db));
-  assert.equal(res.status, 400);
+  assert.equal(res.status, 404);
   assert.equal(db.commits, 0);
 });
 
