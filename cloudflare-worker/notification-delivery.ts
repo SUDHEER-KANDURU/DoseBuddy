@@ -28,6 +28,11 @@ export interface DeliveryAttempt extends DeliveryClaim {
   eventType: NotificationEventType;
 }
 
+export interface DoseNotificationDetails {
+  medicationName: string;
+  dosage: string;
+}
+
 export const DELIVERY_LEASE_SECONDS = 120;
 export const DELIVERY_MAX_RETRIES = 3;
 
@@ -37,12 +42,35 @@ export function notificationEventId(event: DeliveryOccurrence): string {
   return [event.eventType, event.userId, event.medicationId, event.scheduleVersion, event.localDate, event.localTime].join(":");
 }
 
+/** Build the Web Push payload without asset URLs the frontend does not ship.
+ * The service worker supplies its bundled fallback icon and badge when omitted.
+ */
+export function buildDoseNotificationPayload(event: DeliveryOccurrence, dose: DoseNotificationDetails) {
+  const eventId = notificationEventId(event);
+  if (event.eventType === "REMINDER") {
+    return {
+      title: "DoseBuddy - Medication Reminder",
+      body: `Time to take ${dose.medicationName} (${dose.dosage})`,
+      tag: `reminder-${eventId}`,
+      data: { type: "dose-reminder", doseId: eventId, userId: event.userId, medicationId: event.medicationId, url: "/" },
+      timestamp: Date.now(),
+      requireInteraction: true
+    };
+  }
+  return {
+    title: "DoseBuddy - Missed Dose",
+    body: `You missed ${dose.medicationName} (${dose.dosage}) scheduled for ${event.localTime}`,
+    tag: `missed-${eventId}`,
+    data: { type: "missed-dose", doseId: eventId, userId: event.userId, medicationId: event.medicationId, url: "/" }
+  };
+}
+
 export function revalidationSql(eventType: NotificationEventType, lock = false): string {
   const requiredState = eventType === "REMINDER" ? "PENDING" : "MISSED";
   return `SELECT o.id
     FROM dose_occurrences o
     JOIN medications m ON m.id=o.medication_id
-    JOIN medication_times mt ON mt.medication_id=m.id AND TIME_FORMAT(mt.time_of_day,'%H:%i')=o.local_time
+    JOIN medication_times mt ON mt.medication_id=m.id AND TIME_FORMAT(mt.time_of_day,'%H:%i')=TIME_FORMAT(o.local_time,'%H:%i')
     WHERE o.id=? AND m.id=? AND m.user_id=? AND m.active=1
       AND m.schedule_version=? AND o.schedule_version=m.schedule_version
       AND o.local_date BETWEEN m.start_date AND m.end_date

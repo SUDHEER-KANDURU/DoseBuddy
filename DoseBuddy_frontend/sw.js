@@ -18,11 +18,16 @@ self.addEventListener("push", (event) => {
     if (!event.data) return;
     try {
         const data = event.data.json();
+        // Older Worker builds sent /favicon.ico even though the frontend does
+        // not ship that file. Replace that stale path with the bundled icon so
+        // an otherwise valid background push is not paired with a broken asset.
+        const icon = data.icon && data.icon !== "/favicon.ico" ? data.icon : NOTIFICATION_ICON;
+        const badge = data.badge && data.badge !== "/favicon.ico" ? data.badge : NOTIFICATION_ICON;
         event.waitUntil(
             self.registration.showNotification(data.title || "DoseBuddy", {
                 body:  data.body  || "",
-                icon:  data.icon  || NOTIFICATION_ICON,
-                badge: data.badge || NOTIFICATION_ICON,
+                icon,
+                badge,
                 tag:   data.tag   || "dosebuddy-push",
                 data:  data.data  || {},
             })

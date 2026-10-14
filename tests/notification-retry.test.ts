@@ -88,15 +88,32 @@ test("scheduled handler runs due discovery before missed-dose processing", async
   }
 });
 
+test("scheduled handler still processes persisted missed occurrences when due discovery fails", async () => {
+  const mutableWorker: any = worker;
+  const originalDue = mutableWorker.processDueReminders;
+  const originalMissed = mutableWorker.processMissedDoses;
+  let missedRuns = 0;
+  mutableWorker.processDueReminders = async () => { throw new Error("missing users.time_zone"); };
+  mutableWorker.processMissedDoses = async () => { missedRuns++; };
+  try {
+    await worker.scheduled({ scheduledTime: Date.parse("2026-01-01T00:00:00Z"), cron: "*/1 * * * *" }, {} as any, {} as any);
+    assert.equal(missedRuns, 1);
+  } finally {
+    mutableWorker.processDueReminders = originalDue;
+    mutableWorker.processMissedDoses = originalMissed;
+  }
+});
+
 test("one-minute missed selection preserves TAKEN occurrences", async () => {
   const queries: Array<[string, unknown[]]> = [];
   const db: any = {
     query: async (sql: string, values: unknown[] = []) => {
       queries.push([sql, values]);
-      if (sql.includes("FROM dose_occurrences o JOIN medications")) return [[{
+      if (sql.includes("FROM dose_occurrences o JOIN medications") && sql.includes("o.state='PENDING'")) return [[{
         occurrence_id: 1, medication_id: 2, user_id: 3, schedule_version: 1,
         local_date: "2026-01-01", time_str: "10:00", scheduled_at_utc: "2026-01-01 10:00:00.000", medication_name: "Medicine", dosage: "5mg"
       }], undefined];
+      if (sql.includes("FROM dose_occurrences o JOIN medications") && sql.includes("o.state='MISSED'")) return [[], undefined];
       if (sql.startsWith("UPDATE dose_occurrences SET state='MISSED'")) return [{ affectedRows: 0 }, undefined];
       if (sql.includes("FROM push_delivery_attempts")) return [[], undefined];
       return [{ affectedRows: 1 }, undefined];
@@ -114,4 +131,100 @@ test("one-minute missed selection preserves TAKEN occurrences", async () => {
   } finally {
     mutableWorker.sendDoseNotification = originalSend;
   }
+});
+
+test("missed-dose processing dispatches one MISSED push only after the atomic transition", async () => {
+  let state = "PENDING";
+  let committed = false;
+  let sends = 0;
+  const db: any = {
+    query: async (sql: string) => {
+      if (sql.includes("FROM dose_occurrences o JOIN medications m") && sql.includes("o.state='PENDING'")) {
+        return [state === "PENDING" ? [{
+          occurrence_id: 1, medication_id: 2, user_id: 3, schedule_version: 1,
+          local_date: "2026-01-01", time_str: "10:00", scheduled_at_utc: "2026-01-01 10:00:00.000",
+          medication_name: "Medicine", dosage: "5mg"
+        }] : [], undefined];
+      }
+      if (sql.startsWith("UPDATE dose_occurrences SET state='MISSED'")) {
+        if (state !== "PENDING") return [{ affectedRows: 0 }, undefined];
+        state = "MISSED";
+        return [{ affectedRows: 1 }, undefined];
+      }
+      if (sql.startsWith("INSERT INTO intake_logs")) return [{ insertId: 11 }, undefined];
+      if (sql.startsWith("INSERT INTO activities")) return [{ affectedRows: 1 }, undefined];
+      if (sql.includes("FROM push_delivery_attempts")) return [[], undefined];
+      throw new Error(`Unexpected SQL ${sql}`);
+    },
+    beginTransaction: async () => { committed = false; },
+    commit: async () => { committed = true; },
+    rollback: async () => {},
+    end: async () => {}
+  };
+  const mutableWorker: any = worker;
+  const originalSend = mutableWorker.sendDoseNotification;
+  mutableWorker.sendDoseNotification = async (_env: unknown, _db: unknown, notification: any) => {
+    assert.equal(committed, true, "push dispatch must follow the committed MISSED transition");
+    assert.equal(state, "MISSED");
+    assert.equal(notification.event_type, "MISSED");
+    sends++;
+  };
+  try {
+    const env = { TEST_DB_FACTORY: async () => db } as any;
+    const now = new Date("2026-01-01T10:01:00Z");
+    await worker.processMissedDoses(env, now);
+    await worker.processMissedDoses(env, now);
+    assert.equal(sends, 1, "duplicate scheduler runs must not repeat the missed push");
+  } finally {
+    mutableWorker.sendDoseNotification = originalSend;
+  }
+});
+
+test("scheduler reconciles a committed MISSED occurrence when first dispatch never creates a claim", async () => {
+  let state = "PENDING";
+  let committed = false;
+  let claimExists = false;
+  let dispatchCalls = 0;
+  const row = {
+    occurrence_id: 4, medication_id: 5, user_id: 6, schedule_version: 2,
+    local_date: "2026-01-01", time_str: "10:00", scheduled_at_utc: "2026-01-01 10:00:00.000",
+    medication_name: "Medicine", dosage: "5mg", event_type: "MISSED"
+  };
+  const db: any = {
+    query: async (sql: string) => {
+      if (sql.includes("FROM dose_occurrences o JOIN medications m") && sql.includes("o.state='PENDING'")) {
+        return [state === "PENDING" ? [row] : [], undefined];
+      }
+      if (sql.includes("FROM dose_occurrences o JOIN medications m") && sql.includes("o.state='MISSED'")) {
+        return [state === "MISSED" && !claimExists ? [row] : [], undefined];
+      }
+      if (sql.startsWith("UPDATE dose_occurrences SET state='MISSED'")) {
+        if (state !== "PENDING") return [{ affectedRows: 0 }, undefined];
+        state = "MISSED";
+        return [{ affectedRows: 1 }, undefined];
+      }
+      if (sql.startsWith("INSERT INTO intake_logs")) return [{ insertId: 17 }, undefined];
+      if (sql.startsWith("INSERT INTO activities")) return [{ affectedRows: 1 }, undefined];
+      if (sql.includes("FROM push_delivery_attempts")) return [[], undefined];
+      throw new Error(`Unexpected SQL ${sql}`);
+    },
+    beginTransaction: async () => { committed = false; },
+    commit: async () => { committed = true; }, rollback: async () => {}, end: async () => {}
+  };
+  const mutableWorker: any = worker;
+  const originalSend = mutableWorker.sendDoseNotification;
+  mutableWorker.sendDoseNotification = async () => {
+    assert.equal(committed, true, "reconciliation must observe the committed transition");
+    dispatchCalls++;
+    if (dispatchCalls === 1) throw new Error("subscription lookup failed before claim creation");
+    claimExists = true;
+  };
+  try {
+    const env = { TEST_DB_FACTORY: async () => db } as any;
+    await worker.processMissedDoses(env, new Date("2026-01-01T10:01:00Z"));
+    assert.equal(state, "MISSED");
+    assert.equal(dispatchCalls, 2, "reconciliation should retry work that has no ledger claim");
+    await worker.processMissedDoses(env, new Date("2026-01-01T10:02:00Z"));
+    assert.equal(dispatchCalls, 2, "a created ledger claim prevents duplicate reconciliation");
+  } finally { mutableWorker.sendDoseNotification = originalSend; }
 });

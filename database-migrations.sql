@@ -86,6 +86,12 @@ SET @sql = IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schem
   'ALTER TABLE dose_occurrences ADD COLUMN missed_at DATETIME(3) NULL', 'DO 0');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
+-- Link new intake history rows to stable dose occurrences. Existing legacy
+-- history remains intact because the additive column is nullable.
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='intake_logs' AND column_name='occurrence_id')=0,
+  'ALTER TABLE intake_logs ADD COLUMN occurrence_id BIGINT NULL', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
 -- Add the complete delivery ledger shape to legacy tables. Nullable foreign-key
 -- references preserve historical rows that cannot be safely reconstructed.
 SET @sql = IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='push_delivery_attempts' AND column_name='occurrence_id')=0,
@@ -171,6 +177,9 @@ PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 SET @sql = IF((SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='intake_logs' AND index_name='idx_intake_logs_med_date_time')=0,
   'CREATE INDEX idx_intake_logs_med_date_time ON intake_logs (medication_id, date, time)', 'DO 0');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='intake_logs' AND index_name='uq_intake_logs_occurrence')=0,
+  'CREATE UNIQUE INDEX uq_intake_logs_occurrence ON intake_logs (occurrence_id)', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 SET @sql = IF((SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='push_delivery_attempts' AND index_name='idx_push_attempt_event')=0,
   'CREATE INDEX idx_push_attempt_event ON push_delivery_attempts (event_id)', 'DO 0');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
@@ -192,6 +201,9 @@ SET @sql = IF((SELECT COUNT(*) FROM information_schema.key_column_usage WHERE co
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 SET @sql = IF((SELECT COUNT(*) FROM information_schema.key_column_usage WHERE constraint_schema=DATABASE() AND table_name='dose_occurrences' AND column_name='user_id' AND referenced_table_name='users' AND referenced_column_name='id')=0,
   'ALTER TABLE dose_occurrences ADD CONSTRAINT fk_occurrence_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.key_column_usage WHERE constraint_schema=DATABASE() AND table_name='intake_logs' AND column_name='occurrence_id' AND referenced_table_name='dose_occurrences' AND referenced_column_name='id')=0,
+  'ALTER TABLE intake_logs ADD CONSTRAINT fk_intake_logs_occurrence FOREIGN KEY (occurrence_id) REFERENCES dose_occurrences(id) ON DELETE SET NULL', 'DO 0');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 SET @sql = IF((SELECT COUNT(*) FROM information_schema.key_column_usage WHERE constraint_schema=DATABASE() AND table_name='push_delivery_attempts' AND column_name='occurrence_id' AND referenced_table_name='dose_occurrences' AND referenced_column_name='id')=0,
   'ALTER TABLE push_delivery_attempts ADD CONSTRAINT fk_delivery_occurrence FOREIGN KEY (occurrence_id) REFERENCES dose_occurrences(id) ON DELETE CASCADE', 'DO 0');

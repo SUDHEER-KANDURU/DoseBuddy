@@ -2,7 +2,7 @@ import { createConnection } from "mysql2/promise";
 import bcrypt from "bcryptjs";
 import { addLocalDays, canonicalTimeZone, dueOccurrencesAtInstant, resolveLocalOccurrence, zonedParts } from "./scheduling.ts";
 import { markOccurrenceMissed, markOccurrenceTaken, transact, upsertOccurrence } from "./dose-occurrences.ts";
-import { claimDeliveryAttempt, finalizeDelivery, notificationEventId, obsoleteClaim, occurrenceIsCurrent, releaseUnstartedClaim, startDeliveryDispatch, type DeliveryClaim, type DeliveryOccurrence } from "./notification-delivery.ts";
+import { buildDoseNotificationPayload, claimDeliveryAttempt, finalizeDelivery, notificationEventId, obsoleteClaim, occurrenceIsCurrent, releaseUnstartedClaim, startDeliveryDispatch, type DeliveryClaim, type DeliveryOccurrence } from "./notification-delivery.ts";
 import { sendWebPush, type PushSubscriptionData } from "./web-push.ts";
 
 export interface Env {
@@ -232,6 +232,23 @@ function optionalTableMissing(error: unknown, table: string) {
 // medicationSchemaNotReady but is named for the delete/mark call sites.
 function medicationColumnMissing(error: unknown) {
   return medicationSchemaNotReady(error);
+}
+
+/** Persist one authoritative PENDING -> MISSED transition and its adherence rows.
+ * The caller owns the transaction and must dispatch only after that transaction
+ * commits. Both the scheduled processor and authenticated batch route use this
+ * same conditional transition so they cannot race into separate alert paths.
+ */
+async function recordMissedOccurrence(db: any, dose: Json): Promise<boolean> {
+  if (!await markOccurrenceMissed(db, Number(dose.occurrence_id))) return false;
+  const [log] = await query<{ insertId: number }>(db,
+    `INSERT INTO intake_logs (occurrence_id,marker_user_id,medication_id,date,time,status,scheduled_time,missed_time,created_at,updated_at)
+     VALUES (?,?,?,?,?,'MISSED',?,NOW(),NOW(),NOW())
+     ON DUPLICATE KEY UPDATE status=IF(status='TAKEN','TAKEN','MISSED'),missed_time=IF(status='TAKEN',missed_time,NOW()),id=LAST_INSERT_ID(id)`,
+    [dose.occurrence_id, dose.user_id, dose.medication_id, dose.local_date, dose.time_str, dose.scheduled_at_utc]);
+  await query(db, "INSERT INTO activities (user_id,type,message,related_entity_type,related_entity_id,created_at) VALUES (?,'DOSE_MISSED',?,'INTAKE_LOG',?,NOW())",
+    [dose.user_id, `Missed ${dose.medication_name} (${dose.dosage}) scheduled for ${dose.time_str}`, log.insertId]);
+  return true;
 }
 
 // Cleans up a medication's auxiliary notification-era rows prior to deleting the
@@ -2572,15 +2589,36 @@ const worker = {
         if (!accessible(actor, target)) return json({ message: "Access denied" }, 403);
 
         const targetZone = canonicalTimeZone(target.time_zone);
-        if (!targetZone) return json([]);
-        const currentLocal = zonedParts(Date.now(), targetZone);
-        const todayStr = currentLocal.date;
+        const requestedDate = url.searchParams.get("date");
+        if (requestedDate !== null && !/^\d{4}-\d{2}-\d{2}$/.test(requestedDate)) {
+          return json({ message: "date must be in YYYY-MM-DD format" }, 400);
+        }
+        // The dashboard supplies its local calendar date. Honor it so an
+        // account without the newer users.time_zone column can still reload
+        // adherence rows created by /logs/mark. Older clients may omit date;
+        // for those, derive it only from a stored, valid zone.
+        const todayStr = requestedDate ?? (targetZone ? zonedParts(Date.now(), targetZone).date : null);
+        if (!todayStr) return json({ message: "A date is required when the user's time zone is unavailable" }, 400);
 
-        const [meds] = await query<Json[]>(
-          env,
-          "SELECT m.id AS med_id, m.name AS med_name, m.dosage, mt.time_of_day FROM medications m JOIN medication_times mt ON mt.medication_id=m.id WHERE m.user_id=? AND m.active=1 AND m.start_date<=? AND m.end_date>=?",
-          [target.id, todayStr, todayStr]
-        );
+        let meds: Json[];
+        try {
+          [meds] = await query<Json[]>(
+            env,
+            "SELECT m.id AS med_id, m.name AS med_name, m.dosage, mt.time_of_day FROM medications m JOIN medication_times mt ON mt.medication_id=m.id WHERE m.user_id=? AND m.active=1 AND m.start_date<=? AND m.end_date>=?",
+            [target.id, todayStr, todayStr]
+          );
+        } catch (error) {
+          // The legacy medication read path already treats a missing `active`
+          // column as an installation that predates soft deletion. Apply that
+          // same compatibility rule here so a successful mark can be reflected
+          // after dashboard reload. Other SQL errors must still fail visibly.
+          if (!medicationSchemaNotReady(error)) throw error;
+          [meds] = await query<Json[]>(
+            env,
+            "SELECT m.id AS med_id, m.name AS med_name, m.dosage, mt.time_of_day FROM medications m JOIN medication_times mt ON mt.medication_id=m.id WHERE m.user_id=? AND m.start_date<=? AND m.end_date>=?",
+            [target.id, todayStr, todayStr]
+          );
+        }
         const [logs] = await query<Json[]>(
           env,
           "SELECT id, medication_id, DATE_FORMAT(date,'%Y-%m-%d') AS date, TIME_FORMAT(time,'%H:%i') AS time, status FROM intake_logs WHERE marker_user_id=? AND date=?",
@@ -2592,16 +2630,8 @@ const worker = {
           logMap.set(`${l.medication_id}_${l.time}`, l);
         }
 
-        const currentHours = currentLocal.hour;
-        const currentMins = currentLocal.minute;
-
         const doses = meds.map(m => {
           const rawTime = String(m.time_of_day || "00:00:00").substring(0, 5);
-          const [hStr, mStr] = rawTime.split(":");
-          const doseHours = parseInt(hStr, 10);
-          const doseMins = parseInt(mStr, 10);
-          const isPast = doseHours < currentHours || (doseHours === currentHours && doseMins <= currentMins);
-
           const foundLog = logMap.get(`${m.med_id}_${rawTime}`);
           let status = "PENDING";
           let logId = null;
@@ -2609,8 +2639,6 @@ const worker = {
           if (foundLog) {
             status = String(foundLog.status).toUpperCase();
             logId = foundLog.id;
-          } else if (isPast) {
-            status = "PENDING";
           }
 
           return {
@@ -2699,31 +2727,52 @@ const worker = {
         const { body: b } = await requestBody(request);
         const list = Array.isArray(b) ? b : [];
         let created = 0;
+        let dispatchPending = 0;
         let db: any = null;
         try {
           db = await getDbConnection(env);
           for (const req of list) {
-            if (!req.medicationId || !req.date || !req.time) continue;
-            await transact(db, async () => {
+            if (!req.medicationId || typeof req.date !== "string" || typeof req.time !== "string") continue;
+            const transition = await transact(db, async () => {
               const localTime = String(req.time).substring(0, 5);
+              if (!/^\d{4}-\d{2}-\d{2}$/.test(req.date) || !/^\d{2}:\d{2}$/.test(localTime)) return null;
               const [meds] = await query<Json[]>(db,
                 "SELECT m.* FROM medications m JOIN medication_times mt ON mt.medication_id=m.id WHERE m.id=? AND m.active=1 AND ? BETWEEN m.start_date AND m.end_date AND TIME_FORMAT(mt.time_of_day,'%H:%i')=? LIMIT 1 FOR UPDATE",
                 [req.medicationId, req.date, localTime]);
               const med = meds[0];
-              if (!med) return;
+              if (!med) return null;
               const owner = await getUser(db, Number(med.user_id));
-              if (!owner || !accessible(actor, owner)) return;
+              if (!owner || !accessible(actor, owner)) throw new Error("Access denied");
               const zone = canonicalTimeZone(owner.time_zone);
-              if (!zone) return;
-              const occurrenceId = await upsertOccurrence(db, { medicationId: Number(med.id), userId: Number(med.user_id), scheduleVersion: Number(med.schedule_version), localDate: req.date, localTime, scheduledAtUtc: mysqlDateTime(resolveLocalOccurrence(req.date, localTime, zone)) });
-              if (!await markOccurrenceMissed(db, occurrenceId)) return;
-              const [ins] = await query<{ insertId: number }>(db,
-                "INSERT INTO intake_logs (occurrence_id,marker_user_id,medication_id,date,time,status,scheduled_time,missed_time,created_at,updated_at) VALUES (?,?,?,?,?,'MISSED',CONCAT(?,' ',?),NOW(),NOW(),NOW()) ON DUPLICATE KEY UPDATE status=IF(status='TAKEN','TAKEN','MISSED'),missed_time=IF(status='TAKEN',missed_time,NOW()),id=LAST_INSERT_ID(id)",
-                [occurrenceId, actor.id, req.medicationId, req.date, localTime, req.date, localTime]);
-              created++;
+              if (!zone) return null;
+              const scheduledInstant = resolveLocalOccurrence(req.date, localTime, zone);
+              if (Date.now() < scheduledInstant.getTime() + 60_000) return null;
+              const occurrenceId = await upsertOccurrence(db, {
+                medicationId: Number(med.id), userId: Number(med.user_id), scheduleVersion: Number(med.schedule_version),
+                localDate: req.date, localTime, scheduledAtUtc: mysqlDateTime(scheduledInstant)
+              });
+              const dose = {
+                occurrence_id: occurrenceId, medication_id: Number(med.id), user_id: Number(med.user_id),
+                schedule_version: Number(med.schedule_version), local_date: req.date, time_str: localTime,
+                scheduled_at_utc: mysqlDateTime(scheduledInstant), medication_name: String(med.name), dosage: String(med.dosage), event_type: "MISSED"
+              };
+              return await recordMissedOccurrence(db, dose) ? dose : null;
             });
+            if (transition) {
+              created++;
+              // The state and adherence changes are committed. Delivery uses
+              // the same stable event and per-subscription ledger as the Cron.
+              try { await this.sendDoseNotification(env, db, transition); }
+              catch (error) {
+                dispatchPending++;
+                console.error(`[DoseBuddy API] Missed notification queued for scheduler recovery (${transition.occurrence_id}):`, error instanceof Error ? error.message : "unknown");
+              }
+            }
           }
-          return json({ created });
+          return json(dispatchPending ? { created, dispatchPending } : { created });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Unable to mark dose missed";
+          return json({ message }, message === "Access denied" ? 403 : 400);
         } finally {
           if (db) await db.end();
         }
@@ -3186,12 +3235,12 @@ const worker = {
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     console.log("[DoseBuddy Cron] Starting zone-aware occurrence processing");
     const now = new Date(event.scheduledTime || Date.now());
-    try {
-      await this.processDueReminders(env, now);
-      await this.processMissedDoses(env, now);
-    } catch (error) {
-      console.error("[DoseBuddy Cron] Scheduled function error:", error instanceof Error ? error.message : "unknown");
-    }
+    // Keep the two loops isolated: a due-discovery/schema error must not prevent
+    // recovery and MISSED dispatch for occurrences that were already persisted.
+    try { await this.processDueReminders(env, now); }
+    catch (error) { console.error("[DoseBuddy Cron] Due-reminder processing failed:", error instanceof Error ? error.message : "unknown"); }
+    try { await this.processMissedDoses(env, now); }
+    catch (error) { console.error("[DoseBuddy Cron] Missed-dose processing failed:", error instanceof Error ? error.message : "unknown"); }
   },
 
   async processDueReminders(env: Env, now: Date): Promise<void> {
@@ -3241,17 +3290,7 @@ const worker = {
       const db = await getDbConnection(env);
       let transitioned = false;
       try {
-        transitioned = await transact(db, async () => {
-          if (!await markOccurrenceMissed(db, Number(dose.occurrence_id))) return false;
-          const [log] = await query<{ insertId: number }>(db,
-            `INSERT INTO intake_logs (occurrence_id,marker_user_id,medication_id,date,time,status,scheduled_time,missed_time,created_at,updated_at)
-             VALUES (?,?,?,?,?,'MISSED',?,NOW(),NOW(),NOW())
-             ON DUPLICATE KEY UPDATE status=IF(status='TAKEN','TAKEN','MISSED'),missed_time=IF(status='TAKEN',missed_time,NOW()),id=LAST_INSERT_ID(id)`,
-            [dose.occurrence_id, dose.user_id, dose.medication_id, dose.local_date, dose.time_str, dose.scheduled_at_utc]);
-          await query(db, "INSERT INTO activities (user_id,type,message,related_entity_type,related_entity_id,created_at) VALUES (?,'DOSE_MISSED',?,'INTAKE_LOG',?,NOW())",
-            [dose.user_id, `Missed ${dose.medication_name} (${dose.dosage}) scheduled for ${dose.time_str}`, log.insertId]);
-          return true;
-        });
+        transitioned = await transact(db, () => recordMissedOccurrence(db, dose));
         if (transitioned) await this.sendDoseNotification(env, db, { ...dose, event_type: "MISSED" });
       } catch (error) {
         console.error(`[DoseBuddy Cron] Failed missed transition for occurrence ${dose.occurrence_id}:`, error instanceof Error ? error.message : "unknown");
@@ -3260,6 +3299,11 @@ const worker = {
       }
     }
 
+    // Recover transitions that committed but never reached claim creation (for
+    // example, if reading subscriptions failed immediately after commit). This
+    // is an outbox-style reconciliation over the MISSED ledger and active
+    // subscriptions; the delivery claim table still provides dedupe and retry.
+    await this.recoverUndispatchedMissedDoses(env);
     await this.recoverExpiredClaims(env);
     const [retryRows] = await query<any[]>(env,
       `SELECT DISTINCT o.id AS occurrence_id,o.medication_id,o.user_id,o.schedule_version,
@@ -3270,6 +3314,26 @@ const worker = {
     for (const dose of retryRows) {
       const db = await getDbConnection(env);
       try { await this.sendDoseNotification(env, db, dose); } finally { await db.end(); }
+    }
+  },
+
+  async recoverUndispatchedMissedDoses(env: Env): Promise<void> {
+    const [rows] = await query<any[]>(env,
+      `SELECT o.id AS occurrence_id,o.medication_id,o.user_id,o.schedule_version,
+              DATE_FORMAT(o.local_date,'%Y-%m-%d') AS local_date,TIME_FORMAT(o.local_time,'%H:%i') AS time_str,
+              o.scheduled_at_utc,m.name AS medication_name,m.dosage,'MISSED' AS event_type
+       FROM dose_occurrences o JOIN medications m ON m.id=o.medication_id
+       WHERE o.state='MISSED' AND m.active=1 AND o.schedule_version=m.schedule_version
+         AND o.local_date BETWEEN m.start_date AND m.end_date
+         AND EXISTS (SELECT 1 FROM medication_times mt WHERE mt.medication_id=m.id AND TIME_FORMAT(mt.time_of_day,'%H:%i')=TIME_FORMAT(o.local_time,'%H:%i'))
+         AND EXISTS (SELECT 1 FROM push_subscriptions ps WHERE ps.user_id=o.user_id AND ps.active=1
+           AND NOT EXISTS (SELECT 1 FROM push_delivery_attempts a WHERE a.occurrence_id=o.id AND a.subscription_id=ps.id AND a.event_type='MISSED'))`);
+    for (const dose of rows) {
+      const db = await getDbConnection(env);
+      try { await this.sendDoseNotification(env, db, dose); }
+      catch (error) {
+        console.error(`[DoseBuddy Cron] Failed recovering missed notification for occurrence ${dose.occurrence_id}:`, error instanceof Error ? error.message : "unknown");
+      } finally { await db.end(); }
     }
   },
 
@@ -3340,16 +3404,10 @@ const worker = {
           await db.commit();
           continue;
         }
-        const payload = event.eventType === "REMINDER" ? {
-          title: "DoseBuddy - Medication Reminder", body: `Time to take ${dose.medication_name} (${dose.dosage})`,
-          icon: "/favicon.ico", badge: "/favicon.ico", tag: `reminder-${eventId}`,
-          data: { type: "dose-reminder", doseId: eventId, userId: event.userId, medicationId: event.medicationId, url: "/" },
-          timestamp: Date.now(), requireInteraction: true
-        } : {
-          title: "DoseBuddy - Missed Dose", body: `You missed ${dose.medication_name} (${dose.dosage}) scheduled for ${event.localTime}`,
-          icon: "/favicon.ico", badge: "/favicon.ico", tag: `missed-${eventId}`,
-          data: { type: "missed-dose", doseId: eventId, userId: event.userId, medicationId: event.medicationId, url: "/" }
-        };
+        const payload = buildDoseNotificationPayload(event, {
+          medicationName: String(dose.medication_name),
+          dosage: String(dose.dosage)
+        });
         const result = await sendWebPush(JSON.parse(sub.subscription_data) as PushSubscriptionData, payload, vapidConfig(env));
         if (result.expired) {
           await query(db, "UPDATE push_subscriptions SET active=0 WHERE id=?", [sub.id]);

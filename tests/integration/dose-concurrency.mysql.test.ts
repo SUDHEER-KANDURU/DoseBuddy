@@ -1,17 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createConnection } from "mysql2/promise";
+import { disposableMysqlConfig, disposableMysqlUrl } from "./safe-db.ts";
 
 // Deliberately no DB_URL/Hyperdrive fallback: this release gate can only use a
 // disposable, explicitly configured MySQL 8 database.
-const url = process.env.DOSEBUDDY_TEST_MYSQL_URL;
+const url = disposableMysqlUrl();
+const mysqlConfig = disposableMysqlConfig();
 
 const tick = () => new Promise(resolve => setTimeout(resolve, 50));
 
 test("two-connection TAKEN versus MISSED race", { skip: !url }, async () => {
-  const setup = await createConnection(url!);
-  const taken = await createConnection(url!);
-  const cron = await createConnection(url!);
+  const setup = await createConnection(mysqlConfig!);
+  const taken = await createConnection(mysqlConfig!);
+  const cron = await createConnection(mysqlConfig!);
   try {
     await setup.query("DROP TABLE IF EXISTS dose_occurrence_race_test");
     await setup.query("CREATE TABLE dose_occurrence_race_test (id BIGINT PRIMARY KEY, state ENUM('PENDING','TAKEN','MISSED') NOT NULL) ENGINE=InnoDB");
@@ -41,9 +43,9 @@ test("two-connection TAKEN versus MISSED race", { skip: !url }, async () => {
 });
 
 test("medication mutation serializes before the final dispatch boundary", { skip: !url }, async () => {
-  const setup = await createConnection(url!);
-  const mutation = await createConnection(url!);
-  const sender = await createConnection(url!);
+  const setup = await createConnection(mysqlConfig!);
+  const mutation = await createConnection(mysqlConfig!);
+  const sender = await createConnection(mysqlConfig!);
   try {
     await setup.query("DROP TABLE IF EXISTS delivery_lock_test,medication_lock_test");
     await setup.query("CREATE TABLE medication_lock_test (id BIGINT PRIMARY KEY, schedule_version BIGINT NOT NULL) ENGINE=InnoDB");

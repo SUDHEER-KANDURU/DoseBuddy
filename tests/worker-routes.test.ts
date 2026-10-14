@@ -133,6 +133,56 @@ test("medication, push, and TAKEN routes execute through the database adapter", 
   assert.equal(remove.status, 204);
 });
 
+test("today logs return a saved TAKEN dose for legacy schema without time_zone or medications.active", async () => {
+  class LegacyDoseDb extends RouteDbAdapter {
+    savedLog: any = null;
+
+    async query(statement: string, values: unknown[] = []): Promise<any> {
+      if (statement.includes("FROM users WHERE id=?")) {
+        this.calls.push([statement, values]);
+        return [[{ ...patient, time_zone: null }], undefined];
+      }
+      if (statement.includes("FROM medications m JOIN medication_times") && statement.includes("m.active=1")) {
+        this.calls.push([statement, values]);
+        throw Object.assign(new Error("Unknown column 'm.active' in 'where clause'"), { code: "ER_BAD_FIELD_ERROR", errno: 1054 });
+      }
+      if (statement.includes("FROM medications m JOIN medication_times") && statement.includes("m.user_id=?")) {
+        this.calls.push([statement, values]);
+        return [[{ med_id: 7, med_name: this.medication.name, dosage: this.medication.dosage, time_of_day: "08:00:00" }], undefined];
+      }
+      if (statement.startsWith("INSERT INTO intake_logs")) {
+        this.savedLog = { id: 11, medication_id: values[2], date: values[3], time: values[4], status: values[5] };
+        return [{ insertId: 11, affectedRows: 1 }, undefined];
+      }
+      if (statement.startsWith("SELECT id, medication_id, DATE_FORMAT(date")) {
+        this.calls.push([statement, values]);
+        return [[this.savedLog && this.savedLog.date === values[1] ? this.savedLog : null].filter(Boolean), undefined];
+      }
+      return super.query(statement, values);
+    }
+  }
+
+  const db = new LegacyDoseDb();
+  const { accessToken } = await login(db);
+  const mark = await worker.fetch(authorized("/api/logs/mark", accessToken, "POST", {
+    medicationId: 7, date: "2026-06-01", time: "08:00", status: "TAKEN"
+  }), env(db));
+  assert.equal(mark.status, 200);
+  assert.equal(db.savedLog?.status, "TAKEN");
+
+  const today = await worker.fetch(authorized("/api/logs/today/1?date=2026-06-01", accessToken), env(db));
+  assert.equal(today.status, 200);
+  assert.deepEqual(await today.json(), [{
+    id: 11,
+    date: "2026-06-01",
+    time: "08:00",
+    medicationId: 7,
+    medicationName: "Current med",
+    dosage: "5mg",
+    status: "TAKEN"
+  }]);
+});
+
 test("medication ownership is enforced by the production update route", async () => {
   const db = new RouteDbAdapter();
   const { accessToken } = await login(db, caregiver.email);
@@ -162,6 +212,108 @@ test("time-zone synchronization is idempotent and accepts a later valid zone cha
   const writes = db.calls.filter(([sql]) => sql.startsWith("UPDATE users SET time_zone"));
   assert.deepEqual(writes.map(([, values]) => values[0]), [canonicalKolkata, canonicalKolkata, "America/New_York"]);
   assert.ok(writes.every(([, values]) => values[1] === patient.id));
+});
+
+test("missed batch commits one transition and shares dispatch with duplicate Cron processing", async () => {
+  const db = new RouteDbAdapter();
+  db.actor = { ...patient, time_zone: "Asia/Kolkata" };
+  let occurrenceState = "PENDING";
+  const baseQuery = db.query.bind(db);
+  db.query = async (sql: string, values: unknown[] = []) => {
+    if (sql.startsWith("UPDATE dose_occurrences SET state='MISSED'")) {
+      if (occurrenceState !== "PENDING") return [{ affectedRows: 0 }, undefined];
+      occurrenceState = "MISSED";
+      return [{ affectedRows: 1 }, undefined];
+    }
+    if (sql.includes("FROM dose_occurrences o JOIN medications m") && sql.includes("o.state='PENDING'")) {
+      return [occurrenceState === "PENDING" ? [{
+        occurrence_id: 9, medication_id: 7, user_id: 1, schedule_version: 3,
+        local_date: "2026-01-01", time_str: "08:00", scheduled_at_utc: "2026-01-01 02:30:00.000",
+        medication_name: "Current med", dosage: "5mg"
+      }] : [], undefined];
+    }
+    if (sql.includes("FROM push_delivery_attempts")) return [[], undefined];
+    return baseQuery(sql, values);
+  };
+  const { accessToken } = await login(db);
+  const mutableWorker: any = worker;
+  const originalSend = mutableWorker.sendDoseNotification;
+  let dispatches = 0;
+  mutableWorker.sendDoseNotification = async (_env: unknown, _db: unknown, dose: any) => {
+    assert.equal(occurrenceState, "MISSED");
+    assert.equal(db.commits, 1, "dispatch must start after the transaction commits");
+    assert.equal(dose.event_type, "MISSED");
+    dispatches++;
+  };
+  const envWithDb: any = { JWT_SECRET: "route-test-secret", TEST_DB_FACTORY: async () => db };
+  const request = () => authorized("/api/logs/mark-missed-batch", accessToken, "POST", [
+    { medicationId: 7, date: "2026-01-01", time: "08:00" }
+  ]);
+  try {
+    const first = await worker.fetch(request(), envWithDb);
+    assert.equal(first.status, 200);
+    assert.deepEqual(await first.json(), { created: 1 });
+    await worker.processMissedDoses(envWithDb, new Date("2026-01-01T02:31:00Z"));
+    const duplicate = await worker.fetch(request(), envWithDb);
+    assert.equal(duplicate.status, 200);
+    assert.deepEqual(await duplicate.json(), { created: 0 });
+    assert.equal(dispatches, 1, "batch and repeated scheduler processing must produce one logical dispatch");
+  } finally {
+    mutableWorker.sendDoseNotification = originalSend;
+  }
+});
+
+test("missed batch does not transition before the server-side grace deadline", async () => {
+  const db = new RouteDbAdapter();
+  db.actor = { ...patient, time_zone: "Asia/Kolkata" };
+  const { accessToken } = await login(db);
+  const response = await worker.fetch(authorized("/api/logs/mark-missed-batch", accessToken, "POST", [
+    { medicationId: 7, date: "2099-01-01", time: "08:00" }
+  ]), env(db));
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { created: 0 });
+  assert.equal(db.calls.some(([sql]) => sql.startsWith("UPDATE dose_occurrences SET state='MISSED'")), false);
+});
+
+test("concurrent missed batch and Cron race produce one committed transition and dispatch", async () => {
+  const db = new RouteDbAdapter();
+  let occurrenceState = "PENDING";
+  const baseQuery = db.query.bind(db);
+  db.query = async (sql: string, values: unknown[] = []) => {
+    if (sql.startsWith("UPDATE dose_occurrences SET state='MISSED'")) {
+      if (occurrenceState !== "PENDING") return [{ affectedRows: 0 }, undefined];
+      occurrenceState = "MISSED";
+      return [{ affectedRows: 1 }, undefined];
+    }
+    if (sql.includes("FROM dose_occurrences o JOIN medications m") && sql.includes("o.state='PENDING'")) {
+      return [[{ occurrence_id: 9, medication_id: 7, user_id: 1, schedule_version: 3, local_date: "2026-01-01", time_str: "08:00", scheduled_at_utc: "2026-01-01 08:00:00.000", medication_name: "Current med", dosage: "5mg" }], undefined];
+    }
+    if (sql.includes("FROM push_delivery_attempts")) return [[], undefined];
+    return baseQuery(sql, values);
+  };
+  const { accessToken } = await login(db);
+  const mutableWorker: any = worker;
+  const originalSend = mutableWorker.sendDoseNotification;
+  let dispatches = 0;
+  mutableWorker.sendDoseNotification = async (_env: unknown, _db: unknown, dose: any) => {
+    assert.equal(occurrenceState, "MISSED");
+    assert.ok(db.commits > 0, "notification must follow a commit");
+    assert.equal(dose.event_type, "MISSED");
+    dispatches++;
+  };
+  const envWithDb: any = { JWT_SECRET: "route-test-secret", TEST_DB_FACTORY: async () => db };
+  try {
+    const batch = worker.fetch(authorized("/api/logs/mark-missed-batch", accessToken, "POST", [
+      { medicationId: 7, date: "2026-01-01", time: "08:00" }
+    ]), envWithDb);
+    const cron = worker.processMissedDoses(envWithDb, new Date("2026-01-01T08:01:00Z"));
+    const [response] = await Promise.all([batch, cron]);
+    assert.equal(response.status, 200);
+    assert.equal(occurrenceState, "MISSED");
+    assert.equal(dispatches, 1, "the conditional transition winner alone should initiate dispatch");
+  } finally {
+    mutableWorker.sendDoseNotification = originalSend;
+  }
 });
 
 test("time-zone API reports missing schema without assigning a fallback zone", async () => {
