@@ -211,6 +211,71 @@ function timeZoneSchemaNotReady(error: unknown) {
   return e.code === "ER_BAD_FIELD_ERROR" && /\btime_zone\b/i.test(message);
 }
 
+// True ONLY when `error` confirms the named optional notification-era table is
+// absent (legacy deployments that never ran database-migrations.sql). This
+// deliberately matches a single table name so a genuine SQL failure against an
+// unrelated table is never mistaken for an optional-schema gap. MySQL raises
+// ER_NO_SUCH_TABLE (code 1146) whose message is like:
+//   "Table 'dosebuddy.push_delivery_attempts' doesn't exist".
+function optionalTableMissing(error: unknown, table: string) {
+  const e = error as { code?: unknown; errno?: unknown; message?: unknown; sqlMessage?: unknown };
+  const message = [e.message, e.sqlMessage].filter(value => typeof value === "string").join(" ");
+  const isNoSuchTable = e.code === "ER_NO_SUCH_TABLE" || e.errno === 1146;
+  if (!isNoSuchTable) return false;
+  // Require the specific table name to appear, bounded so e.g. "medications"
+  // never matches a message about "push_delivery_attempts".
+  return new RegExp(`[.'\`]${table}['\`]`, "i").test(message) || new RegExp(`\\b${table}\\b`, "i").test(message);
+}
+
+// True when a notification-era COLUMN the delete/mark paths touch is absent on a
+// legacy medications row (e.g. schedule_version). Reuses the same signal as
+// medicationSchemaNotReady but is named for the delete/mark call sites.
+function medicationColumnMissing(error: unknown) {
+  return medicationSchemaNotReady(error);
+}
+
+// Cleans up a medication's auxiliary notification-era rows prior to deleting the
+// medication itself. Runs inside the caller's transaction. Each auxiliary table
+// is optional: on a legacy deployment that never ran database-migrations.sql the
+// table is absent, which we tolerate ONLY when the error confirms THAT specific
+// table is missing. Any other SQL error propagates so the transaction rolls back
+// and the request is NOT reported as a success.
+async function deleteMedicationAux(db: any, medicationId: unknown) {
+  try {
+    await query(db, "UPDATE push_delivery_attempts SET outcome='OBSOLETE',next_attempt_at=NULL WHERE medication_id=? AND outcome IN ('CLAIMED','RETRY')", [medicationId]);
+  } catch (error) {
+    if (!optionalTableMissing(error, "push_delivery_attempts")) throw error;
+  }
+  // dose_occurrences references medications; the migration adds ON DELETE
+  // CASCADE, but a partially-migrated DB may hold referencing rows that would
+  // block the medication delete. Remove them explicitly, tolerating only a
+  // confirmed-missing dose_occurrences table.
+  try {
+    await query(db, "DELETE FROM dose_occurrences WHERE medication_id=?", [medicationId]);
+  } catch (error) {
+    if (!optionalTableMissing(error, "dose_occurrences")) throw error;
+  }
+}
+
+// Finds the active, in-range medication whose schedule includes `localTime`,
+// locked FOR UPDATE. Falls back to a schema without the notification-era
+// `active` column ONLY when the error confirms that column is missing (legacy
+// deployments); any other SQL error propagates.
+async function findActiveScheduledMedication(db: any, medicationId: unknown, date: unknown, localTime: string): Promise<Json | undefined> {
+  try {
+    const [rows] = await query<Json[]>(db,
+      "SELECT m.* FROM medications m JOIN medication_times mt ON mt.medication_id=m.id WHERE m.id=? AND m.active=1 AND ? BETWEEN m.start_date AND m.end_date AND TIME_FORMAT(mt.time_of_day,'%H:%i')=? LIMIT 1 FOR UPDATE",
+      [medicationId, date, localTime]);
+    return rows[0];
+  } catch (error) {
+    if (!medicationColumnMissing(error)) throw error;
+    const [rows] = await query<Json[]>(db,
+      "SELECT m.* FROM medications m JOIN medication_times mt ON mt.medication_id=m.id WHERE m.id=? AND ? BETWEEN m.start_date AND m.end_date AND TIME_FORMAT(mt.time_of_day,'%H:%i')=? LIMIT 1 FOR UPDATE",
+      [medicationId, date, localTime]);
+    return rows[0];
+  }
+}
+
 function logSignupFailure(phase: string, error: unknown) {
   const e = error as {
     name?: unknown;
@@ -2479,7 +2544,7 @@ const worker = {
           const [rows] = await query<Json[]>(db, "SELECT * FROM medications WHERE id=? FOR UPDATE", [del[1]]);
           if (!rows[0]) { await db.rollback(); return new Response(null, { status: 404, headers: cors }); }
           if (Number(rows[0].user_id) !== actor.id) { await db.rollback(); return plain("Access denied", 403); }
-          await query(db, "UPDATE push_delivery_attempts SET outcome='OBSOLETE',next_attempt_at=NULL WHERE medication_id=? AND outcome IN ('CLAIMED','RETRY')", [del[1]]);
+          await deleteMedicationAux(db, del[1]);
           await query(db, "DELETE FROM intake_logs WHERE medication_id=?", [del[1]]);
           await query(db, "DELETE FROM medication_times WHERE medication_id=?", [del[1]]);
           await query(db, "DELETE FROM medications WHERE id=?", [del[1]]);
@@ -2573,22 +2638,33 @@ const worker = {
           db = await getDbConnection(env);
           const result = await transact(db, async () => {
             const localTime = String(b.time).substring(0, 5);
-            const [medRows] = await query<Json[]>(db,
-              "SELECT m.* FROM medications m JOIN medication_times mt ON mt.medication_id=m.id WHERE m.id=? AND m.active=1 AND ? BETWEEN m.start_date AND m.end_date AND TIME_FORMAT(mt.time_of_day,'%H:%i')=? LIMIT 1 FOR UPDATE",
-              [b.medicationId, b.date, localTime]);
-            const med = medRows[0];
+            const med = await findActiveScheduledMedication(db, b.medicationId, b.date, localTime);
             if (!med) throw new Error("Medication or current schedule not found");
             const owner = await getUser(db, Number(med.user_id));
             if (!owner || !accessible(actor, owner)) throw new Error("Access denied");
             const zone = canonicalTimeZone(owner.time_zone);
             if (!zone) throw new Error("User time zone is not configured");
-            const occurrenceId = await upsertOccurrence(db, {
-              medicationId: Number(med.id), userId: Number(med.user_id), scheduleVersion: Number(med.schedule_version),
-              localDate: b.date, localTime, scheduledAtUtc: mysqlDateTime(resolveLocalOccurrence(b.date, localTime, zone))
-            });
-            const changed = status === "TAKEN"
-              ? await markOccurrenceTaken(db, occurrenceId)
-              : await markOccurrenceMissed(db, occurrenceId);
+            // dose_occurrences is the authoritative dose-state ledger for the
+            // notification system. On a legacy deployment that never ran
+            // database-migrations.sql the table is absent — and so is server
+            // notification scheduling — so recording adherence in intake_logs
+            // alone (the pre-notification behavior) is safe and correct. We fall
+            // back ONLY when the error confirms dose_occurrences is missing; any
+            // other failure propagates and rolls the transaction back.
+            let occurrenceId: number | null = null;
+            let changed = true;
+            try {
+              occurrenceId = await upsertOccurrence(db, {
+                medicationId: Number(med.id), userId: Number(med.user_id), scheduleVersion: Number(med.schedule_version ?? 1),
+                localDate: b.date, localTime, scheduledAtUtc: mysqlDateTime(resolveLocalOccurrence(b.date, localTime, zone))
+              });
+              changed = status === "TAKEN"
+                ? await markOccurrenceTaken(db, occurrenceId)
+                : await markOccurrenceMissed(db, occurrenceId);
+            } catch (occErr) {
+              if (!optionalTableMissing(occErr, "dose_occurrences")) throw occErr;
+              occurrenceId = null;
+            }
             const [logResult] = await query<{ insertId: number }>(db,
               `INSERT INTO intake_logs (occurrence_id,marker_user_id,medication_id,date,time,status,scheduled_time,taken_time,missed_time,created_at,updated_at)
                VALUES (?,?,?,?,?,?,CONCAT(?,' ',?),IF(?='TAKEN',NOW(),NULL),IF(?='MISSED',NOW(),NULL),NOW(),NOW())
