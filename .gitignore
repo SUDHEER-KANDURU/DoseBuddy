@@ -23,3 +23,7 @@ NOTIFICATION_*.md
 # Misplaced local MySQL Shell dump artifacts; preserve locally, never publish.
 /Userssudheer kanduruDoseBuddy-backupsaiven-defaultdb-20261016-212524/
 /Userssudheer kanduruDoseBuddy-backupsaiven-defaultdb-fresh-a80abd241a754498a1834d37eb08d261/
+
+# Local operator notes; intentionally not published.
+/docs/PRODUCTION_MIGRATION_RUNBOOK.md
+/docs/WEB_PUSH_MANUAL_TEST.md
