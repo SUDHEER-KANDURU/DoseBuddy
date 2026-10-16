@@ -42,16 +42,28 @@ export function notificationEventId(event: DeliveryOccurrence): string {
   return [event.eventType, event.userId, event.medicationId, event.scheduleVersion, event.localDate, event.localTime].join(":");
 }
 
+/** Canonical OS-level notification `tag` shared by the foreground and background paths.
+ * Derived only from dose identity (user, medication, local date, HH:MM) so it is
+ * schedule-version- and event-type-INDEPENDENT. The browser coalesces notifications
+ * that share this tag, so the foreground local notification and the background push for
+ * the same dose must produce a byte-identical string. The frontend keeps an identical
+ * copy in `DoseBuddy_frontend/dose-tag.js`; `tests/notification-dedup.test.ts` is the
+ * contract that keeps the two in lockstep. */
+export function canonicalDoseTag(userId: number, medicationId: number, localDate: string, localTime: string): string {
+  return `dose-${userId}-${medicationId}-${localDate}-${String(localTime).slice(0, 5).replace(":", "")}`;
+}
+
 /** Build the Web Push payload without asset URLs the frontend does not ship.
  * The service worker supplies its bundled fallback icon and badge when omitted.
  */
 export function buildDoseNotificationPayload(event: DeliveryOccurrence, dose: DoseNotificationDetails) {
   const eventId = notificationEventId(event);
+  const tag = canonicalDoseTag(event.userId, event.medicationId, event.localDate, event.localTime);
   if (event.eventType === "REMINDER") {
     return {
       title: "DoseBuddy - Medication Reminder",
       body: `Time to take ${dose.medicationName} (${dose.dosage})`,
-      tag: `reminder-${eventId}`,
+      tag,
       data: { type: "dose-reminder", doseId: eventId, userId: event.userId, medicationId: event.medicationId, url: "/" },
       timestamp: Date.now(),
       requireInteraction: true
@@ -60,7 +72,7 @@ export function buildDoseNotificationPayload(event: DeliveryOccurrence, dose: Do
   return {
     title: "DoseBuddy - Missed Dose",
     body: `You missed ${dose.medicationName} (${dose.dosage}) scheduled for ${event.localTime}`,
-    tag: `missed-${eventId}`,
+    tag,
     data: { type: "missed-dose", doseId: eventId, userId: event.userId, medicationId: event.medicationId, url: "/" }
   };
 }

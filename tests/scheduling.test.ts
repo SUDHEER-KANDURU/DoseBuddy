@@ -146,6 +146,57 @@ test("Worker dispatch path sends a shifted spring-forward occurrence", async () 
   }
 });
 
+test("due REMINDER discovered by the scheduler, accepted by the provider, finalizes SENT (cases 1, 3, 4)", async () => {
+  for (const status of [201, 200]) {
+    const fixture = await webPushFixture();
+    const originalFetch = globalThis.fetch;
+    let fetches = 0;
+    globalThis.fetch = async () => { fetches++; return new Response(null, { status }); };
+    const outcomes: string[] = [];
+    let occurrenceUpserted = false;
+    const db: any = {
+      query: async (sql: string, values: unknown[] = []) => {
+        if (sql.includes("FROM medications m JOIN medication_times")) return [[{
+          medication_id: 1, user_id: 2, medication_name: "Medicine", dosage: "5mg",
+          start_date: "2026-10-14", end_date: "2026-10-14", schedule_version: 1,
+          time_zone: "Asia/Kolkata", time_str: "07:30"
+        }], undefined];
+        if (sql.startsWith("INSERT INTO dose_occurrences")) { occurrenceUpserted = true; return [{ insertId: 42, affectedRows: 1 }, undefined]; }
+        if (sql.includes("FROM push_subscriptions")) return [[{ id: 7, subscription_data: JSON.stringify(fixture.subscription) }], undefined];
+        if (sql.startsWith("INSERT IGNORE")) return [{ affectedRows: 1 }, undefined];
+        // upsertOccurrence probes for an existing row first; return none so the INSERT path runs.
+        if (sql.includes("SELECT id FROM dose_occurrences")) return [[], undefined];
+        // revalidation query (occurrenceIsCurrent, SELECT o.id ...) → occurrence is current.
+        if (sql.includes("SELECT o.id")) return [[{ id: 42 }], undefined];
+        if (sql.includes("SET dispatch_started_at")) return [{ affectedRows: 1 }, undefined];
+        if (sql.includes("SET outcome=?")) { outcomes.push(String(values[0])); return [{ affectedRows: 1 }, undefined]; }
+        return [{ affectedRows: 1 }, undefined];
+      },
+      beginTransaction: async () => {}, commit: async () => {}, rollback: async () => {}, end: async () => {}
+    };
+    try {
+      // Within the 60s grace window after 07:30 Asia/Kolkata (02:00 UTC) → REMINDER.
+      await worker.processDueReminders({ ...fixture.env, TEST_DB_FACTORY: async () => db } as any, new Date("2026-10-14T02:00:30Z"));
+      assert.equal(fetches, 1, `exactly one provider request for status ${status}`);
+      assert.equal(occurrenceUpserted, true, "the due occurrence is upserted");
+      assert.deepEqual(outcomes, ["SENT"], `2xx (${status}) finalizes SENT`);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }
+});
+
+test("a dose near midnight keeps its local calendar date across the UTC boundary (case 2)", () => {
+  // 23:30 Asia/Kolkata on 2026-10-13 is 18:00 UTC on 2026-10-13; observed just after
+  // the local day has effectively elapsed but while the UTC instant stays on the 13th,
+  // and again once UTC has rolled into the 14th. The local_date must remain 2026-10-13.
+  assert.equal(zonedParts(new Date("2026-10-13T18:00:00Z"), "Asia/Kolkata").date, "2026-10-13");
+  const row = { medication_id: 1, time_zone: "Asia/Kolkata", time_str: "23:30", start_date: "2026-10-13", end_date: "2026-10-13" };
+  const afterUtcMidnight = occurrencesThroughInstant([row], new Date("2026-10-14T00:05:00Z"));
+  assert.equal(afterUtcMidnight.length, 1);
+  assert.equal(afterUtcMidnight[0].localDate, "2026-10-13", "local date stays on the 13th even though UTC is the 14th");
+});
+
 test("scheduler work stays bounded for a representative same-zone schedule volume", () => {
   const rows = Array.from({ length: 10_000 }, (_, index) => ({
     medication_id: index + 1,

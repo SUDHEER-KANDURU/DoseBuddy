@@ -12,7 +12,10 @@ test("reminder and missed push payloads leave icons to the service worker fallba
   const event: DeliveryOccurrence = { occurrenceId: 8, medicationId: 2, userId: 3, scheduleVersion: 4, localDate: "2026-10-11", localTime: "08:00", eventType: "MISSED" };
   const missed = buildDoseNotificationPayload(event, { medicationName: "Medicine", dosage: "5mg" });
   assert.equal(missed.title, "DoseBuddy - Missed Dose");
-  assert.equal(missed.tag, `missed-${notificationEventId(event)}`);
+  // OS-facing tag is the schedule-version-independent canonical dose tag, not the
+  // internal event id. The internal event id stays on data.doseId for the ledger.
+  assert.equal(missed.tag, "dose-3-2-2026-10-11-0800");
+  assert.equal(missed.data.doseId, notificationEventId(event));
   assert.equal("icon" in missed, false);
   assert.equal("badge" in missed, false);
 

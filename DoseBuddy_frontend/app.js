@@ -1,4 +1,5 @@
 ﻿import { escapeHtml, renderMarkdown } from "./markdown.js";
+import { canonicalDoseTag } from "./dose-tag.js";
 
 const API_BASE_URL = (window.APP_CONFIG && window.APP_CONFIG.apiBaseUrl)
     ? window.APP_CONFIG.apiBaseUrl
@@ -4614,7 +4615,7 @@ function triggerDoseNotification(med, dateStr, displayTime) {
     showDoseBuddySystemNotification("DoseBuddy Reminder", {
         body:  `Time to take ${med.name} (${med.dosage})`,
         icon:  NOTIFICATION_ICON,
-        tag:   key,
+        tag:   canonicalDoseTag(currentUser.id, med.id, dateStr, displayTime),
         data:  { url: self?.location?.origin || "/" },
         requireInteraction: false,
     }).then(result => {
