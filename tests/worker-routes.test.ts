@@ -17,6 +17,7 @@ class RouteDbAdapter {
   commits = 0;
   rollbacks = 0;
   activePushSubscriptions: any[] = [];
+  missingPushSubscriptionTable = false;
 
   async query(statement: string, values: unknown[] = []): Promise<any> {
     this.calls.push([statement, values]);
@@ -29,6 +30,9 @@ class RouteDbAdapter {
     }
     if (statement.includes("FROM users WHERE id=?")) {
       return [[Number(values[0]) === caregiver.id ? caregiver : patient], undefined];
+    }
+    if (statement.includes("SELECT id,endpoint,subscription_data FROM push_subscriptions") && this.missingPushSubscriptionTable) {
+      throw Object.assign(new Error("Table 'dosebuddy_test.push_subscriptions' doesn't exist"), { code: "ER_NO_SUCH_TABLE", errno: 1146 });
     }
     if (statement.includes("SELECT id,endpoint,subscription_data FROM push_subscriptions")) return [this.activePushSubscriptions, undefined];
     if (statement.includes("SELECT * FROM medications WHERE id=? FOR UPDATE")) return [[this.medication], undefined];
@@ -158,6 +162,20 @@ test("background push test reports missing VAPID configuration without claiming 
     code: "VAPID_NOT_CONFIGURED",
     message: "Background push is unavailable because the Worker is missing its VAPID configuration."
   });
+});
+
+test("background push test identifies missing subscription storage before provider dispatch", async () => {
+  const fixture = await webPushFixture();
+  const db = new RouteDbAdapter();
+  db.missingPushSubscriptionTable = true;
+  const { accessToken } = await login(db);
+  const response = await worker.fetch(authorized("/api/push/test", accessToken, "POST"), env(db, fixture.env));
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), {
+    code: "PUSH_STORAGE_NOT_CONFIGURED",
+    message: "Push subscription storage is not installed. Apply the notification database migration."
+  });
+  assert.ok(db.calls.some(([sql]) => sql.includes("SELECT id,endpoint,subscription_data FROM push_subscriptions")));
 });
 
 test("background push test submits through VAPID and records provider acceptance separately", async () => {
