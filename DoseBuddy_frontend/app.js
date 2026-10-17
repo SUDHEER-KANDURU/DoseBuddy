@@ -4475,12 +4475,16 @@ function playMissedDoseAlert() {
     return playReminderSound("Missed dose");
 }
 
-// Single dose-identity string shared across the in-tab dedupe guard and the OS
-// notification tag. Must match the server's notificationEventId() field order exactly
-// ([type, userId, medId, scheduleVersion, localDate, localTime].join(":")) so that the
-// prefixed OS tag (`reminder-${id}` / `missed-${id}`) is byte-for-byte equal to the
-// server's buildDoseNotificationPayload() tag and the OS coalesces the foreground and
-// background notifications for the same dose into one.
+// Single dose-identity string used as the in-tab dedupe guard key. Must match the
+// server's notificationEventId() field order exactly
+// ([type, userId, medId, scheduleVersion, localDate, localTime].join(":")).
+// NOTE: this logical event id is NOT the OS notification tag. The visible OS tag is
+// produced separately by canonicalDoseTag(userId, medId, localDate, HHMM) at the
+// showDoseBuddySystemNotification call site; canonicalDoseTag deliberately drops
+// scheduleVersion and the REMINDER/MISSED type so the foreground local notification and
+// the background push for the same dose coalesce into one visible notification (and a
+// late MISSED replaces the earlier REMINDER). Keeping the two identities distinct is the
+// locked design decision enforced byte-for-byte by tests/notification-dedup.test.ts.
 function doseEventId(type, userId, medId, scheduleVersion, localDate, localTime) {
     return [type, userId, medId, scheduleVersion, localDate, localTime].join(":");
 }
@@ -7493,7 +7497,11 @@ async function updateNotifPermissionStatus() {
         }
         if (subscription) {
             hasActivePushSubscription = true;
-            statusText.textContent  = "✓ Background reminders are on for this device.";
+            // Browser-permission fact only. This row no longer claims delivery is
+            // "working" — the evidence-based verdict (which needs server confirmation
+            // of an active subscription row and recent dispatch outcomes) is rendered
+            // by the Reminder Delivery Health panel via resolveNotificationStatus().
+            statusText.textContent  = "Permission granted and this device is subscribed. See Reminder Delivery Health below.";
             statusText.className    = "notif-perm-text notif-perm-granted";
             enableBtn.style.display = "none";
         } else {
@@ -7512,6 +7520,177 @@ async function updateNotifPermissionStatus() {
         statusText.textContent  = "⚠ Permission required — click Enable Notifications to get started.";
         statusText.className    = "notif-perm-text notif-perm-default";
         enableBtn.style.display = "inline-flex";
+    }
+}
+
+// ── Reminder Delivery Health panel ────────────────────────────────────────────
+// Per-status presentation (design §5.2): human copy, a short badge label, the
+// badge severity class, and the button label for the single next action. The
+// status + action come from resolveNotificationStatus() — this map only turns the
+// machine-readable status/action into on-screen text, it NEVER re-derives status.
+const NOTIF_HEALTH_PRESENTATION = {
+    UNSUPPORTED:                 { badge: "Unsupported", severity: "bad",     copy: "This browser can't show reminders." },
+    DISABLED:                    { badge: "Off",         severity: "neutral", copy: "Reminders are turned off in preferences." },
+    PERMISSION_DENIED:           { badge: "Blocked",     severity: "bad",     copy: "Notifications are blocked in browser settings." },
+    PERMISSION_REQUIRED:         { badge: "Action needed",severity: "warn",   copy: "Turn on notifications to get reminders." },
+    SUBSCRIPTION_MISSING:        { badge: "Action needed",severity: "warn",   copy: "Finish enabling background reminders on this device." },
+    SUBSCRIPTION_NEEDS_RECOVERY: { badge: "Needs recovery",severity: "warn",  copy: "This device needs to re-register for reminders." },
+    CONNECTION_UNAVAILABLE:      { badge: "Unknown",     severity: "neutral", copy: "Can't reach DoseBuddy to check reminder status." },
+    DISPATCH_FAILED:             { badge: "Delivery failed",severity: "bad",  copy: "A recent reminder could not be delivered." },
+    DISPATCH_UNCERTAIN:          { badge: "Unconfirmed", severity: "warn",    copy: "A reminder was sent but delivery couldn't be confirmed." },
+    DISPATCH_PENDING:            { badge: "Queued",      severity: "neutral", copy: "A reminder is queued and will be delivered shortly." },
+    PROVIDER_ACCEPTED:           { badge: "Delivering",  severity: "ok",      copy: "Reminders are being delivered (display isn't guaranteed when the browser is closed)." },
+    ACTIVE:                      { badge: "On",          severity: "ok",      copy: "Background reminders are on for this device (display isn't guaranteed when the browser is closed)." },
+};
+
+// Button label for each machine-readable action key from resolveNotificationStatus().
+// NONE means no button is shown.
+const NOTIF_HEALTH_ACTION_LABEL = {
+    SUPPORTED_BROWSERS: "View supported browsers",
+    OPEN_PREFERENCES:   "Open reminder preferences",
+    UNBLOCK_STEPS:      "How to unblock notifications",
+    ENABLE:             "Enable notifications",
+    RESUBSCRIBE:        "Re-register this device",
+    RETRY:              "Retry",
+    TEST_PUSH:          "Send a test notification",
+    NONE:               null,
+};
+
+// Reads the live browser facts + fetches the evidence-only server aggregate, then
+// renders the resolved status. Never throws out of the modal-open path. A failed or
+// slow health fetch degrades to a null aggregate → resolveNotificationStatus returns
+// CONNECTION_UNAVAILABLE (so we never paint a false green on a fetch error).
+async function renderNotificationHealthPanel() {
+    const panel     = document.getElementById("notif-health-panel");
+    const badgeEl    = document.getElementById("notif-health-badge");
+    const copyEl     = document.getElementById("notif-health-copy");
+    const actionRow  = document.getElementById("notif-health-action-row");
+    const actionBtn  = document.getElementById("notif-health-action-btn");
+    const failuresEl = document.getElementById("notif-health-failures");
+    const failuresUl = document.getElementById("notif-health-failures-list");
+    if (!panel || !badgeEl || !copyEl || !actionRow || !actionBtn || !failuresEl || !failuresUl) return;
+
+    // Browser capability + permission facts.
+    const supported = ("Notification" in window) && ("serviceWorker" in navigator) && ("PushManager" in window);
+    const permission = ("Notification" in window) ? Notification.permission : "default";
+
+    // Preference facts: reminders must be enabled for the push channel to matter.
+    const prefs = loadFromLS(NOTIF_PREFS_KEY, { "medicine-reminders": true, "sound-alerts": true });
+    const prefsEnabled = prefs["medicine-reminders"] !== false;
+
+    // Live browser subscription fact.
+    let hasBrowserSub = false;
+    if (supported) {
+        try {
+            const registration = await navigator.serviceWorker.ready;
+            hasBrowserSub = !!(await registration.pushManager.getSubscription());
+        } catch (err) {
+            console.log("[DoseBuddy Health] getSubscription failed:", err?.message || err);
+            hasBrowserSub = false;
+        }
+    }
+
+    // Evidence-only server aggregate. null on any failure/timeout → CONNECTION_UNAVAILABLE.
+    let serverAggregate = null;
+    if (currentUser?.id) {
+        try {
+            const res = await authFetch(`${API_BASE}/notifications/health/${currentUser.id}`);
+            if (res.ok) {
+                serverAggregate = await res.json().catch(() => null);
+            }
+        } catch (err) {
+            console.log("[DoseBuddy Health] health fetch failed:", err?.message || err);
+            serverAggregate = null;
+        }
+    }
+
+    const { status, action } = resolveNotificationStatus({
+        permission, hasBrowserSub, serverAggregate, supported, prefsEnabled,
+    });
+    const presentation = NOTIF_HEALTH_PRESENTATION[status]
+        || { badge: "Unknown", severity: "neutral", copy: "Reminder status is unavailable right now." };
+
+    // Status copy + badge.
+    copyEl.textContent  = presentation.copy;
+    badgeEl.textContent = presentation.badge;
+    badgeEl.className   = `notif-health-badge notif-health-badge-${presentation.severity}`;
+
+    // Single next-action button.
+    const actionLabel = Object.prototype.hasOwnProperty.call(NOTIF_HEALTH_ACTION_LABEL, action)
+        ? NOTIF_HEALTH_ACTION_LABEL[action]
+        : null;
+    if (actionLabel) {
+        actionBtn.textContent = actionLabel;
+        actionBtn.dataset.action = action;
+        actionRow.style.display = "flex";
+    } else {
+        actionBtn.removeAttribute("data-action");
+        actionRow.style.display = "none";
+    }
+
+    // Recent failures (server already humanized each via explainFailure()).
+    const failures = serverAggregate && Array.isArray(serverAggregate.recentFailures)
+        ? serverAggregate.recentFailures
+        : [];
+    failuresUl.textContent = "";
+    if (failures.length > 0) {
+        failures.forEach(f => {
+            const li = document.createElement("li");
+            li.className = "notif-health-failure-item";
+            const text = document.createElement("span");
+            text.textContent = f && typeof f.explanation === "string" && f.explanation
+                ? f.explanation
+                : "A recent reminder had a problem DoseBuddy is still checking on.";
+            li.appendChild(text);
+            if (f && f.attemptedAt) {
+                const when = document.createElement("time");
+                when.className = "notif-health-failure-time";
+                const parsed = new Date(f.attemptedAt);
+                when.textContent = Number.isNaN(parsed.getTime()) ? "" : parsed.toLocaleString();
+                if (when.textContent) li.appendChild(when);
+            }
+            failuresUl.appendChild(li);
+        });
+        failuresEl.style.display = "block";
+    } else {
+        failuresEl.style.display = "none";
+    }
+}
+
+// Runs the single next-action resolved for the current health status. Routes each
+// action key to the existing affordance — no new delivery paths are introduced.
+async function runNotificationHealthAction(action) {
+    switch (action) {
+        case "ENABLE":
+        case "RESUBSCRIBE": {
+            try {
+                await enableDoseBuddyPush();
+                showToast("Background push subscription is active on this device.", "success", 5000);
+            } catch (error) {
+                showToast(error.message || "Could not enable background notifications.", "warning", 8000);
+            }
+            await updateNotifPermissionStatus();
+            await renderNotificationHealthPanel();
+            break;
+        }
+        case "TEST_PUSH":
+            document.getElementById("notif-test-push-btn")?.click();
+            break;
+        case "RETRY":
+            await renderNotificationHealthPanel();
+            break;
+        case "OPEN_PREFERENCES":
+            // Already inside the preferences modal; nudge focus to the reminders toggle.
+            document.querySelector('.toggle-switch[data-pref="medicine-reminders"]')?.focus();
+            break;
+        case "UNBLOCK_STEPS":
+            showToast("Open your browser's site settings for DoseBuddy and set Notifications to Allow, then reopen this panel.", "info", 10000);
+            break;
+        case "SUPPORTED_BROWSERS":
+            showToast("Background reminders need a recent Chrome, Edge, Firefox, or Safari. iOS requires installing DoseBuddy to the Home Screen.", "info", 10000);
+            break;
+        default:
+            break;
     }
 }
 
@@ -7853,6 +8032,9 @@ function openNotifPrefsModal() {
     // Refresh the live permission status row each time the modal opens
     updateNotifPermissionStatus();
 
+    // Refresh the evidence-based Reminder Delivery Health panel (async; never throws).
+    renderNotificationHealthPanel();
+
     // Update sound status text
     const soundStatusEl = document.getElementById("notif-sound-status-text");
     if (soundStatusEl) {
@@ -7891,13 +8073,29 @@ document.addEventListener("DOMContentLoaded", () => {
         try {
             await enableDoseBuddyPush();
             updateNotifPermissionStatus();
+            renderNotificationHealthPanel();
             showToast("Background push subscription is active on this device.", "success", 5000);
             const banner = document.getElementById("notif-permission-banner");
             if (banner) { banner.classList.remove("notif-banner-visible"); setTimeout(() => banner.remove(), 300); }
             scheduleMedicineReminders();
         } catch (error) {
             updateNotifPermissionStatus();
+            renderNotificationHealthPanel();
             showToast(error.message || "Could not enable background notifications.", "warning", 8000);
+        } finally {
+            button.disabled = false;
+        }
+    });
+
+    // Reminder Delivery Health panel — single next-action button. The action key is
+    // set by renderNotificationHealthPanel() from resolveNotificationStatus().
+    document.getElementById("notif-health-action-btn")?.addEventListener("click", async event => {
+        const button = event.currentTarget;
+        const action = button.dataset.action;
+        if (!action) return;
+        button.disabled = true;
+        try {
+            await runNotificationHealthAction(action);
         } finally {
             button.disabled = false;
         }

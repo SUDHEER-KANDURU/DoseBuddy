@@ -2000,3 +2000,17 @@ body.dark-mode #auth-view select {
     padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 0px));
   }
 }
+
+/* ── Reminder Delivery Health panel (modal-notif) ──────────────────────────── */
+@media (max-width: 480px) {
+  .notif-health-row {
+    flex-direction: column;
+    gap: 6px;
+  }
+  .notif-health-copy {
+    flex-basis: auto;
+  }
+  .notif-health-action-row .notif-health-action-btn {
+    width: 100%;
+  }
+}

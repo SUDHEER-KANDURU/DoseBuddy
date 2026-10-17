@@ -2190,6 +2190,26 @@
                     Enable Notifications
                 </button>
             </div>
+
+            <!-- Reminder health panel: evidence-based status resolved by
+                 resolveNotificationStatus() (never a green "working" without a live
+                 browser subscription AND server evidence). Populated by
+                 renderNotificationHealthPanel() in app.js. -->
+            <div class="modal-section-label">Reminder Delivery Health</div>
+            <div id="notif-health-panel" class="notif-health-panel" aria-live="polite">
+                <div class="notif-health-row">
+                    <span id="notif-health-badge" class="notif-health-badge notif-health-badge-checking">Checking…</span>
+                    <p id="notif-health-copy" class="notif-health-copy">Checking reminder delivery status…</p>
+                </div>
+                <div id="notif-health-action-row" class="notif-health-action-row" style="display:none;">
+                    <button id="notif-health-action-btn" class="modal-btn-secondary notif-health-action-btn" type="button"></button>
+                </div>
+                <div id="notif-health-failures" class="notif-health-failures" style="display:none;">
+                    <p class="notif-health-failures-label">Recent reminder problems</p>
+                    <ul id="notif-health-failures-list" class="notif-health-failures-list"></ul>
+                </div>
+            </div>
+
             <div class="modal-section-label">Reminders</div>
             <div class="pref-list">
                 <div class="pref-row"><div class="pref-info"><p class="pref-title">Medicine Reminders</p><p class="pref-desc">Get notified when it is time to take your medicine</p></div><button class="toggle-switch active" data-pref="medicine-reminders" role="switch" aria-checked="true"><span class="toggle-knob"></span></button></div>
