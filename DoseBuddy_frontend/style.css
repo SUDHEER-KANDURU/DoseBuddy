@@ -1713,11 +1713,13 @@ tr.due-now { animation: pulse-row 2s ease infinite; }
   color: var(--primary); font-weight: 600;
 }
 .time-slot-icon { flex: 0 0 auto; color: var(--primary); }
-/* Input sits inside the card: drop its own border so the card is the frame */
-.time-slot-card input[type="time"] {
+/* Input sits inside the card: drop its own border so the card is the frame.
+   Selector raised to .form-group.time-slot-card so it outranks the base
+   .addmed-form-card .form-group input rule (two classes + one type). */
+.addmed-form-card .form-group.time-slot-card input[type="time"] {
   border: none; background: transparent; padding: 2px 0; box-shadow: none;
 }
-.time-slot-card input[type="time"]:focus {
+.addmed-form-card .form-group.time-slot-card input[type="time"]:focus {
   box-shadow: none; background: transparent;
 }
 
