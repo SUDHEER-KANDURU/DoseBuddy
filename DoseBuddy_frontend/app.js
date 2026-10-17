@@ -7297,6 +7297,86 @@ function decodeVapidPublicKey(value) {
     return Uint8Array.from(binary, char => char.charCodeAt(0));
 }
 
+// ── Notification health status resolver ──────────────────────────────────────
+// SINGLE SOURCE OF TRUTH for the notification-health status enum (design §5.2).
+// Pure and DOM-free so it can be sliced out and unit-tested; FEAT-003 wires it to
+// the health panel. The server (GET /api/notifications/health/{userId}) returns
+// EVIDENCE ONLY and never emits one of these statuses — the status is resolved
+// here, where the browser facts (permission, live subscription) are known.
+//
+// Argument object:
+//   permission       Notification.permission ("granted" | "denied" | "default")
+//   hasBrowserSub    boolean — PushManager.getSubscription() returned a live sub
+//   serverAggregate  the §5.1 evidence payload, or null/undefined when the health
+//                    fetch failed (→ CONNECTION_UNAVAILABLE)
+//   supported        optional boolean (default true) — Notification + PushManager
+//                    exist in this browser; pass false for UNSUPPORTED
+//   prefsEnabled     optional boolean (default true) — the medicine-reminders /
+//                    sound-alerts preferences are on; pass false for DISABLED
+//
+// Returns { status, action } where status is one of the §5.2 strings and action is
+// the machine-readable next-step key FEAT-003 maps to a button/affordance.
+// Resolution order is first-match-wins exactly as listed in §5.2. Only lastDispatch
+// (REMINDER/MISSED) participates — a TEST attempt (lastTest) never flips the status.
+// ACTIVE / PROVIDER_ACCEPTED require BOTH a live browser subscription AND server-known
+// evidence (an active row / a real-reminder SENT), so no green state appears without it.
+function resolveNotificationStatus({ permission, hasBrowserSub, serverAggregate, supported = true, prefsEnabled = true } = {}) {
+    if (!supported) {
+        return { status: "UNSUPPORTED", action: "SUPPORTED_BROWSERS" };
+    }
+    if (!prefsEnabled) {
+        return { status: "DISABLED", action: "OPEN_PREFERENCES" };
+    }
+    if (permission === "denied") {
+        return { status: "PERMISSION_DENIED", action: "UNBLOCK_STEPS" };
+    }
+    if (permission === "default") {
+        return { status: "PERMISSION_REQUIRED", action: "ENABLE" };
+    }
+    // permission === "granted" (or anything else) from here on.
+
+    const subCount = serverAggregate && serverAggregate.subscription
+        ? Number(serverAggregate.subscription.count) || 0
+        : 0;
+    const lastOutcome = serverAggregate && serverAggregate.lastDispatch
+        ? serverAggregate.lastDispatch.outcome
+        : null;
+
+    // The subscription-count branches below are only truthful when the server
+    // evidence is actually present; without it the server-side count is unknown,
+    // so a missing aggregate resolves to CONNECTION_UNAVAILABLE instead.
+    if (serverAggregate && !hasBrowserSub && subCount === 0) {
+        return { status: "SUBSCRIPTION_MISSING", action: "ENABLE" };
+    }
+    if (serverAggregate && ((hasBrowserSub && subCount === 0) || lastOutcome === "EXPIRED")) {
+        return { status: "SUBSCRIPTION_NEEDS_RECOVERY", action: "RESUBSCRIBE" };
+    }
+    if (!serverAggregate) {
+        return { status: "CONNECTION_UNAVAILABLE", action: "RETRY" };
+    }
+    if (lastOutcome === "FAILED") {
+        return { status: "DISPATCH_FAILED", action: "TEST_PUSH" };
+    }
+    if (lastOutcome === "UNCERTAIN") {
+        return { status: "DISPATCH_UNCERTAIN", action: "TEST_PUSH" };
+    }
+    if (lastOutcome === "CLAIMED" || lastOutcome === "RETRY") {
+        return { status: "DISPATCH_PENDING", action: "NONE" };
+    }
+    if (lastOutcome === "SENT") {
+        return { status: "PROVIDER_ACCEPTED", action: "TEST_PUSH" };
+    }
+    const recentFailures = serverAggregate && Array.isArray(serverAggregate.recentFailures)
+        ? serverAggregate.recentFailures
+        : [];
+    if (hasBrowserSub && subCount >= 1 && recentFailures.length === 0) {
+        return { status: "ACTIVE", action: "TEST_PUSH" };
+    }
+    // Granted + live sub + server-known sub, but an unmapped/ambiguous dispatch
+    // state or lingering failures — surface a safe recovery rather than a false green.
+    return { status: "SUBSCRIPTION_NEEDS_RECOVERY", action: "RESUBSCRIBE" };
+}
+
 // Shared subscribe + POST routine. Returns the active PushSubscription.
 // Reuses an existing subscription if one is already present (no redundant re-POST).
 // Must be reachable from a user gesture because some browsers require transient
