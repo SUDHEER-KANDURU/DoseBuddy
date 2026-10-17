@@ -1688,6 +1688,39 @@ tr.due-now { animation: pulse-row 2s ease infinite; }
 .addmed-form-card .form-group input[type="time"]  { font-size: 0.9rem; font-weight: 500; color: var(--primary); }
 .addmed-form-card .form-group input[type="date"]  { color: var(--text-primary); }
 
+/* Native time picker should follow the current theme (scoped to these inputs only) */
+.addmed-form-card .form-group input[type="time"] { color-scheme: light; }
+
+/* Light-mode clock indicator: understated, matches the date-indicator style */
+.addmed-form-card .form-group input[type="time"]::-webkit-calendar-picker-indicator {
+  cursor: pointer; opacity: 0.6; transition: opacity 0.2s ease;
+}
+.addmed-form-card .form-group input[type="time"]::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+}
+
+/* Chip/card wrapper for each reminder slot */
+.time-slot-card {
+  border: 1.5px solid var(--border); border-radius: var(--radius-md);
+  background: var(--surface); padding: 10px 12px; gap: 8px;
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+.time-slot-card:focus-within {
+  border-color: var(--primary); box-shadow: 0 0 0 3px rgba(0,161,155,0.1);
+}
+.time-slot-label {
+  display: flex; align-items: center; gap: 6px;
+  color: var(--primary); font-weight: 600;
+}
+.time-slot-icon { flex: 0 0 auto; color: var(--primary); }
+/* Input sits inside the card: drop its own border so the card is the frame */
+.time-slot-card input[type="time"] {
+  border: none; background: transparent; padding: 2px 0; box-shadow: none;
+}
+.time-slot-card input[type="time"]:focus {
+  box-shadow: none; background: transparent;
+}
+
 .form-submit-row { padding-top: var(--space-4); border-top: 1px solid var(--border); }
 
 .submit-med-btn {
@@ -4564,7 +4597,23 @@ body.dark-mode .phone-code-select:focus {
 
 body.dark-mode .addmed-form-card .form-group input[type="time"] {
   color: var(--accent);
+  color-scheme: dark;
 }
+
+/* Make the native clock icon visible on black: invert the dark default to light */
+body.dark-mode .addmed-form-card .form-group input[type="time"]::-webkit-calendar-picker-indicator {
+  filter: invert(1) brightness(1.4); opacity: 0.85;
+}
+body.dark-mode .addmed-form-card .form-group input[type="time"]::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+}
+
+body.dark-mode .time-slot-card { border-color: var(--border); background: var(--surface); }
+body.dark-mode .time-slot-card:focus-within {
+  border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-muted);
+}
+body.dark-mode .time-slot-label,
+body.dark-mode .time-slot-icon { color: var(--accent); }
 
 body.dark-mode .form-section-num {
   background: var(--accent);
