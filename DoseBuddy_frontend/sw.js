@@ -16,34 +16,59 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("push", (event) => {
     if (!event.data) return;
+    let data;
     try {
-        const data = event.data.json();
-        // Older Worker builds sent /favicon.ico even though the frontend does
-        // not ship that file. Replace that stale path with the bundled icon so
-        // an otherwise valid background push is not paired with a broken asset.
-        const icon = data.icon && data.icon !== "/favicon.ico" ? data.icon : NOTIFICATION_ICON;
-        const badge = data.badge && data.badge !== "/favicon.ico" ? data.badge : NOTIFICATION_ICON;
-        event.waitUntil(
-            self.registration.showNotification(data.title || "DoseBuddy", {
-                body:  data.body  || "",
-                icon,
-                badge,
-                tag:   data.tag   || "dosebuddy-push",
-                data:  data.data  || {},
-            })
-        );
+        data = event.data.json();
     } catch (e) {
+        // A payload that is not valid JSON is never rendered — showing a blank
+        // or garbage notification would be worse than showing nothing.
         console.warn("[DoseBuddy SW] push parse error", e);
+        return;
     }
+    // Only a non-null, non-array object carries addressable notification fields.
+    // A string/number/boolean/null/array payload is malformed; render nothing so
+    // the patient never sees a blank or garbage reminder.
+    if (typeof data !== "object" || data === null || Array.isArray(data)) {
+        console.warn("[DoseBuddy SW] push payload is not an object; ignoring");
+        return;
+    }
+    // Older Worker builds sent /favicon.ico even though the frontend does
+    // not ship that file. Replace that stale path with the bundled icon so
+    // an otherwise valid background push is not paired with a broken asset.
+    const icon = data.icon && data.icon !== "/favicon.ico" ? data.icon : NOTIFICATION_ICON;
+    const badge = data.badge && data.badge !== "/favicon.ico" ? data.badge : NOTIFICATION_ICON;
+    // Valid object: coerce every field to a safe default so a missing/odd field
+    // never produces a blank title or an undefined tag.
+    event.waitUntil(
+        self.registration.showNotification(data.title || "DoseBuddy", {
+            body:  data.body  || "",
+            icon,
+            badge,
+            tag:   data.tag   || "dosebuddy-push",
+            data:  data.data  || {},
+        })
+    );
 });
 
 // ── Notification click ───────────────────────────────────────────────────────
 self.addEventListener("notificationclick", (event) => {
     event.notification.close();
 
-    const targetUrl = (event.notification.data && event.notification.data.url)
-        ? event.notification.data.url
-        : DOSEBUDDY_URL;
+    // Only honor a data.url that resolves to the DoseBuddy origin. A cross-origin
+    // (or unparseable) url falls back to the app origin so a tampered/stale payload
+    // can never redirect a click off-site.
+    let targetUrl = DOSEBUDDY_URL;
+    const rawUrl = event.notification.data && event.notification.data.url;
+    if (rawUrl) {
+        try {
+            const resolved = new URL(rawUrl, DOSEBUDDY_URL);
+            if (resolved.origin === DOSEBUDDY_URL) {
+                targetUrl = resolved.href;
+            }
+        } catch (e) {
+            // Unparseable url — keep the origin fallback.
+        }
+    }
 
     event.waitUntil(
         self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {

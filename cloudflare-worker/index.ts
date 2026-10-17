@@ -597,6 +597,55 @@ function vapidConfig(env: Env) {
   };
 }
 
+// Pure (outcome, error_category) -> patient-safe explanation mapping (design §4.2).
+// Keyed on outcome, refined by error_category. No raw provider text, status,
+// endpoint, token, or medication detail is ever interpolated — only the constant
+// strings below. Any unmapped pair resolves to the default fallback so a new or
+// null category never leaks a raw code or produces an empty string.
+function explainFailure(outcome: string | null | undefined, category: string | null | undefined): string {
+  const fallback = "A recent reminder had a problem DoseBuddy is still checking on.";
+  switch (outcome) {
+    case "RETRY":
+      switch (category) {
+        case "provider":
+        case "provider-retryable":
+          return "The push service was busy; DoseBuddy will try again shortly.";
+        case "pre-dispatch":
+          return "DoseBuddy couldn't start sending the last reminder and will try again.";
+        case "push-preparation-failed":
+          return "DoseBuddy had trouble preparing the last reminder and will try again.";
+        case "lease-expired-before-dispatch":
+          return "A reminder attempt timed out before sending; DoseBuddy will try again.";
+        default:
+          return fallback;
+      }
+    case "EXPIRED":
+      // The real dose path passes no category on EXPIRED, so null resolves here too.
+      return "This device's reminder registration expired. Re-enable reminders on this device.";
+    case "FAILED":
+      switch (category) {
+        case "provider":
+        case "provider-rejected":
+          return "The push service rejected the last reminder. Try a test notification.";
+        case "push-preparation-failed":
+          return "DoseBuddy repeatedly failed to prepare the last reminder.";
+        default:
+          return fallback;
+      }
+    case "UNCERTAIN":
+      switch (category) {
+        case "dispatch-uncertain":
+          return "A reminder was sent but delivery couldn't be confirmed.";
+        case "lease-expired-after-dispatch":
+          return "A reminder may have been sent; delivery couldn't be confirmed.";
+        default:
+          return fallback;
+      }
+    default:
+      return fallback;
+  }
+}
+
 const mysqlDateTime = (date: Date) => date.toISOString().slice(0, 23).replace("T", " ");
 const mysqlDate = (value: unknown) => value instanceof Date ? value.toISOString().slice(0, 10) : String(value).slice(0, 10);
 
@@ -2211,6 +2260,10 @@ async function callAi(env: Env, prompt: string): Promise<Response> {
 }
 
 const worker = {
+  // Exposed for unit tests (§11). The module-scope pure function is the single
+  // source of truth; this is only a reference to it.
+  explainFailure,
+
   async fetch(request: Request, env: Env): Promise<Response> {
     const startTime = Date.now();
     const url = new URL(request.url);
@@ -2898,29 +2951,49 @@ const worker = {
       if (path === "/api/push/subscribe" && request.method === "POST") {
         const { body: b } = await requestBody(request);
         if (!b.subscription) return json({ message: "Missing subscription data" }, 400);
+        // Server-side body validation. A generic message is returned on failure so
+        // the endpoint value, keys, or any other data are never echoed back.
+        const base64Url = (value: unknown) => typeof value === "string" && value.length > 0 && /^[A-Za-z0-9_-]+$/.test(value);
+        const sub: any = b.subscription;
+        let endpointIsHttps = false;
+        if (typeof sub?.endpoint === "string") {
+          try { endpointIsHttps = new URL(sub.endpoint).protocol === "https:"; } catch { endpointIsHttps = false; }
+        }
+        if (!endpointIsHttps || !sub?.keys || !base64Url(sub.keys.p256dh) || !base64Url(sub.keys.auth)) {
+          return json({ message: "Invalid push subscription" }, 400);
+        }
         const subscriptionZone = b.timeZone === undefined ? null : canonicalTimeZone(b.timeZone);
         if (b.timeZone !== undefined && !subscriptionZone) return json({ message: "Invalid IANA time zone" }, 400);
 
+        const endpoint = sub.endpoint;
+        const subscriptionData = JSON.stringify(sub);
+        let db: any = null;
         try {
           if (subscriptionZone) await query(env, "UPDATE users SET time_zone=?,updated_at=NOW() WHERE id=?", [subscriptionZone, actor.id]);
-          // Clean up any existing subscriptions for this user first
-          await query(
-            env,
-            "DELETE FROM push_subscriptions WHERE user_id = ? AND endpoint = ?",
-            [actor.id, b.subscription.endpoint]
+          db = await getDbConnection(env);
+          await db.beginTransaction();
+          // Idempotent per-endpoint upsert with ownership takeover for actor.id.
+          // Full-value WHERE endpoint=? TEXT equality (idx_endpoint is only a
+          // non-unique prefix index). Only the matched endpoint's row is touched;
+          // this user's other devices (different endpoints) stay active=1.
+          const [updateResult] = await db.query(
+            "UPDATE push_subscriptions SET user_id=?, subscription_data=?, active=1, updated_at=NOW() WHERE endpoint=?",
+            [actor.id, subscriptionData, endpoint]
           );
-
-          // Insert new subscription
-          await query(
-            env,
-            "INSERT INTO push_subscriptions (user_id, endpoint, subscription_data, active, created_at) VALUES (?, ?, ?, 1, NOW())",
-            [actor.id, b.subscription.endpoint, JSON.stringify(b.subscription)]
-          );
-
+          if (!updateResult || Number(updateResult.affectedRows) === 0) {
+            await db.query(
+              "INSERT INTO push_subscriptions (user_id, endpoint, subscription_data, active, created_at) VALUES (?, ?, ?, 1, NOW())",
+              [actor.id, endpoint, subscriptionData]
+            );
+          }
+          await db.commit();
           return json({ success: true, message: "Push subscription registered" });
         } catch (error) {
+          if (db) { try { await db.rollback(); } catch {} }
           console.error("[Push Subscribe] Error:", error);
           return json({ message: "Failed to register push subscription" }, 500);
+        } finally {
+          if (db) { try { await db.end(); } catch {} }
         }
       }
 
@@ -2971,6 +3044,17 @@ const worker = {
             "SELECT id,endpoint,subscription_data FROM push_subscriptions WHERE user_id=? AND active=1", [actor.id]);
           if (!subscriptions.length) {
             return json({ code: "PUSH_SUBSCRIPTION_MISSING", message: "This account has no active background push subscription. Enable reminders first." }, 409);
+          }
+
+          // Rolling 3-per-60s rate limit, counting DISTINCT event_id (presses),
+          // not ledger rows, so it holds for multi-device users where one press
+          // fans out to several rows sharing one event_id. Reject the 4th press
+          // in-window WITHOUT sending and WITHOUT writing a ledger row.
+          const [[rateRow]] = await query<Array<{ c: number }>>(db,
+            "SELECT COUNT(DISTINCT event_id) AS c FROM push_delivery_attempts WHERE user_id=? AND event_type='TEST' AND attempted_at >= DATE_SUB(NOW(3), INTERVAL 60 SECOND)",
+            [actor.id]);
+          if (rateRow && Number(rateRow.c) >= 3) {
+            return json({ code: "RATE_LIMITED", message: "Too many test notifications. Please wait a minute before trying again." }, 429);
           }
 
           const eventId = `TEST:${actor.id}:${crypto.randomUUID()}`;
@@ -3036,6 +3120,88 @@ const worker = {
         } finally {
           if (db) await db.end();
         }
+      }
+
+      // ── Notification health (evidence only; the §5.2 status enum is resolved
+      //    client-side, never here) ──────────────────────────────────────────
+      const notifHealth = path.match(/^\/api\/notifications\/health\/(\d+)$/);
+      if (notifHealth && request.method === "GET") {
+        // Load the target by id, then reuse the case-normalized `accessible`
+        // helper verbatim. A missing target returns 403 (not 404) so a caller
+        // cannot enumerate which user ids exist — "not found" and "not allowed"
+        // are deliberately indistinguishable here.
+        const target = await getUser(env, Number(notifHealth[1]));
+        if (!target) return json({ message: "Access denied" }, 403);
+        if (!accessible(actor, target)) return json({ message: "Access denied" }, 403);
+
+        const vapidConfigured = !!(env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY && env.VAPID_EMAIL);
+        const [[subRow]] = await query<Array<{ c: number }>>(
+          env,
+          "SELECT COUNT(*) AS c FROM push_subscriptions WHERE user_id=? AND active=1",
+          [target.id]
+        );
+        const activeCount = Number(subRow?.c || 0);
+
+        let lastDispatch: Record<string, unknown> | null = null;
+        let lastTest: Record<string, unknown> | null = null;
+        let recentFailures: Array<Record<string, unknown>> = [];
+        try {
+          const [dispatchRows] = await query<any[]>(
+            env,
+            "SELECT outcome,event_type,attempted_at,provider_status FROM push_delivery_attempts WHERE user_id=? AND event_type IN ('REMINDER','MISSED') ORDER BY attempted_at DESC LIMIT 1",
+            [target.id]
+          );
+          if (dispatchRows[0]) {
+            lastDispatch = {
+              outcome: dispatchRows[0].outcome ?? null,
+              eventType: dispatchRows[0].event_type ?? null,
+              attemptedAt: dispatchRows[0].attempted_at ?? null,
+              providerStatus: dispatchRows[0].provider_status ?? null
+            };
+          }
+
+          const [testRows] = await query<any[]>(
+            env,
+            "SELECT outcome,attempted_at,provider_status FROM push_delivery_attempts WHERE user_id=? AND event_type='TEST' ORDER BY attempted_at DESC LIMIT 1",
+            [target.id]
+          );
+          if (testRows[0]) {
+            lastTest = {
+              outcome: testRows[0].outcome ?? null,
+              attemptedAt: testRows[0].attempted_at ?? null,
+              providerStatus: testRows[0].provider_status ?? null
+            };
+          }
+
+          const [failureRows] = await query<any[]>(
+            env,
+            "SELECT outcome,error_category,attempted_at FROM push_delivery_attempts WHERE user_id=? AND event_type IN ('REMINDER','MISSED') AND outcome IN ('RETRY','EXPIRED','FAILED','UNCERTAIN') ORDER BY attempted_at DESC LIMIT 5",
+            [target.id]
+          );
+          recentFailures = failureRows.map(row => ({
+            outcome: row.outcome ?? null,
+            category: row.error_category ?? null,
+            attemptedAt: row.attempted_at ?? null,
+            explanation: explainFailure(row.outcome, row.error_category)
+          }));
+        } catch (error) {
+          // Legacy/partial schema: the ledger table is absent. Degrade to
+          // subscription-only facts rather than reporting a false success.
+          if (!optionalTableMissing(error, "push_delivery_attempts")) throw error;
+          lastDispatch = null;
+          lastTest = null;
+          recentFailures = [];
+        }
+
+        const actionRequired = activeCount === 0 || recentFailures.length > 0;
+        return json({
+          subscription: { exists: activeCount > 0, active: activeCount > 0, count: activeCount },
+          vapidConfigured,
+          lastDispatch,
+          lastTest,
+          recentFailures,
+          actionRequired
+        });
       }
 
       const logsHistory = path.match(/^\/api\/logs\/history\/(\d+)$/);
