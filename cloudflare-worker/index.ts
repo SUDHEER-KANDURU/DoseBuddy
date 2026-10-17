@@ -1387,6 +1387,29 @@ function extractMedicineName(message: string, userMedications: any[]): string | 
   return null;
 }
 
+function isPersonalMedicationPhrase(name: string, message: string): boolean {
+  // Detect when the extracted "medicine name" is actually a non-specific
+  // pronoun/determiner phrase (e.g. "one of my medicines" from "Tell me about
+  // one of my medicines") rather than a real product. Match a literal list of
+  // such phrases (case-insensitive, trimmed); do NOT regex-match arbitrary
+  // text, so real names like "zinc", "Lisinopril" or "paniclips" are never
+  // caught. `message` is accepted for call-site symmetry and future use.
+  if (!name || typeof name !== "string") return false;
+  const normalized = name.trim().toLowerCase();
+  if (!normalized) return false;
+  const personalPhrases = [
+    "one of my medicines",
+    "one of my medications",
+    "my medicines",
+    "my medications",
+    "my meds",
+    "my pills",
+    "my medicine",
+    "my medication"
+  ];
+  return personalPhrases.includes(normalized);
+}
+
 function extractSymptom(message: string): string | null {
   if (!message || typeof message !== 'string') {
     return null;
@@ -1571,6 +1594,36 @@ async function processMedicineInfoIntent(env: Env, message: string, conversation
     else if (words.length === 1 && /^[a-z][a-z0-9'\-]*$/.test(lowerMessage)) {
       finalMedicineName = message.trim();
     }
+  }
+
+  // Non-specific personal phrasing like "Tell me about one of my medicines"
+  // extracts the literal phrase ("one of my medicines") as the medicine name.
+  // That is not a real product, so do NOT ask the AI about a medicine literally
+  // named that — offer the user's OWN medications for selection (or, with none
+  // on file, say so without inventing one). Intent stays MEDICINE_INFO.
+  if (finalMedicineName && isPersonalMedicationPhrase(finalMedicineName, message)) {
+    if (userMedications.length > 0) {
+      response.messageType = "QUESTION";
+      response.message = "I can help you learn about medicines. Which medicine would you like to know about?";
+      response.questionType = "MEDICINE_SELECTION";
+      const questions = userMedications.map(med => ({
+        id: med.id?.toString() || "unknown",
+        text: `${med.name} (${med.dosage || "N/A"})`,
+        value: med.name
+      }));
+      questions.push({
+        id: "custom",
+        text: "Other medicine not in my list",
+        value: "custom"
+      });
+      response.questions = questions;
+      response.conversationState = conversationState;
+      return response;
+    }
+    response.messageType = "RESPONSE";
+    response.message = "You don't have any medicines saved in DoseBuddy yet. Add one using the 'Add Medicine' section, or tell me the name of a specific medicine or supplement you'd like to learn about.";
+    response.conversationState = conversationState;
+    return response;
   }
   
   // Only show personal medication selection if:
@@ -2160,10 +2213,17 @@ async function callAi(env: Env, prompt: string): Promise<Response> {
             body: JSON.stringify({
               contents: [{ parts: [{ text: trimmedPrompt }] }],
               generationConfig: { temperature: 0.2 }
-            })
+            }),
+            // Bound the provider call at 20s. The per-model try/catch below
+            // catches an AbortError/timeout and falls through to the next model,
+            // so a single slow provider never hangs the whole request. The
+            // frontend /api/ai/chat timeout is 30s (>20s) so the Worker always
+            // responds first. (The prescription Gemini calls keep their own
+            // separate 20s AbortSignal.timeout sites.)
+            signal: AbortSignal.timeout(20000)
           }
         );
-        
+
         if (resp.ok) {
           const data = await resp.json<any>();
           const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
@@ -2204,9 +2264,10 @@ async function callAi(env: Env, prompt: string): Promise<Response> {
             model,
             messages: [{ role: "user", content: trimmedPrompt }],
             temperature: 0.2
-          })
+          }),
+          signal: AbortSignal.timeout(20000)
         });
-        
+
         if (resp.ok) {
           const data = await resp.json<any>();
           const text = data.choices?.[0]?.message?.content;
@@ -2226,10 +2287,17 @@ async function callAi(env: Env, prompt: string): Promise<Response> {
     }
   }
 
-  // 3. Intelligent fallback responses based on prompt content
-  console.warn('All AI providers failed, using intelligent fallback');
-  
-  // Handle special JSON array requests for health insights
+  // 3. All AI providers failed (or were aborted by the 20s timeout). The
+  // per-model try/catch above already let each failure/abort fall through to
+  // the next provider. Preserve the deterministic JSON-array fallback for the
+  // legacy health-insights request (sent via /api/medicine/ai-info and parsed
+  // by the frontend as a JSON array of insights). For every other prompt,
+  // surface a recoverable error to the caller instead of fabricating a canned
+  // medical answer: the /api/ai/chat route's catch returns { success:false,
+  // error }, which the frontend shows as a clear, recoverable error (no
+  // fabricated answer, no silent swallow).
+  console.warn('All AI providers failed');
+
   if (prompt.includes("health insights") || prompt.includes("Patient data") || prompt.includes("JSON array")) {
     const fallbackArray = [
       { title: "Medication Adherence", message: "Keep taking your scheduled doses consistently for optimal health outcomes.", type: "info", icon: "💊" },
@@ -2239,24 +2307,8 @@ async function callAi(env: Env, prompt: string): Promise<Response> {
     ];
     return plain(JSON.stringify(fallbackArray));
   }
-  
-  // Context-aware fallback for different types of queries
-  const lowerPrompt = trimmedPrompt.toLowerCase();
-  
-  if (lowerPrompt.includes('symptom') || lowerPrompt.includes('pain') || lowerPrompt.includes('headache') || lowerPrompt.includes('feeling')) {
-    return plain(`I understand you're asking about symptoms, but our AI assistant is temporarily unavailable. For health concerns, please consider consulting your healthcare provider, especially if symptoms persist or worsen.`);
-  }
-  
-  if (lowerPrompt.includes('medicine') || lowerPrompt.includes('medication') || lowerPrompt.includes('drug') || lowerPrompt.includes('zinc')) {
-    return plain(`I'd like to help with your medication question, but our AI assistant is temporarily unavailable. Please consult your pharmacist or healthcare provider for accurate medication information and guidance.`);
-  }
-  
-  if (lowerPrompt.includes('side effect') || lowerPrompt.includes('interaction')) {
-    return plain(`For questions about medication side effects or interactions, please speak with your pharmacist or healthcare provider immediately, as our AI assistant is temporarily unavailable.`);
-  }
-  
-  // Default fallback
-  return plain(`I received your message about "${trimmedPrompt.substring(0, 50)}${trimmedPrompt.length > 50 ? '...' : ''}", but our AI health assistant is temporarily unavailable. Please consult your physician or pharmacist for health-related guidance.`);
+
+  throw new Error("AI service temporarily unavailable. Please try again later.");
 }
 
 const worker = {

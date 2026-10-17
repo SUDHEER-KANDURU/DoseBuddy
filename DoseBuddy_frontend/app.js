@@ -5269,9 +5269,14 @@ function wireStarterPrompts() {
         btn.addEventListener("click", () => {
             const prompt = btn.dataset.prompt;
             if (prompt) {
+                // ChatGPT-style: fill the composer with the suggestion and focus it so the
+                // user can edit before sending. Do NOT auto-send. Dispatching an input
+                // event runs the existing autosize listener and re-enables the Send button;
+                // updateSendButton() keeps that state consistent.
                 chatInput.value = prompt;
                 chatInput.focus();
-                sendChatMessage();
+                chatInput.dispatchEvent(new Event("input", { bubbles: true }));
+                updateSendButton();
             }
         });
     });
@@ -5370,7 +5375,11 @@ async function sendChatMessage() {
             aiConversationState.conversationId = "chat_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9);
         }
 
+        // 30s > the backend's 20s callAi cap, so the Worker always responds first
+        // (a real answer or a recoverable error) instead of the browser aborting
+        // at the 15s authFetch default and masking the real failure.
         const response = await authFetch(`${API_BASE}/ai/chat`, {
+            timeout: 30000,
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -5385,9 +5394,13 @@ async function sendChatMessage() {
         }
 
         const data = await response.json();
-        
+
         if (!data.success) {
-            throw new Error(data.error || "Unknown error");
+            // Surface the backend's recoverable error verbatim instead of the
+            // generic catch fallback, so a provider failure / timeout / auth
+            // message from the Worker reaches the user without fabrication.
+            addChatMessage("assistant", data.error || "The assistant could not respond right now. Please try again.", "error");
+            return;
         }
 
         // Update conversation state
@@ -5398,10 +5411,12 @@ async function sendChatMessage() {
 
     } catch (error) {
         console.error("AI chat error:", error);
-        
+
         let errorMessage = "I'm having trouble right now. Please try again in a moment.";
-        
-        if (error.message.includes('HTTP 500')) {
+
+        if (error.message.includes('Request timeout')) {
+            errorMessage = "The assistant took too long to respond. Please try again.";
+        } else if (error.message.includes('HTTP 500')) {
             errorMessage = "There's a temporary server issue. Your message was received, but I can't respond right now. Please try again.";
         } else if (error.message.includes('HTTP 429')) {
             errorMessage = "I'm receiving too many requests right now. Please wait a moment and try again.";
@@ -5521,7 +5536,8 @@ async function sendOptionSelection(value) {
 
     try {
         const response = await authFetch(`${API_BASE}/ai/chat`, {
-            method: "POST", 
+            timeout: 30000,
+            method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 message: String(value), // Ensure it's a string
@@ -5620,7 +5636,12 @@ function scrollChatToBottom() {
     const chatMessages = document.getElementById("ai-chat-messages");
     if (chatMessages) {
         setTimeout(() => {
-            chatMessages.scrollTop = chatMessages.scrollHeight;
+            // Only force-scroll when the user is already near the bottom (within ~120px),
+            // so a user reading older messages is not yanked back down on each new message.
+            const nearBottom = chatMessages.scrollHeight - chatMessages.scrollTop - chatMessages.clientHeight < 120;
+            if (nearBottom) {
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            }
         }, 100);
     }
 }

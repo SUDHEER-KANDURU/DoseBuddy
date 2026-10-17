@@ -1185,3 +1185,41 @@ test("ai chat includes the authenticated user medication context in the provider
     globalThis.fetch = originalFetch;
   }
 });
+
+test("ai chat personal-phrase MEDICINE_INFO returns QUESTION/MEDICINE_SELECTION without calling AI provider", async () => {
+  const db = new RouteDbAdapter();
+  // RouteDbAdapter.medication.name is "Current med"; it is returned by the
+  // JSON_ARRAYAGG query so userMedications will contain one entry.
+  const e = env(db, { GEMINI_API_KEY: "test-key" });
+  const originalFetch = globalThis.fetch;
+  let providerCalled = false;
+  globalThis.fetch = async (input: any, _init?: any) => {
+    const url = String(typeof input === "string" ? input : input.url ?? input);
+    if (url.includes("generativelanguage.googleapis.com") || url.includes("api.groq.com")) {
+      providerCalled = true;
+    }
+    return new Response(JSON.stringify({}), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  try {
+    const { accessToken } = await login(db);
+    const response = await worker.fetch(
+      authorized("/api/ai/chat", accessToken, "POST", {
+        message: "Tell me about one of my medicines",
+        conversationId: "t5",
+        conversationState: {}
+      }),
+      e
+    );
+    assert.equal(response.status, 200);
+    const payload = await response.json() as any;
+    assert.equal(payload.success, true, `expected success:true, got: ${JSON.stringify(payload)}`);
+    assert.equal(payload.messageType, "QUESTION", `expected QUESTION, got messageType=${payload.messageType}`);
+    assert.equal(payload.questionType, "MEDICINE_SELECTION", `expected MEDICINE_SELECTION, got questionType=${payload.questionType}`);
+    assert.ok(Array.isArray(payload.questions) && payload.questions.length > 0, "expected non-empty questions array");
+    const firstOption = payload.questions[0];
+    assert.ok(firstOption.value === "Current med" || firstOption.text.includes("Current med"), `expected 'Current med' in first option, got: ${JSON.stringify(firstOption)}`);
+    assert.equal(providerCalled, false, "AI provider should NOT be called for a personal-phrase MEDICINE_INFO request");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
