@@ -612,3 +612,133 @@ test("medication create retries with the legacy schema after notification-column
   assert.equal(db.rollbacks, 1);
   assert.equal(db.commits, 1);
 });
+
+// ── Prescription upload regression tests (FEAT-002) ──────────────────────────
+
+const GEMINI_MOCK_RESPONSE = {
+  candidates: [{
+    content: {
+      parts: [{
+        text: JSON.stringify({
+          medicines: [{
+            name: "TestMed",
+            dosage: "10mg",
+            form: "Tablet",
+            morning: true,
+            afternoon: false,
+            evening: false,
+            night: false,
+            strength: "10mg",
+            startDate: "",
+            durationDays: 30,
+            foodInstruction: "After meal",
+            confidence: 0.95
+          }]
+        })
+      }]
+    }
+  }]
+};
+
+test("prescription upload with JSON image body returns extraction shape", async () => {
+  const db = new RouteDbAdapter();
+  const { accessToken } = await login(db);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input: any, _init?: any) => {
+    const url = String(typeof input === "string" ? input : input.url ?? input);
+    if (url.includes("generativelanguage.googleapis.com")) {
+      return new Response(JSON.stringify(GEMINI_MOCK_RESPONSE), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      });
+    }
+    return new Response(null, { status: 200 });
+  };
+  try {
+    const response = await worker.fetch(
+      authorized("/api/prescription/upload", accessToken, "POST", {
+        images: [{ image: "dGVzdA==", mimeType: "image/jpeg", fileName: "test.jpg" }],
+        userId: 1
+      }),
+      env(db, { GEMINI_API_KEY: "test-key" })
+    );
+    assert.equal(response.status, 200);
+    const body = await response.json() as any;
+    assert.ok(Array.isArray(body.medicines), "medicines should be an array");
+    assert.ok(body.medicines.length > 0, "medicines array should be non-empty");
+    assert.ok(typeof body.medicines[0].name === "string" && body.medicines[0].name.length > 0, "first medicine should have a non-empty name");
+    assert.ok(typeof body.disclaimer === "string" && body.disclaimer.toLowerCase().includes("verify"), "disclaimer should contain 'verify'");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("prescription upload with multipart form data returns extraction shape", async () => {
+  const db = new RouteDbAdapter();
+  const { accessToken } = await login(db);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input: any, _init?: any) => {
+    const url = String(typeof input === "string" ? input : input.url ?? input);
+    if (url.includes("generativelanguage.googleapis.com")) {
+      return new Response(JSON.stringify(GEMINI_MOCK_RESPONSE), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      });
+    }
+    return new Response(null, { status: 200 });
+  };
+  try {
+    const fileBytes = new Uint8Array([0x25, 0x50, 0x44, 0x46]); // minimal PDF header bytes
+    const formData = new FormData();
+    formData.append("file", new File([fileBytes], "test.pdf", { type: "application/pdf" }));
+
+    const token = accessToken;
+    const request = new Request("https://dosebuddy.test/api/prescription/upload", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}` },
+      body: formData
+    });
+    const response = await worker.fetch(request, env(db, { GEMINI_API_KEY: "test-key" }));
+    assert.equal(response.status, 200);
+    const body = await response.json() as any;
+    assert.ok(Array.isArray(body.medicines), "medicines should be an array");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("prescription upload with empty multipart form returns 400", async () => {
+  const db = new RouteDbAdapter();
+  const { accessToken } = await login(db);
+
+  const formData = new FormData();
+  formData.append("userId", "1");
+
+  const request = new Request("https://dosebuddy.test/api/prescription/upload", {
+    method: "POST",
+    headers: { authorization: `Bearer ${accessToken}` },
+    body: formData
+  });
+  const response = await worker.fetch(request, env(db));
+  assert.equal(response.status, 400);
+  const body = await response.json() as any;
+  assert.equal(body.message, "No file uploaded");
+});
+
+test("prescription upload with unsupported content type returns 400", async () => {
+  const db = new RouteDbAdapter();
+  const { accessToken } = await login(db);
+
+  const request = new Request("https://dosebuddy.test/api/prescription/upload", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${accessToken}`,
+      "content-type": "text/plain"
+    },
+    body: "hello"
+  });
+  const response = await worker.fetch(request, env(db));
+  assert.equal(response.status, 400);
+  const body = await response.json() as any;
+  assert.equal(body.message, "Unsupported content type");
+});

@@ -931,7 +931,7 @@ async function parsePrescriptionWithAi(env: Env, base64: string, mimeType: strin
           const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${env.GEMINI_API_KEY}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            signal: AbortSignal.timeout(25000),
+            signal: AbortSignal.timeout(20000),
             body: JSON.stringify({
               contents: [{
                 parts: [
@@ -1085,7 +1085,7 @@ async function parsePrescriptionBatchWithAi(
           const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${env.GEMINI_API_KEY}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            signal: AbortSignal.timeout(25000),
+            signal: AbortSignal.timeout(20000),
             body: JSON.stringify({
               contents: [{ parts }],
               generationConfig: { temperature: 0.0 }

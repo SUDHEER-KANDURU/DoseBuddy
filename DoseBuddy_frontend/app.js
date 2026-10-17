@@ -6736,6 +6736,7 @@ function setupPrescriptionUpload() {
                 }));
 
                 uploadRes = await authFetch(`${API_BASE}/prescription/upload`, {
+                    timeout: 60000,
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
@@ -6756,6 +6757,7 @@ function setupPrescriptionUpload() {
                 }
 
                 uploadRes = await authFetch(`${API_BASE}/prescription/upload`, {
+                    timeout: 60000,
                     method: "POST",
                     body: formData
                 });
