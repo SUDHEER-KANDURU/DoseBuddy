@@ -68,18 +68,24 @@ test("all reminder sound paths reference the single original asset notify-sound.
   assert.ok(source.includes('playReminderSound("Enable sound")'), "Enable-sound button uses the shared mp3 player");
 });
 
-test("foreground dose sound calls are gated on hasActivePushSubscription (no double audio)", async () => {
+test("foreground dose sound plays whenever a tab is open (not gated on subscription)", async () => {
   const source = await appSource();
-  // The reminder fire and both missed paths must only play the page sound when there
-  // is NO active push subscription (otherwise the OS notification sound is authoritative).
+  // The page plays the single reminder asset whenever a DoseBuddy tab is open, even
+  // for push-subscribed users, because desktop OS notification sounds are unreliable.
+  // The old `if (!hasActivePushSubscription)` sound gate must be gone from every
+  // foreground dose path so the MP3 is the dependable in-tab alert.
+  const soundGateCount = (source.match(/if \(!hasActivePushSubscription\) \{/g) || []).length;
+  assert.equal(soundGateCount, 0,
+    "no foreground dose sound path is gated on !hasActivePushSubscription anymore");
+  // The reminder fire still plays through the one shared player.
   const trigger = sliceFn(source, "function triggerDoseNotification(");
-  assert.ok(/if \(!hasActivePushSubscription\) \{\s*playReminderSound\(\);/.test(trigger),
-    "triggerDoseNotification gates playReminderSound() on !hasActivePushSubscription");
-  // The checkReminders / missed handler gate the missed sound the same way.
-  const missedGateCount = (source.match(/if \(!hasActivePushSubscription\) \{/g) || []).length;
-  assert.ok(missedGateCount >= 3, "reminder + two missed paths are each gated");
-  // The explicit settings buttons are NOT gated (always play on user action).
+  assert.ok(/playReminderSound\(\);/.test(trigger),
+    "triggerDoseNotification plays the shared reminder sound");
+  // The explicit settings button still plays on user action.
   assert.ok(source.includes('playReminderSound("Enable sound")'), "Enable-sound button plays unconditionally");
+  // In-tab de-duplication still prevents the SAME dose from re-firing its sound:
+  // the fired-key guard remains the mechanism, not the subscription flag.
+  assert.ok(source.includes("firedReminderKeys"), "in-tab fired-key guard still present");
 });
 
 test("a single reminder fire plays the mp3 exactly once", async () => {

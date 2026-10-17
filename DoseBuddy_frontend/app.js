@@ -4563,13 +4563,14 @@ function triggerDoseNotification(med, dateStr, displayTime) {
     });
 
     // ── Sound ─────────────────────────────────────────────────────────────
-    // When a background push subscription is active the OS notification sound is the
-    // single authoritative alert, so suppress the foreground page MP3 to avoid a double
-    // audible alert for the same dose. When there is no subscription, the page MP3 is
-    // the only alert this user can get while a tab is open.
-    if (!hasActivePushSubscription) {
-        playReminderSound();
-    }
+    // Whenever a DoseBuddy tab is open the page plays the single reminder asset
+    // (notify-sound.mp3). This is intentional even for push-subscribed users: desktop
+    // OS notification sounds are unreliable (some systems play nothing), so the page
+    // MP3 is the dependable in-tab alert. playReminderSound() honors the sound-alerts
+    // preference and silently no-ops if autoplay is blocked, so this never throws and
+    // never blocks notification delivery. (Closed-tab pushes still rely on the OS
+    // notification + its own sound, which the page cannot control.)
+    playReminderSound();
 }
 
 function clearScheduledTimeouts() {
@@ -4948,13 +4949,12 @@ function _handleMissedDoseCheck(med, dateStr, timeStr) {
             console.error("[DoseBuddy Notifications] Unexpected missed dose notification error:", err);
         });
 
-        // 3. Sound — suppressed when background push is the authoritative alert channel
-        // (OS notification sound already plays); the page MP3 is the sole alert only
-        // when there is no active push subscription.
-        if (!hasActivePushSubscription) {
-            console.log(`[DoseBuddy Scheduler] Playing missed dose alert sound for ${med.name}`);
-            playMissedDoseAlert();
-        }
+        // 3. Sound — the page plays the single reminder asset whenever a tab is open
+        // (OS notification sound is unreliable on desktop). playMissedDoseAlert()
+        // delegates to the shared player, honors the sound-alerts preference, and
+        // no-ops silently if autoplay is blocked.
+        console.log(`[DoseBuddy Scheduler] Playing missed dose alert sound for ${med.name}`);
+        playMissedDoseAlert();
 
         console.log(`[DoseBuddy Scheduler] MISSED ALERT fired — med="${med.name}" key=${missedKey}`);
 
@@ -5035,12 +5035,11 @@ function checkReminders() {
                         
                         console.log(`[DoseBuddy CheckReminders] PROCESSING MISSED: ${med.name} (${diff} min late)`);
                         
-                        // Play missed-dose sound only when there is no active push
-                        // subscription (otherwise the OS notification sound is authoritative).
-                        if (!hasActivePushSubscription) {
-                            console.log(`[DoseBuddy CheckReminders] Playing missed dose sound for ${med.name}`);
-                            playMissedDoseAlert();
-                        }
+                        // Play the single reminder asset whenever a tab is open; the
+                        // shared player honors the sound-alerts preference and no-ops
+                        // silently if autoplay is blocked.
+                        console.log(`[DoseBuddy CheckReminders] Playing missed dose sound for ${med.name}`);
+                        playMissedDoseAlert();
                         
                         // Mark as missed immediately
                         markDoseMissed(currentUser.id, med.id, todayStr, displayTime).then(() => {
