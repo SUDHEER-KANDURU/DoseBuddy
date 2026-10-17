@@ -8359,27 +8359,35 @@ body.dark-mode .prx-modal-add-btn:hover:not(:disabled) {
     to { transform: rotate(360deg); }
 }
 
-/* Mobile responsive adjustments — AI Assistant flex-fill chat layout.
-   #ai-view fills the area below the top nav inside .main-content's padded content
-   box (its height subtracts .main-content's mobile padding so .main-content never
-   becomes a competing scroll container), .ai-chat-messages is the single scroll
-   region, the composer stays pinned at the bottom, and the disclaimer is compacted
-   and reordered above the chat. Desktop (>=769px) rules are untouched. */
+/* Mobile responsive adjustments — AI Assistant.
+   On mobile the page scrolls naturally; the chat container expands to fit its
+   content (no internal scroll, no competing scroll containers). The fixed-height
+   viewport approach is removed — it caused the unwanted internal scrollbar visible
+   in the chat box. Desktop (>=769px) rules are untouched. */
 @media (max-width: 768px) {
+    /* Let the page scroll; no fixed height on the view */
     #ai-view {
-        display: flex;
-        flex-direction: column;
-        height: calc(100dvh - var(--topnav-h) - 2 * var(--space-4) - env(safe-area-inset-bottom, 0px));
-        min-height: 0;
+        display: block;
     }
 
-    .page-header {
-        flex-shrink: 0;
+    /* Chat container: expand to content, no height cap, no internal scroll */
+    .ai-chat-container {
+        max-height: none;
+        height: auto;
+        overflow: visible;
+        margin-bottom: var(--space-4);
     }
 
+    /* Messages region: expand to content, no overflow scroll */
+    .ai-chat-messages {
+        flex: none;
+        overflow-y: visible;
+        overflow: visible;
+    }
+
+    /* Disclaimer: sits naturally in page flow (no reordering needed) */
     .ai-disclaimer-card {
-        order: -1;
-        flex-shrink: 0;
+        order: 0;
         padding: var(--space-2) var(--space-3);
     }
 
@@ -8389,24 +8397,6 @@ body.dark-mode .prx-modal-add-btn:hover:not(:disabled) {
 
     .ai-disclaimer-text {
         font-size: 0.72rem;
-    }
-
-    .ai-chat-container {
-        flex: 1 1 0;
-        min-height: 0;
-        max-height: none;
-        height: auto;
-        margin-bottom: 0;
-    }
-
-    .ai-chat-messages {
-        flex: 1 1 0;
-        min-height: 0;
-        overflow-y: auto;
-    }
-
-    .ai-chat-input-area {
-        flex-shrink: 0;
     }
 
     .ai-starter-prompts {
@@ -8430,28 +8420,13 @@ body.dark-mode .prx-modal-add-btn:hover:not(:disabled) {
     }
 }
 
-/* Narrow phones (<=480px): .main-content padding shrinks to var(--space-3), so
-   #ai-view's height tracks it; compact the disclaimer further and keep the
-   composer padding comfortable so it stays reachable on 320px screens. */
 @media (max-width: 480px) {
-    #ai-view {
-        height: calc(100dvh - var(--topnav-h) - 2 * var(--space-3) - env(safe-area-inset-bottom, 0px));
-    }
-
     .ai-disclaimer-card {
         padding: var(--space-2);
     }
 
     .ai-chat-input-area {
         padding: var(--space-3);
-    }
-}
-
-/* Very narrow phones (<=375px): .main-content padding drops to var(--space-2); track
-   it so #ai-view still fits exactly with no competing scroll container. */
-@media (max-width: 375px) {
-    #ai-view {
-        height: calc(100dvh - var(--topnav-h) - 2 * var(--space-2) - env(safe-area-inset-bottom, 0px));
     }
 }
 
