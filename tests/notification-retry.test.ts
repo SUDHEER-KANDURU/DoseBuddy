@@ -90,6 +90,55 @@ test("stale-token completion cannot overwrite a reclaimed delivery", async () =>
   assert.deepEqual(calls[0].slice(-4), ["event", 12, "stale", 1]);
 });
 
+test("provider status maps to the correct delivery outcome and never SENT without a 2xx", async () => {
+  const cases: Array<{ status: number; outcome: string; deactivates: boolean }> = [
+    { status: 201, outcome: "SENT", deactivates: false },
+    { status: 429, outcome: "RETRY", deactivates: false },
+    { status: 500, outcome: "RETRY", deactivates: false },
+    { status: 410, outcome: "EXPIRED", deactivates: true },
+    { status: 404, outcome: "EXPIRED", deactivates: true },
+    { status: 400, outcome: "FAILED", deactivates: false }
+  ];
+  for (const { status, outcome, deactivates } of cases) {
+    const fixture = await webPushFixture();
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => new Response(null, { status });
+    const outcomes: string[] = [];
+    let deactivated = false;
+    let retryIncremented = false;
+    let retryNextAttemptSet = false;
+    const db: any = {
+      query: async (sql: string, values: unknown[] = []) => {
+        if (sql.includes("FROM push_subscriptions")) return [[{ id: 12, subscription_data: JSON.stringify(fixture.subscription) }], undefined];
+        if (sql.startsWith("INSERT IGNORE")) return [{ affectedRows: 1 }, undefined];
+        if (sql.includes("FROM dose_occurrences")) return [[{ id: 1 }], undefined];
+        if (sql.includes("SET dispatch_started_at")) return [{ affectedRows: 1 }, undefined];
+        if (sql.startsWith("UPDATE push_subscriptions SET active=0")) { deactivated = true; return [{ affectedRows: 1 }, undefined]; }
+        if (sql.includes("SET outcome=?")) {
+          outcomes.push(String(values[0]));
+          if (String(values[0]) === "RETRY") {
+            retryIncremented = /retry_count=retry_count\+1/.test(sql);
+            retryNextAttemptSet = /next_attempt_at=DATE_ADD/.test(sql);
+          }
+          return [{ affectedRows: 1 }, undefined];
+        }
+        throw new Error(`Unexpected SQL ${sql}`);
+      },
+      beginTransaction: async () => {}, commit: async () => {}, rollback: async () => {}
+    };
+    try {
+      await worker.sendDoseNotification(fixture.env as any, db, dose);
+      assert.deepEqual(outcomes, [outcome], `HTTP ${status} must map to ${outcome}`);
+      if (outcome !== "SENT") assert.ok(!outcomes.includes("SENT"), `HTTP ${status} must never record SENT`);
+      assert.equal(deactivated, deactivates, `HTTP ${status} subscription deactivation`);
+      if (outcome === "RETRY") {
+        assert.ok(retryIncremented, "RETRY increments retry_count");
+        assert.ok(retryNextAttemptSet, "RETRY sets next_attempt_at");
+      }
+    } finally { globalThis.fetch = originalFetch; }
+  }
+});
+
 test("scheduled handler runs due discovery before missed-dose processing", async () => {
   const mutableWorker: any = worker;
   const originalDue = mutableWorker.processDueReminders;

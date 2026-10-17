@@ -584,6 +584,12 @@ async function logMissedDoseActivities(meds, todayStr) {
 let activeMissTimeouts = [];   // legacy - to be removed
 let activeReminderAudio = null;
 let audioUnlocked = false; // tracks whether browser autoplay has been unblocked
+// Cached background-push subscription state. True once an active push_subscriptions
+// row is known to exist for this browser. When true the OS notification (and its
+// OS sound) is the authoritative alert, so the foreground page MP3 is suppressed to
+// avoid a double audible alert for the same dose. Refreshed by ensurePushSubscription()
+// and updateNotifPermissionStatus().
+let hasActivePushSubscription = false;
 
 
 function showToast(message, type = "success", duration = 3000) {
@@ -2606,6 +2612,10 @@ async function renderDashboard() {
         console.log(`[DoseBuddy DEBUG] Running immediate checkReminders after dashboard load`);
         checkReminders();
 
+        // Best-effort: guarantee an active push subscription so background delivery
+        // works with every tab closed (the core fix). Never throws.
+        ensurePushSubscription();
+
         // Fire-and-forget: this is a write-side-effect (marks past doses missed
         // on the server).  It does NOT need to complete before the dashboard
         // finishes rendering — removing the await cuts one full server RTT from
@@ -4273,15 +4283,14 @@ function stopReminderAudio() {
     }
 }
 
-// ── Audio: No AudioContext (avoids 'not allowed to start' errors) ────────────
 // ── Audio system ──────────────────────────────────────────────────────────────
-// DoseBuddy uses Web Audio API as PRIMARY (no autoplay issues once the context
-// is created and resumed inside a user gesture) with the notify-sound.mp3
-// element as FALLBACK.
+// Every reminder/missed/test sound is the single original asset notify-sound.mp3,
+// played through the shared playReminderSound() implementation. The AudioContext is
+// kept ONLY to unlock HTML audio autoplay inside a user gesture (primeAudioElement);
+// there is no synthesized-tone alert path.
 //
 // KEY RULE: AudioContext MUST be created inside a user gesture. We do it lazily
 // inside primeAudioElement() which is called from the gesture listeners.
-// _playAlertTone() checks the context is ready before using it.
 
 let _audioCtx   = null;   // created inside first gesture
 let _audioReady = false;  // true once AudioContext is running
@@ -4295,31 +4304,6 @@ function _ensureAudioCtx() {
     } catch (e) { _audioCtx = null; }
 }
 
-// A two-note beep tone: 880 Hz (A5) → 1175 Hz (D6), 600 ms total.
-// Requires AudioContext to be in "running" state.
-function _playAlertTone() {
-    if (!_audioCtx || _audioCtx.state !== "running") return false;
-    try {
-        const t    = _audioCtx.currentTime;
-        const osc  = _audioCtx.createOscillator();
-        const gain = _audioCtx.createGain();
-        osc.type = "sine";
-        osc.frequency.setValueAtTime(880,  t);
-        osc.frequency.setValueAtTime(1175, t + 0.22);
-        gain.gain.setValueAtTime(0.0001, t);
-        gain.gain.exponentialRampToValueAtTime(0.45, t + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.60);
-        osc.connect(gain);
-        gain.connect(_audioCtx.destination);
-        osc.start(t);
-        osc.stop(t + 0.65);
-        return true;
-    } catch (e) {
-        console.warn("[DoseBuddy] alert tone error:", e.message);
-        return false;
-    }
-}
-
 // Prime the audio system. Must be called from inside a genuine user gesture
 // (click / pointerdown / touchstart / keydown).  Does two things:
 //   1. Creates and resumes the AudioContext (Web Audio primary path).
@@ -4330,8 +4314,8 @@ function primeAudioElement() {
     if (_audioCtx) {
         if (_audioCtx.state === "suspended") {
             // Mark optimistically — the resume() is async but the gesture IS valid.
-            // _playAlertTone() checks state === "running" so even if this races,
-            // the tone just won't fire and the mp3 fallback takes over.
+            // The context is only used to unlock HTML audio autoplay; the mp3 element
+            // is the sole sound source.
             _audioCtx.resume().then(() => {
                 _audioReady = (_audioCtx.state === "running");
                 if (_audioReady) console.log("[DoseBuddy Audio] UNLOCKED — AudioContext running");
@@ -4370,99 +4354,66 @@ function primeAudioElement() {
     return Promise.resolve(true);
 }
 
-// ── Unified alert player ──────────────────────────────────────────────────────
-// Called by playReminderSound() and playMissedDoseAlert().
-// Tries Web Audio tone first (most reliable from setTimeout); falls back to mp3.
-function _playNotifSound(label) {
-    // Simplified MP3-only implementation - no Web Audio confusion
+// ── Single shared reminder-sound player ───────────────────────────────────────
+// The ONE implementation that plays the original asset notify-sound.mp3. Every
+// intended reminder/missed/test sound routes through here, so there is exactly one
+// reminder sound. It honours the "sound-alerts" preference, stops any in-flight
+// playback, and treats a rejected play() (e.g. NotAllowedError before a gesture
+// unlocked audio) as a non-fatal condition — it logs and returns false, never throws,
+// so a blocked sound can never block notification delivery.
+function playReminderSound(label = "Reminder") {
     const prefs = loadFromLS(NOTIF_PREFS_KEY, { "sound-alerts": true });
     if (prefs["sound-alerts"] === false) {
-        console.log(`[DoseBuddy Audio] ${label}: sound alerts disabled in preferences`);
+        console.log(`[DoseBuddy Audio] ${label}: SOUND SKIPPED (sound alerts disabled)`);
         return false;
     }
 
-    console.log(`[DoseBuddy Audio] ${label}: playing MP3 sound`);
-    
-    const audio = document.getElementById("notify-sound");
-    if (!audio) { 
-        console.warn(`[DoseBuddy Audio] ${label}: no audio element found with id 'notify-sound'`); 
-        return false; 
-    }
-
-    try {
-        stopReminderAudio();
-        audio.currentTime = 0;
-        audio.volume = 0.8;
-        audio.muted  = false;
-        
-        const playPromise = audio.play();
-        if (playPromise) {
-            playPromise
-                .then(() => {
-                    console.log(`[DoseBuddy Audio] ${label} MP3 played successfully`);
-                    activeReminderAudio = audio;
-                })
-                .catch(err => {
-                    console.warn(`[DoseBuddy Audio] ${label} MP3 play failed:`, err.message);
-                });
-        }
-        return true;
-    } catch (e) {
-        console.warn(`[DoseBuddy] ${label}: mp3 error — ${e.message}`);
-        return false;
-    }
-}
-
-// Scheduled medicine reminder sound (fires at the dose time via setTimeout)
-function playReminderSound() {
-    console.log("[DoseBuddy Audio] playReminderSound called - using MP3 directly");
-    
-    const prefs = loadFromLS(NOTIF_PREFS_KEY, { "sound-alerts": true });
-    if (prefs["sound-alerts"] === false) {
-        console.log("[DoseBuddy Audio] REMINDER SOUND SKIPPED (sound alerts disabled)");
-        return false;
-    }
-    
     try {
         const audio = document.getElementById("notify-sound");
         if (!audio) {
-            console.warn("[DoseBuddy Audio] No notify-sound element found");
+            console.warn(`[DoseBuddy Audio] ${label}: no notify-sound element found`);
             return false;
         }
-        
-        // Stop any currently playing audio
+
+        // Stop any currently playing audio so repeated fires do not overlap.
         stopReminderAudio();
-        
+
         audio.currentTime = 0;
-        audio.volume = 0.8; // Slightly lower volume for reminders
+        audio.volume = 0.8;
         audio.muted = false;
         audio.loop = false;
-        
+
         const playPromise = audio.play();
-        if (playPromise) {
+        if (playPromise && typeof playPromise.then === "function") {
             playPromise.then(() => {
-                console.log("[DoseBuddy Audio] ✓ REMINDER SOUND PLAYED (notify-sound.mp3)");
+                console.log(`[DoseBuddy Audio] ✓ ${label} SOUND PLAYED (notify-sound.mp3)`);
                 activeReminderAudio = audio;
                 audioUnlocked = true;
             }).catch(err => {
-                console.error("[DoseBuddy Audio] Reminder sound play failed:", err.name, err.message);
+                // NotAllowedError etc. — non-fatal, never thrown to the caller.
+                console.warn(`[DoseBuddy Audio] ${label} sound play blocked:`, err.name, err.message);
                 audioUnlocked = false;
             });
         } else {
-            console.log("[DoseBuddy Audio] ✓ REMINDER SOUND PLAYED (notify-sound.mp3, legacy)");
+            console.log(`[DoseBuddy Audio] ✓ ${label} SOUND PLAYED (notify-sound.mp3, legacy)`);
             activeReminderAudio = audio;
             audioUnlocked = true;
         }
         return true;
     } catch (e) {
-        console.error("[DoseBuddy Audio] Reminder sound error:", e.message);
+        console.warn(`[DoseBuddy Audio] ${label} sound error:`, e.message);
         return false;
     }
 }
 
-// Missed-dose alert sound (fires at PENDING → MISSED transition, ~5 min late)
-// Distinct entry point so the two events are never confused, even though they
-// share the same asset + player.
+// Test-sound button entry point — delegates to the one shared mp3 player.
+function _playNotifSound(label) {
+    return playReminderSound(label || "Test sound");
+}
+
+// Missed-dose alert entry point (fires at PENDING → MISSED transition, ~5 min late).
+// A distinct name so the two events are never confused, even though they share the
+// same asset + shared player.
 // Add a simple test function you can call from browser console
 window.testMissedDoseSound = function() {
     console.log("=== TESTING MISSED DOSE SOUND (MP3) ===");
@@ -4519,51 +4470,19 @@ window.testSchedulerDebug = function() {
 };
 
 function playMissedDoseAlert() {
-    console.log("[DoseBuddy Audio] playMissedDoseAlert called - using MP3 directly");
-    
-    const prefs = loadFromLS(NOTIF_PREFS_KEY, { "sound-alerts": true });
-    if (prefs["sound-alerts"] === false) {
-        console.log("[DoseBuddy Audio] MISSED DOSE SOUND SKIPPED (sound alerts disabled)");
-        return false;
-    }
-    
-    try {
-        const audio = document.getElementById("notify-sound");
-        if (!audio) {
-            console.error("[DoseBuddy Audio] No notify-sound element found for missed dose alert");
-            return false;
-        }
-        
-        console.log("[DoseBuddy Audio] Found notify-sound element, src:", audio.src);
-        
-        // Stop any currently playing audio
-        stopReminderAudio();
-        
-        audio.currentTime = 0;
-        audio.volume = 1.0; // Full volume for missed dose alerts
-        audio.muted = false;
-        audio.loop = false;
-        
-        const playPromise = audio.play();
-        if (playPromise) {
-            playPromise.then(() => {
-                console.log("[DoseBuddy Audio] ✓ MISSED DOSE SOUND PLAYED (notify-sound.mp3)");
-                activeReminderAudio = audio;
-                audioUnlocked = true;
-            }).catch(err => {
-                console.error("[DoseBuddy Audio] Missed dose sound play failed:", err.name, err.message);
-                audioUnlocked = false;
-            });
-        } else {
-            console.log("[DoseBuddy Audio] ✓ MISSED DOSE SOUND PLAYED (notify-sound.mp3, legacy)");
-            activeReminderAudio = audio;
-            audioUnlocked = true;
-        }
-        return true;
-    } catch (e) {
-        console.error("[DoseBuddy Audio] Missed dose sound error:", e.message);
-        return false;
-    }
+    // Delegates to the one shared mp3 player so missed-dose and scheduled reminders
+    // use the identical original asset and single playback path.
+    return playReminderSound("Missed dose");
+}
+
+// Single dose-identity string shared across the in-tab dedupe guard and the OS
+// notification tag. Must match the server's notificationEventId() field order exactly
+// ([type, userId, medId, scheduleVersion, localDate, localTime].join(":")) so that the
+// prefixed OS tag (`reminder-${id}` / `missed-${id}`) is byte-for-byte equal to the
+// server's buildDoseNotificationPayload() tag and the OS coalesces the foreground and
+// background notifications for the same dose into one.
+function doseEventId(type, userId, medId, scheduleVersion, localDate, localTime) {
+    return [type, userId, medId, scheduleVersion, localDate, localTime].join(":");
 }
 
 function triggerDoseNotification(med, dateStr, displayTime) {
@@ -4582,7 +4501,10 @@ function triggerDoseNotification(med, dateStr, displayTime) {
         return;
     }
 
-    const key = `${currentUser.id}-${med.id}-${dateStr}-${displayTime}`;
+    // One dose identity, used unprefixed as the in-tab guard key and (prefixed) as the
+    // OS tag below. localTime is the 24-hour HH:MM form (confirmed: callers pass
+    // rawTime.substring(0,5)); re-slicing is a defensive no-op on current inputs.
+    const key = doseEventId("REMINDER", currentUser.id, med.id, Number(med.scheduleVersion ?? 0), dateStr, displayTime.slice(0, 5));
 
     // Skip already-taken doses
     if (getDoseStatus(currentUser.id, med.id, dateStr, displayTime) === "TAKEN") {
@@ -4641,7 +4563,13 @@ function triggerDoseNotification(med, dateStr, displayTime) {
     });
 
     // ── Sound ─────────────────────────────────────────────────────────────
-    playReminderSound();
+    // When a background push subscription is active the OS notification sound is the
+    // single authoritative alert, so suppress the foreground page MP3 to avoid a double
+    // audible alert for the same dose. When there is no subscription, the page MP3 is
+    // the only alert this user can get while a tab is open.
+    if (!hasActivePushSubscription) {
+        playReminderSound();
+    }
 }
 
 function clearScheduledTimeouts() {
@@ -4961,12 +4889,14 @@ function _handleMissedDoseCheck(med, dateStr, timeStr) {
         return; // already handled
     }
 
-    const missedAlertKey = `missed-${currentUser.id}-${med.id}-${dateStr}-${timeStr}`;
-    if (firedMissedAlertKeys.has(missedAlertKey)) {
-        console.log(`[DoseBuddy Scheduler] MISSED CHECK SKIPPED — already fired for ${missedAlertKey}`);
+    // One dose identity (unprefixed) as the in-tab guard key; the OS tag below is the
+    // same identity prefixed with `missed-`, byte-for-byte equal to the server tag.
+    const missedKey = doseEventId("MISSED", currentUser.id, med.id, Number(med.scheduleVersion ?? 0), dateStr, timeStr.slice(0, 5));
+    if (firedMissedAlertKeys.has(missedKey)) {
+        console.log(`[DoseBuddy Scheduler] MISSED CHECK SKIPPED — already fired for ${missedKey}`);
         return; // deduped
     }
-    firedMissedAlertKeys.add(missedAlertKey);
+    firedMissedAlertKeys.add(missedKey);
 
     console.log(`[DoseBuddy Scheduler] Processing missed dose for med="${med.name}" time=${timeStr}`);
 
@@ -4999,7 +4929,7 @@ function _handleMissedDoseCheck(med, dateStr, timeStr) {
         console.log(`[DoseBuddy Scheduler] Sending system notification for missed dose: ${med.name}`);
         showDoseBuddySystemNotification(`Missed dose: ${med.name}`, {
             body:  `Your scheduled dose at ${timeStr} was not marked as taken.`,
-            tag:   missedAlertKey,
+            tag:   canonicalDoseTag(currentUser.id, med.id, dateStr, timeStr),
             data:  { url: window.location.origin },
         }).then(r => {
             if (r.ok) {
@@ -5018,11 +4948,15 @@ function _handleMissedDoseCheck(med, dateStr, timeStr) {
             console.error("[DoseBuddy Notifications] Unexpected missed dose notification error:", err);
         });
 
-        // 3. Sound
-        console.log(`[DoseBuddy Scheduler] Playing missed dose alert sound for ${med.name}`);
-        playMissedDoseAlert();
+        // 3. Sound — suppressed when background push is the authoritative alert channel
+        // (OS notification sound already plays); the page MP3 is the sole alert only
+        // when there is no active push subscription.
+        if (!hasActivePushSubscription) {
+            console.log(`[DoseBuddy Scheduler] Playing missed dose alert sound for ${med.name}`);
+            playMissedDoseAlert();
+        }
 
-        console.log(`[DoseBuddy Scheduler] MISSED ALERT fired — med="${med.name}" key=${missedAlertKey}`);
+        console.log(`[DoseBuddy Scheduler] MISSED ALERT fired — med="${med.name}" key=${missedKey}`);
 
         // Re-render dashboard so "Due now" → "Missed" appears
         setTimeout(() => {
@@ -5078,7 +5012,7 @@ function checkReminders() {
             // NEW: Check if this is dose time (within 1 minute) and primary scheduler might have missed it
             if (diff >= 0 && diff < 1) {
                 const status = getDoseStatus(currentUser.id, med.id, todayStr, displayTime);
-                const reminderKey = `${currentUser.id}-${med.id}-${todayStr}-${displayTime}`;
+                const reminderKey = doseEventId("REMINDER", currentUser.id, med.id, Number(med.scheduleVersion ?? 0), todayStr, displayTime.slice(0, 5));
                 
                 if (status === "PENDING" && !firedReminderKeys.has(reminderKey)) {
                     console.log(`[DoseBuddy CheckReminders] ⚡ BACKUP REMINDER: ${med.name} at ${displayTime} (primary scheduler may have missed it)`);
@@ -5095,15 +5029,18 @@ function checkReminders() {
                 console.log(`[DoseBuddy CheckReminders] ${med.name} status: ${status}`);
                 
                 if (status === "PENDING") {
-                    const missedAlertKey = `missed-${currentUser.id}-${med.id}-${todayStr}-${displayTime}`;
-                    if (!firedMissedAlertKeys.has(missedAlertKey)) {
-                        firedMissedAlertKeys.add(missedAlertKey);
+                    const missedKey = doseEventId("MISSED", currentUser.id, med.id, Number(med.scheduleVersion ?? 0), todayStr, displayTime.slice(0, 5));
+                    if (!firedMissedAlertKeys.has(missedKey)) {
+                        firedMissedAlertKeys.add(missedKey);
                         
                         console.log(`[DoseBuddy CheckReminders] PROCESSING MISSED: ${med.name} (${diff} min late)`);
                         
-                        // **PLAY MISSED DOSE SOUND IMMEDIATELY**
-                        console.log(`[DoseBuddy CheckReminders] Playing missed dose sound for ${med.name}`);
-                        playMissedDoseAlert();
+                        // Play missed-dose sound only when there is no active push
+                        // subscription (otherwise the OS notification sound is authoritative).
+                        if (!hasActivePushSubscription) {
+                            console.log(`[DoseBuddy CheckReminders] Playing missed dose sound for ${med.name}`);
+                            playMissedDoseAlert();
+                        }
                         
                         // Mark as missed immediately
                         markDoseMissed(currentUser.id, med.id, todayStr, displayTime).then(() => {
@@ -5132,7 +5069,7 @@ function checkReminders() {
                             console.log(`[DoseBuddy CheckReminders] Sending browser notification for missed dose: ${med.name}`);
                             showDoseBuddySystemNotification(`Missed dose: ${med.name}`, {
                                 body: `Your scheduled dose at ${displayTime} was not marked as taken.`,
-                                tag: missedAlertKey,
+                                tag: canonicalDoseTag(currentUser.id, med.id, todayStr, displayTime),
                                 data: { url: window.location.origin },
                             }).then(r => {
                                 if (r.ok) {
@@ -7361,26 +7298,24 @@ function decodeVapidPublicKey(value) {
     return Uint8Array.from(binary, char => char.charCodeAt(0));
 }
 
-// Must be invoked from an explicit user gesture so permission prompts and
-// PushManager.subscribe are allowed by browsers.
-async function enableDoseBuddyPush() {
-    if (!currentUser) throw new Error("Please sign in before enabling reminders.");
+// Shared subscribe + POST routine. Returns the active PushSubscription.
+// Reuses an existing subscription if one is already present (no redundant re-POST).
+// Must be reachable from a user gesture because some browsers require transient
+// activation for PushManager.subscribe() even when permission is already granted.
+// Sets hasActivePushSubscription on success. Throws on failure so callers can decide
+// whether to swallow (ensurePushSubscription) or surface (gesture handlers) the error.
+async function subscribeToPush() {
     if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
         throw new Error("Background push is not supported by this browser.");
     }
-    const permission = await requestNotificationPermission();
-    if (permission !== "granted") throw new Error(permission === "denied"
-        ? "Notifications are blocked in browser settings. Allow them for this site first."
-        : "Notification permission was not granted.");
-
     const registration = await navigator.serviceWorker.ready;
-    const keyResponse = await authFetch(`${API_BASE}/push/vapid-key`);
-    const keyData = await keyResponse.json().catch(() => ({}));
-    if (!keyResponse.ok || !keyData.publicKey) {
-        throw new Error(keyData.message || "Push notifications are not configured on the server yet.");
-    }
     let subscription = await registration.pushManager.getSubscription();
     if (!subscription) {
+        const keyResponse = await authFetch(`${API_BASE}/push/vapid-key`);
+        const keyData = await keyResponse.json().catch(() => ({}));
+        if (!keyResponse.ok || !keyData.publicKey) {
+            throw new Error(keyData.message || "Push notifications are not configured on the server yet.");
+        }
         subscription = await registration.pushManager.subscribe({
             userVisibleOnly: true,
             applicationServerKey: decodeVapidPublicKey(keyData.publicKey)
@@ -7400,11 +7335,52 @@ async function enableDoseBuddyPush() {
         }
         throw new Error(data.message || `Could not register push subscription (${response.status}).`);
     }
+    hasActivePushSubscription = true;
     return subscription;
 }
 
+// Must be invoked from an explicit user gesture so permission prompts and
+// PushManager.subscribe are allowed by browsers.
+async function enableDoseBuddyPush() {
+    if (!currentUser) throw new Error("Please sign in before enabling reminders.");
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+        throw new Error("Background push is not supported by this browser.");
+    }
+    const permission = await requestNotificationPermission();
+    if (permission !== "granted") throw new Error(permission === "denied"
+        ? "Notifications are blocked in browser settings. Allow them for this site first."
+        : "Notification permission was not granted.");
+
+    return subscribeToPush();
+}
+
+// Best-effort automatic subscription on dashboard load. Guarantees that a user who
+// has already granted permission gets an active push_subscriptions row without having
+// to hunt for the opt-in button — this is the core background-delivery fix. It never
+// throws: a gesture-less subscribe() rejection (e.g. NotAllowedError on browsers that
+// require transient activation) is swallowed, leaving the gesture fallback in
+// updateNotifPermissionStatus()/the banner as the recovery path.
+async function ensurePushSubscription() {
+    try {
+        if (!("Notification" in window) || Notification.permission !== "granted") return;
+        if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
+        if (!currentUser) return;
+        const registration = await navigator.serviceWorker.ready;
+        const existing = await registration.pushManager.getSubscription();
+        if (existing) { hasActivePushSubscription = true; return; }
+        await subscribeToPush();
+    } catch (err) {
+        // Swallow — notably gesture-less NotAllowedError. The gesture fallback recovers.
+        hasActivePushSubscription = false;
+        console.log("[DoseBuddy Push] ensurePushSubscription deferred:", err?.message || err);
+    }
+}
+
 // Updates the permission status row inside the Notification Preferences modal.
-function updateNotifPermissionStatus() {
+// For the granted case it queries the real PushManager subscription so the UI never
+// claims background delivery is active when no push_subscriptions row exists, and it
+// keeps the hasActivePushSubscription flag truthful for the foreground sound gate.
+async function updateNotifPermissionStatus() {
     const statusRow   = document.getElementById("notif-perm-status-row");
     const statusText  = document.getElementById("notif-perm-status-text");
     const enableBtn   = document.getElementById("notif-perm-enable-btn");
@@ -7427,14 +7403,33 @@ function updateNotifPermissionStatus() {
 
     const perm = Notification.permission;
     if (perm === "granted") {
-        statusText.textContent  = "Permission granted. Background delivery still needs an active push subscription.";
-        statusText.className    = "notif-perm-text notif-perm-granted";
-        enableBtn.style.display = "inline-flex";
+        let subscription = null;
+        if ("serviceWorker" in navigator && "PushManager" in window) {
+            try {
+                const registration = await navigator.serviceWorker.ready;
+                subscription = await registration.pushManager.getSubscription();
+            } catch (err) {
+                console.log("[DoseBuddy Push] getSubscription check failed:", err?.message || err);
+            }
+        }
+        if (subscription) {
+            hasActivePushSubscription = true;
+            statusText.textContent  = "✓ Background reminders are on for this device.";
+            statusText.className    = "notif-perm-text notif-perm-granted";
+            enableBtn.style.display = "none";
+        } else {
+            hasActivePushSubscription = false;
+            statusText.textContent  = "Permission granted. Tap to finish enabling background reminders on this device.";
+            statusText.className    = "notif-perm-text notif-perm-granted";
+            enableBtn.style.display = "inline-flex";
+        }
     } else if (perm === "denied") {
+        hasActivePushSubscription = false;
         statusText.textContent  = "✕ Blocked — enable notifications in your browser settings to receive dose reminders.";
         statusText.className    = "notif-perm-text notif-perm-denied";
         enableBtn.style.display = "none";
     } else {
+        hasActivePushSubscription = false;
         statusText.textContent  = "⚠ Permission required — click Enable Notifications to get started.";
         statusText.className    = "notif-perm-text notif-perm-default";
         enableBtn.style.display = "inline-flex";
@@ -7842,16 +7837,10 @@ document.addEventListener("DOMContentLoaded", () => {
         if (btn) { btn.disabled = true; btn.textContent = "Unlocking…"; }
         try {
             await primeAudioElement();
-            // Play a very short test tone to confirm
-            const toneOk = _playAlertTone();
-            const mp3El  = document.getElementById("notify-sound");
-            let mp3Ok = false;
-            if (!toneOk && mp3El && audioUnlocked) {
-                mp3El.currentTime = 0; mp3El.volume = 0.4;
-                await mp3El.play().then(() => { mp3El.pause(); mp3El.currentTime = 0; mp3Ok = true; }).catch(() => {});
-            }
-            const anyOk = toneOk || mp3Ok;
-            if (anyOk) {
+            // Confirm by playing the one reminder asset (notify-sound.mp3) once — the
+            // same sound reminders use, so there is no second/distinct "DoseBuddy sound".
+            const played = playReminderSound("Enable sound");
+            if (played) {
                 showResult("✓ Reminder sounds enabled!", "var(--success, #16a34a)");
                 if (statusEl) statusEl.textContent = "✓ Sounds enabled — you will hear reminder alerts";
             } else {

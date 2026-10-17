@@ -2593,6 +2593,7 @@ const worker = {
             ...x,
             startDate: x.start_date,
             endDate: x.end_date,
+            scheduleVersion: Number(x.schedule_version ?? 0),
             times: typeof x.times === "string" ? JSON.parse(x.times) : x.times
           }))
         );
