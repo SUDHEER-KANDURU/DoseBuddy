@@ -1083,3 +1083,105 @@ test("prescription upload with unsupported content type returns 400", async () =
   const body = await response.json() as any;
   assert.equal(body.message, "Unsupported content type");
 });
+
+test("ai chat returns a successful response", async () => {
+  const db = new RouteDbAdapter();
+  const e = env(db, { GEMINI_API_KEY: "test-key" });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input: any, _init?: any) => {
+    const url = String(typeof input === "string" ? input : input.url ?? input);
+    if (url.includes("generativelanguage.googleapis.com")) {
+      return new Response(
+        JSON.stringify({ candidates: [{ content: { parts: [{ text: "Hello from the assistant" }] } }] }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }
+    return new Response(JSON.stringify({}), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  try {
+    const { accessToken } = await login(db);
+    const response = await worker.fetch(
+      authorized("/api/ai/chat", accessToken, "POST", { message: "hello", conversationId: "t1", conversationState: {} }),
+      e
+    );
+    assert.equal(response.status, 200);
+    const payload = await response.json() as any;
+    assert.equal(payload.success, true);
+    assert.ok(typeof payload.message === "string" && payload.message.length > 0, "message should be a non-empty string");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("ai chat rejects a request with no auth token", async () => {
+  const db = new RouteDbAdapter();
+  const request = new Request("https://dosebuddy.test/api/ai/chat", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ message: "hi" })
+  });
+  const response = await worker.fetch(request, env(db, {}));
+  assert.equal(response.status, 401);
+  const body = await response.json() as any;
+  assert.ok(
+    body.message === "Unauthorized" || body.error === "Unauthorized" || /unauthorized/i.test(JSON.stringify(body)),
+    `expected an Unauthorized body, got: ${JSON.stringify(body)}`
+  );
+});
+
+test("ai chat surfaces a recoverable error when all providers fail", async () => {
+  const db = new RouteDbAdapter();
+  const e = env(db, { GEMINI_API_KEY: "k", GROQ_API_KEY: "k" });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_input: any, _init?: any) => {
+    return new Response("upstream error", { status: 500 });
+  };
+  try {
+    const { accessToken } = await login(db);
+    const response = await worker.fetch(
+      authorized("/api/ai/chat", accessToken, "POST", { message: "hello", conversationId: "t3", conversationState: {} }),
+      e
+    );
+    assert.equal(response.status, 200, "Worker should return 200 with a recoverable error, not propagate 500");
+    const payload = await response.json() as any;
+    assert.equal(payload.success, false, "success should be false when all providers fail");
+    assert.ok(typeof payload.error === "string" && payload.error.length > 0, "error should be a non-empty string");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("ai chat includes the authenticated user medication context in the provider prompt", async () => {
+  const db = new RouteDbAdapter();
+  // medication.name is "Current med" (from RouteDbAdapter.medication)
+  const e = env(db, { GEMINI_API_KEY: "test-key" });
+  const originalFetch = globalThis.fetch;
+  let captured = "";
+  globalThis.fetch = async (input: any, init?: any) => {
+    const url = String(typeof input === "string" ? input : input.url ?? input);
+    captured = String(init?.body ?? "");
+    if (url.includes("generativelanguage.googleapis.com")) {
+      return new Response(
+        JSON.stringify({ candidates: [{ content: { parts: [{ text: "ok" }] } }] }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }
+    return new Response(JSON.stringify({}), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  try {
+    const { accessToken } = await login(db);
+    // "interact" + "medicines" → INTERACTION intent, which always includes
+    // "Current medications: <name> <dosage>" in the prompt sent to the provider.
+    await worker.fetch(
+      authorized("/api/ai/chat", accessToken, "POST", {
+        message: "Can these medicines interact with each other?",
+        conversationId: "t4",
+        conversationState: {}
+      }),
+      e
+    );
+    assert.ok(captured.includes("Current med"), `Expected provider prompt to include 'Current med', got: ${captured.slice(0, 200)}`);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
