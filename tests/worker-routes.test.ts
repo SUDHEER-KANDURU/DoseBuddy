@@ -35,6 +35,7 @@ class RouteDbAdapter {
       throw Object.assign(new Error("Table 'dosebuddy_test.push_subscriptions' doesn't exist"), { code: "ER_NO_SUCH_TABLE", errno: 1146 });
     }
     if (statement.includes("SELECT id,endpoint,subscription_data FROM push_subscriptions")) return [this.activePushSubscriptions, undefined];
+    if (statement.includes("COUNT(DISTINCT event_id)")) return [[{ c: 0 }], undefined];
     if (statement.includes("SELECT * FROM medications WHERE id=? FOR UPDATE")) return [[this.medication], undefined];
     if (statement.includes("SELECT m.* FROM medications m JOIN medication_times")) return [[this.medication], undefined];
     if (statement.includes("JSON_ARRAYAGG") && statement.includes("FROM medications")) {
@@ -135,7 +136,7 @@ test("medication, push, and TAKEN routes execute through the database adapter", 
   assert.equal(mark.status, 200);
   assert.equal((await mark.json() as any).success, true);
 
-  const subscribe = await worker.fetch(authorized("/api/push/subscribe", accessToken, "POST", { subscription: { endpoint: "https://push.example/1" }, timeZone: "UTC" }), env(db));
+  const subscribe = await worker.fetch(authorized("/api/push/subscribe", accessToken, "POST", { subscription: { endpoint: "https://push.example/1", keys: { p256dh: "BPXV", auth: "k9xO" } }, timeZone: "UTC" }), env(db));
   assert.equal(subscribe.status, 200);
 
   const remove = await worker.fetch(authorized("/api/medications/7", accessToken, "DELETE"), env(db));
@@ -611,4 +612,348 @@ test("medication create retries with the legacy schema after notification-column
   );
   assert.equal(db.rollbacks, 1);
   assert.equal(db.commits, 1);
+});
+
+// ── FEAT-001: subscribe upsert, health endpoint, test rate limit, explainFailure ──
+
+const validSubscription = {
+  endpoint: "https://push.example/endpoint-A",
+  keys: { p256dh: "BPXVabc123", auth: "k9xO_auth" }
+};
+
+test("push subscribe takes ownership via UPDATE and leaves other devices untouched", async () => {
+  // Endpoint already exists (owned by another user); UPDATE matches one row, so no INSERT.
+  class SubscribeAdapter extends RouteDbAdapter {
+    updateValues: unknown[] | null = null;
+    insertValues: unknown[] | null = null;
+    deactivations: unknown[][] = [];
+    async query(statement: string, values: unknown[] = []): Promise<any> {
+      if (statement.startsWith("UPDATE push_subscriptions SET user_id=?")) {
+        this.calls.push([statement, values]);
+        this.updateValues = values;
+        return [{ affectedRows: 1 }, undefined];
+      }
+      if (statement.startsWith("INSERT INTO push_subscriptions")) {
+        this.calls.push([statement, values]);
+        this.insertValues = values;
+        return [{ insertId: 50, affectedRows: 1 }, undefined];
+      }
+      if (statement.startsWith("UPDATE push_subscriptions SET active = 0") || statement.includes("SET active=0")) {
+        this.deactivations.push(values);
+        return [{ affectedRows: 1 }, undefined];
+      }
+      return super.query(statement, values);
+    }
+  }
+  const db = new SubscribeAdapter();
+  const { accessToken } = await login(db);
+  const response = await worker.fetch(authorized("/api/push/subscribe", accessToken, "POST", {
+    subscription: validSubscription, timeZone: "UTC"
+  }), env(db));
+  assert.equal(response.status, 200);
+  // UPDATE took ownership for the authenticated actor by full-value endpoint equality.
+  assert.deepEqual(db.updateValues, [patient.id, JSON.stringify(validSubscription), validSubscription.endpoint]);
+  // A matched UPDATE means no INSERT and no deactivation of any other device/row.
+  assert.equal(db.insertValues, null);
+  assert.equal(db.deactivations.length, 0);
+  assert.equal(db.commits, 1);
+});
+
+test("push subscribe inserts a new row when no endpoint matches", async () => {
+  class SubscribeInsertAdapter extends RouteDbAdapter {
+    insertValues: unknown[] | null = null;
+    async query(statement: string, values: unknown[] = []): Promise<any> {
+      if (statement.startsWith("UPDATE push_subscriptions SET user_id=?")) {
+        this.calls.push([statement, values]);
+        return [{ affectedRows: 0 }, undefined];
+      }
+      if (statement.startsWith("INSERT INTO push_subscriptions")) {
+        this.calls.push([statement, values]);
+        this.insertValues = values;
+        return [{ insertId: 51, affectedRows: 1 }, undefined];
+      }
+      return super.query(statement, values);
+    }
+  }
+  const db = new SubscribeInsertAdapter();
+  const { accessToken } = await login(db);
+  const response = await worker.fetch(authorized("/api/push/subscribe", accessToken, "POST", {
+    subscription: validSubscription
+  }), env(db));
+  assert.equal(response.status, 200);
+  assert.deepEqual(db.insertValues, [patient.id, validSubscription.endpoint, JSON.stringify(validSubscription)]);
+  assert.equal(db.commits, 1);
+});
+
+test("push subscribe rejects non-https endpoints and missing keys with a generic message", async () => {
+  const bad = [
+    { endpoint: "http://push.example/x", keys: { p256dh: "a", auth: "b" } },
+    { endpoint: "not-a-url", keys: { p256dh: "a", auth: "b" } },
+    { endpoint: "https://push.example/x" },
+    { endpoint: "https://push.example/x", keys: { p256dh: "", auth: "b" } },
+    { endpoint: "https://push.example/x", keys: { p256dh: "a", auth: "" } },
+    { endpoint: "https://push.example/x", keys: { p256dh: "has space", auth: "b" } }
+  ];
+  for (const subscription of bad) {
+    const db = new RouteDbAdapter();
+    const { accessToken } = await login(db);
+    const response = await worker.fetch(authorized("/api/push/subscribe", accessToken, "POST", { subscription }), env(db));
+    assert.equal(response.status, 400);
+    const body = await response.json() as any;
+    assert.equal(body.message, "Invalid push subscription");
+    // Nothing about the rejected value is echoed back, and no subscription row is written.
+    const serialized = JSON.stringify(body);
+    assert.equal(serialized.includes("push.example"), false);
+    assert.equal(db.calls.some(([sql]) => sql.includes("INTO push_subscriptions") || sql.startsWith("UPDATE push_subscriptions SET user_id=?")), false);
+  }
+});
+
+test("push subscribe rolls back and never trusts a client-supplied user id on failure", async () => {
+  class SubscribeFailAdapter extends RouteDbAdapter {
+    async query(statement: string, values: unknown[] = []): Promise<any> {
+      if (statement.startsWith("UPDATE push_subscriptions SET user_id=?")) {
+        this.calls.push([statement, values]);
+        throw Object.assign(new Error("Deadlock mid-upsert"), { code: "ER_LOCK_DEADLOCK" });
+      }
+      return super.query(statement, values);
+    }
+  }
+  const db = new SubscribeFailAdapter();
+  const { accessToken } = await login(db);
+  const response = await worker.fetch(authorized("/api/push/subscribe", accessToken, "POST", {
+    userId: 999, subscription: validSubscription
+  }), env(db));
+  assert.equal(response.status, 500);
+  assert.equal(db.rollbacks, 1);
+  assert.equal(db.commits, 0);
+  // The ownership UPDATE always binds the authenticated actor.id, never a client value.
+  const upsert = db.calls.find(([sql]) => sql.startsWith("UPDATE push_subscriptions SET user_id=?"));
+  assert.equal(upsert?.[1][0], patient.id);
+});
+
+// ── Health endpoint ──────────────────────────────────────────────────────────
+
+class HealthAdapter extends RouteDbAdapter {
+  activeSubCount = 1;
+  dispatchRows: any[] = [];
+  testRows: any[] = [];
+  failureRows: any[] = [];
+  missingLedgerTable = false;
+  async query(statement: string, values: unknown[] = []): Promise<any> {
+    if (statement.includes("COUNT(*) AS c FROM push_subscriptions")) {
+      this.calls.push([statement, values]);
+      return [[{ c: this.activeSubCount }], undefined];
+    }
+    if (statement.includes("FROM push_delivery_attempts")) {
+      this.calls.push([statement, values]);
+      if (this.missingLedgerTable) {
+        throw Object.assign(new Error("Table 'dosebuddy_test.push_delivery_attempts' doesn't exist"), { code: "ER_NO_SUCH_TABLE", errno: 1146 });
+      }
+      if (statement.includes("event_type='TEST'")) return [this.testRows, undefined];
+      if (statement.includes("outcome IN ('RETRY'")) return [this.failureRows, undefined];
+      return [this.dispatchRows, undefined];
+    }
+    return super.query(statement, values);
+  }
+}
+
+test("health endpoint returns evidence only with no status field and redacts sensitive data", async () => {
+  const db = new HealthAdapter();
+  db.activeSubCount = 2;
+  db.dispatchRows = [{ outcome: "SENT", event_type: "REMINDER", attempted_at: "2026-01-01T08:00:00.000Z", provider_status: 201 }];
+  db.testRows = [{ outcome: "SENT", attempted_at: "2026-01-01T07:59:00.000Z", provider_status: 201 }];
+  db.failureRows = [{ outcome: "RETRY", error_category: "provider", attempted_at: "2026-01-01T07:50:00.000Z" }];
+  const { accessToken } = await login(db);
+  const response = await worker.fetch(authorized("/api/notifications/health/1", accessToken), env(db, { VAPID_PUBLIC_KEY: "pub", VAPID_PRIVATE_KEY: "priv", VAPID_EMAIL: "a@b.c" }));
+  assert.equal(response.status, 200);
+  const body = await response.json() as any;
+  assert.equal("status" in body, false, "server must not resolve the §5.2 enum");
+  assert.deepEqual(body.subscription, { exists: true, active: true, count: 2 });
+  assert.equal(body.vapidConfigured, true);
+  assert.equal(body.lastDispatch.outcome, "SENT");
+  assert.equal(body.lastDispatch.eventType, "REMINDER");
+  assert.equal(body.lastTest.outcome, "SENT");
+  assert.equal(body.recentFailures[0].explanation, "The push service was busy; DoseBuddy will try again shortly.");
+  assert.equal(body.actionRequired, true);
+  // No endpoint/token/key/medication detail anywhere in the payload.
+  const serialized = JSON.stringify(body);
+  for (const leak of ["endpoint", "subscription_data", "p256dh", "auth", "Current med"]) {
+    assert.equal(serialized.includes(leak), false, `response leaked ${leak}`);
+  }
+});
+
+test("health vapidConfigured uses the three-key predicate", async () => {
+  const db = new HealthAdapter();
+  const { accessToken } = await login(db);
+  const partial = await worker.fetch(authorized("/api/notifications/health/1", accessToken), env(db, { VAPID_PUBLIC_KEY: "pub", VAPID_PRIVATE_KEY: "priv" }));
+  assert.equal((await partial.json() as any).vapidConfigured, false);
+  const full = await worker.fetch(authorized("/api/notifications/health/1", accessToken), env(db, { VAPID_PUBLIC_KEY: "pub", VAPID_PRIVATE_KEY: "priv", VAPID_EMAIL: "a@b.c" }));
+  assert.equal((await full.json() as any).vapidConfigured, true);
+});
+
+test("health endpoint excludes TEST from lastDispatch/recentFailures but surfaces it in lastTest", async () => {
+  const db = new HealthAdapter();
+  db.activeSubCount = 1;
+  db.dispatchRows = []; // the only recent real-reminder row is absent
+  db.testRows = [{ outcome: "FAILED", attempted_at: "2026-01-01T09:00:00.000Z", provider_status: 400 }];
+  db.failureRows = []; // TEST failures never populate recentFailures
+  const { accessToken } = await login(db);
+  const response = await worker.fetch(authorized("/api/notifications/health/1", accessToken), env(db));
+  const body = await response.json() as any;
+  assert.equal(body.lastDispatch, null);
+  assert.deepEqual(body.recentFailures, []);
+  assert.equal(body.lastTest.outcome, "FAILED");
+  // The dispatch/failure queries filter to REMINDER/MISSED only.
+  assert.ok(db.calls.some(([sql]) => sql.includes("event_type IN ('REMINDER','MISSED') ORDER BY")));
+  assert.ok(db.calls.some(([sql]) => sql.includes("outcome IN ('RETRY','EXPIRED','FAILED','UNCERTAIN')")));
+});
+
+test("health endpoint returns 403 for a non-owner and for a missing target (indistinguishable)", async () => {
+  // A second patient (id 3) the caregiver fixture is NOT linked to.
+  class OtherUserAdapter extends HealthAdapter {
+    async query(statement: string, values: unknown[] = []): Promise<any> {
+      if (statement.includes("FROM users WHERE id=?") && Number(values[0]) === 3) {
+        this.calls.push([statement, values]);
+        return [[{ id: 3, email: "other@example.test", role: "PATIENT", time_zone: "UTC" }], undefined];
+      }
+      if (statement.includes("FROM users WHERE id=?") && Number(values[0]) === 404) {
+        this.calls.push([statement, values]);
+        return [[], undefined]; // missing target
+      }
+      return super.query(statement, values);
+    }
+  }
+  const db = new OtherUserAdapter();
+  const { accessToken } = await login(db);
+  const nonOwner = await worker.fetch(authorized("/api/notifications/health/3", accessToken), env(db));
+  assert.equal(nonOwner.status, 403);
+  assert.deepEqual(await nonOwner.json(), { message: "Access denied" });
+  const missing = await worker.fetch(authorized("/api/notifications/health/404", accessToken), env(db));
+  assert.equal(missing.status, 403);
+  assert.deepEqual(await missing.json(), { message: "Access denied" });
+});
+
+test("health endpoint authorizes the caregiver branch through the reused accessible helper", async () => {
+  const db = new HealthAdapter();
+  const { accessToken } = await login(db, caregiver.email);
+  // caregiver.patient_email === patient.email, so accessible(caregiver, patient) is true.
+  const response = await worker.fetch(authorized("/api/notifications/health/1", accessToken), env(db, { VAPID_PUBLIC_KEY: "pub", VAPID_PRIVATE_KEY: "priv", VAPID_EMAIL: "a@b.c" }));
+  assert.equal(response.status, 200);
+  assert.equal("status" in (await response.json() as any), false);
+});
+
+test("health endpoint tolerates a legacy schema missing the delivery-attempts table", async () => {
+  const db = new HealthAdapter();
+  db.missingLedgerTable = true;
+  const { accessToken } = await login(db);
+  const response = await worker.fetch(authorized("/api/notifications/health/1", accessToken), env(db));
+  assert.equal(response.status, 200);
+  const body = await response.json() as any;
+  assert.equal(body.lastDispatch, null);
+  assert.equal(body.lastTest, null);
+  assert.deepEqual(body.recentFailures, []);
+});
+
+// ── /api/push/test rate limit ─────────────────────────────────────────────────
+
+class RateLimitAdapter extends RouteDbAdapter {
+  presses = 0;              // distinct event_id count reported by the rate-count query
+  ledgerWrites = 0;
+  subs: any[];
+  constructor(subs: any[]) { super(); this.subs = subs; }
+  async query(statement: string, values: unknown[] = []): Promise<any> {
+    if (statement.includes("SELECT id,endpoint,subscription_data FROM push_subscriptions")) {
+      return [this.subs, undefined];
+    }
+    if (statement.includes("COUNT(DISTINCT event_id)")) {
+      return [[{ c: this.presses }], undefined];
+    }
+    if (statement.startsWith("INSERT INTO push_delivery_attempts")) {
+      this.ledgerWrites++;
+      return [{ insertId: 1, affectedRows: 1 }, undefined];
+    }
+    return super.query(statement, values);
+  }
+}
+
+test("push test allows 3 presses then rejects the 4th with RATE_LIMITED and no ledger row", async () => {
+  const fixture = await webPushFixture();
+  const db = new RateLimitAdapter([{ id: 23, endpoint: fixture.subscription.endpoint, subscription_data: JSON.stringify(fixture.subscription) }]);
+  const { accessToken } = await login(db);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(null, { status: 201 });
+  try {
+    // Presses 1-3: the in-window distinct count seen is 0,1,2 — all < 3.
+    for (let seen = 0; seen < 3; seen++) {
+      db.presses = seen;
+      const ok = await worker.fetch(authorized("/api/push/test", accessToken, "POST"), env(db, fixture.env));
+      assert.equal(ok.status, 200);
+    }
+    assert.equal(db.ledgerWrites, 3);
+    // 4th press: distinct count is now 3 -> 429, no send, no ledger row.
+    db.presses = 3;
+    const limited = await worker.fetch(authorized("/api/push/test", accessToken, "POST"), env(db, fixture.env));
+    assert.equal(limited.status, 429);
+    assert.equal((await limited.json() as any).code, "RATE_LIMITED");
+    assert.equal(db.ledgerWrites, 3, "a rejected press must not write a ledger row");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("push test rate limit counts presses not rows for a multi-device user", async () => {
+  const fixture = await webPushFixture();
+  const db = new RateLimitAdapter([
+    { id: 23, endpoint: fixture.subscription.endpoint, subscription_data: JSON.stringify(fixture.subscription) },
+    { id: 24, endpoint: fixture.subscription.endpoint, subscription_data: JSON.stringify(fixture.subscription) }
+  ]);
+  const { accessToken } = await login(db);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(null, { status: 201 });
+  try {
+    // Each press writes >=2 ledger rows sharing one event_id, but presses==distinct count.
+    for (let seen = 0; seen < 3; seen++) {
+      db.presses = seen;
+      const ok = await worker.fetch(authorized("/api/push/test", accessToken, "POST"), env(db, fixture.env));
+      assert.equal(ok.status, 200);
+    }
+    assert.equal(db.ledgerWrites, 6, "two active subs means two rows per allowed press");
+    db.presses = 3;
+    const limited = await worker.fetch(authorized("/api/push/test", accessToken, "POST"), env(db, fixture.env));
+    assert.equal(limited.status, 429);
+    assert.equal((await limited.json() as any).code, "RATE_LIMITED");
+    assert.equal(db.ledgerWrites, 6);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+// ── explainFailure pure mapping (§4.2) ────────────────────────────────────────
+
+test("explainFailure maps every §4.2 pair and falls back without leaking raw codes", async () => {
+  const explainFailure = (worker as any).explainFailure as (o: string | null, c: string | null) => string;
+  const cases: Array<[string | null, string | null, string]> = [
+    ["RETRY", "provider", "The push service was busy; DoseBuddy will try again shortly."],
+    ["RETRY", "provider-retryable", "The push service was busy; DoseBuddy will try again shortly."],
+    ["RETRY", "pre-dispatch", "DoseBuddy couldn't start sending the last reminder and will try again."],
+    ["RETRY", "push-preparation-failed", "DoseBuddy had trouble preparing the last reminder and will try again."],
+    ["RETRY", "lease-expired-before-dispatch", "A reminder attempt timed out before sending; DoseBuddy will try again."],
+    ["EXPIRED", "expired-subscription", "This device's reminder registration expired. Re-enable reminders on this device."],
+    ["EXPIRED", null, "This device's reminder registration expired. Re-enable reminders on this device."],
+    ["FAILED", "provider", "The push service rejected the last reminder. Try a test notification."],
+    ["FAILED", "provider-rejected", "The push service rejected the last reminder. Try a test notification."],
+    ["FAILED", "push-preparation-failed", "DoseBuddy repeatedly failed to prepare the last reminder."],
+    ["UNCERTAIN", "dispatch-uncertain", "A reminder was sent but delivery couldn't be confirmed."],
+    ["UNCERTAIN", "lease-expired-after-dispatch", "A reminder may have been sent; delivery couldn't be confirmed."]
+  ];
+  const fallback = "A recent reminder had a problem DoseBuddy is still checking on.";
+  for (const [outcome, category, expected] of cases) {
+    assert.equal(explainFailure(outcome, category), expected);
+  }
+  // Unmapped pairs and nulls resolve to the fallback, never an empty string or raw code.
+  for (const [outcome, category] of [["RETRY", "mystery-code"], ["SENT", null], [null, null], ["WEIRD", "500"]] as Array<[string | null, string | null]>) {
+    assert.equal(explainFailure(outcome, category), fallback);
+  }
+  // No raw status/code text leaks for an unmapped numeric category.
+  assert.equal(explainFailure("FAILED", "503").includes("503"), false);
 });
