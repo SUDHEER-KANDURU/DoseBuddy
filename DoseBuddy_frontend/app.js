@@ -6740,6 +6740,7 @@ function setupPrescriptionUpload() {
                 }));
 
                 uploadRes = await authFetch(`${API_BASE}/prescription/upload`, {
+                    timeout: 60000, // AI extraction can take up to ~20s; 60s gives ample headroom
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
@@ -6760,6 +6761,7 @@ function setupPrescriptionUpload() {
                 }
 
                 uploadRes = await authFetch(`${API_BASE}/prescription/upload`, {
+                    timeout: 60000, // AI extraction can take up to ~20s; 60s gives ample headroom
                     method: "POST",
                     body: formData
                 });
