@@ -5482,34 +5482,100 @@ function addChatMessage(sender, content, messageType = "normal") {
     scrollChatToBottom();
 }
 
+function isOtherOption(option) {
+    // Detect options that should render as an inline text input rather than a plain button.
+    // Matches: id === 'custom', isOther flag, type: 'other', or text starting with 'Other'
+    // (case-insensitive). Does NOT match 'I'm not sure' or other non-custom options.
+    if (!option || typeof option !== 'object') return false;
+    if (option.isOther === true || option.type === 'other') return true;
+    if (option.id === 'custom') return true;
+    const text = option.text || '';
+    return typeof text === 'string' && /^other\b/i.test(text);
+}
+
 function addQuestionOptions(data) {
     const chatMessages = document.getElementById("ai-chat-messages");
-    
     const optionsDiv = document.createElement("div");
     optionsDiv.className = "ai-question-options";
-    
+    // Track whether a submit for this option set is in flight to prevent duplicates.
+    let otherSubmitting = false;
+
     data.questions.forEach(option => {
         // Validate option properties before rendering
         if (!option || typeof option !== 'object') {
             console.warn('Invalid option object:', option);
             return;
         }
-        
         const optionText = option.text || option.id || 'Unknown option';
         const optionValue = option.value || option.text || option.id || 'unknown';
-        
         if (!optionText || !optionValue) {
             console.warn('Option missing required properties:', option);
             return;
         }
-        
-        const button = document.createElement("button");
-        button.className = "ai-option-btn";
-        button.textContent = optionText;
-        button.onclick = () => selectOption(optionValue, optionsDiv);
-        optionsDiv.appendChild(button);
+
+        if (isOtherOption(option)) {
+            // Render as an inline row: label + text input + send button
+            const row = document.createElement("div");
+            row.className = "ai-other-option-row";
+            row.setAttribute("role", "group");
+
+            const label = document.createElement("label");
+            label.className = "ai-other-option-label";
+            label.textContent = "Other:";
+            const inputId = "ai-other-input-" + Math.random().toString(36).slice(2, 8);
+            label.setAttribute("for", inputId);
+
+            const input = document.createElement("input");
+            input.type = "text";
+            input.id = inputId;
+            input.className = "ai-other-option-input";
+            input.placeholder = "Describe...";
+            input.setAttribute("aria-label", "Custom answer");
+            // font-size 16px set via CSS class to prevent iOS zoom
+
+            const sendBtn = document.createElement("button");
+            sendBtn.type = "button";
+            sendBtn.className = "ai-other-option-send";
+            sendBtn.setAttribute("aria-label", "Send custom answer");
+            sendBtn.textContent = "Send";
+
+            const submitOther = () => {
+                const customText = input.value.trim();
+                if (!customText) return;           // no empty/whitespace answers
+                if (otherSubmitting) return;        // no duplicate submission
+                if (aiConversationState.isProcessing) return;
+                otherSubmitting = true;
+                sendBtn.disabled = true;
+                input.disabled = true;
+                // Show the user's actual typed answer in the conversation
+                addChatMessage("user", customText);
+                // Remove the entire option set
+                optionsDiv.remove();
+                // Send the custom text (NOT the word "Other") to the AI
+                sendOptionSelection(customText);
+            };
+
+            input.addEventListener("keydown", function(e) {
+                if (e.key === "Enter") {
+                    e.preventDefault(); // prevent accidental page/form submission
+                    submitOther();
+                }
+            });
+
+            sendBtn.addEventListener("click", submitOther);
+
+            row.appendChild(label);
+            row.appendChild(input);
+            row.appendChild(sendBtn);
+            optionsDiv.appendChild(row);
+        } else {
+            const button = document.createElement("button");
+            button.className = "ai-option-btn";
+            button.textContent = optionText;
+            button.onclick = () => selectOption(optionValue, optionsDiv);
+            optionsDiv.appendChild(button);
+        }
     });
-    
     chatMessages.appendChild(optionsDiv);
     scrollChatToBottom();
 }

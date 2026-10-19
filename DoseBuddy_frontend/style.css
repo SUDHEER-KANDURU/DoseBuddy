@@ -8288,6 +8288,75 @@ body.dark-mode .prx-modal-add-btn:hover:not(:disabled) {
     background: var(--primary-dark);
 }
 
+/* ── AI Assistant "Other" inline option row ─────────────────────────────────── */
+.ai-other-option-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) 0;
+    flex-wrap: nowrap;
+}
+.ai-other-option-label {
+    font-weight: 500;
+    color: var(--text-primary);
+    white-space: nowrap;
+    flex-shrink: 0;
+    font-size: 0.9375rem;
+}
+.ai-other-option-input {
+    flex: 1;
+    min-width: 0;
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 16px; /* Prevent iOS zoom on focus */
+    line-height: 1.4;
+    min-height: 40px;
+    touch-action: manipulation;
+}
+.ai-other-option-input:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px var(--primary-light);
+}
+.ai-other-option-input:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+.ai-other-option-send {
+    padding: var(--space-2) var(--space-3);
+    background: var(--primary);
+    color: white;
+    border: none;
+    border-radius: var(--radius-md);
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+    min-height: 40px;
+    touch-action: manipulation;
+    transition: background-color 0.2s ease;
+}
+.ai-other-option-send:hover {
+    background: var(--primary-dark);
+}
+.ai-other-option-send:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+.dark-mode .ai-other-option-input {
+    background: #111111;
+    border-color: #2a2a2a;
+    color: var(--text-primary);
+}
+.dark-mode .ai-other-option-input:focus {
+    border-color: #00A19B;
+    box-shadow: 0 0 0 3px rgba(0, 161, 155, 0.2);
+}
 .ai-chat-input-area {
     border-top: 1px solid var(--border-color);
     padding: var(--space-4);
@@ -8442,6 +8511,8 @@ body.dark-mode .prx-modal-add-btn:hover:not(:disabled) {
     .ai-chat-message     { max-width: 95%; }
     .ai-question-options { margin-left: 0; }
     .ai-option-btn       { font-size: 0.875rem; }
+    .ai-other-option-row { flex-wrap: wrap; }
+    .ai-other-option-input { font-size: 16px; } /* Prevent iOS zoom */
     #ai-chat-input       { font-size: 16px; } /* Prevent iOS zoom */
 }
 
