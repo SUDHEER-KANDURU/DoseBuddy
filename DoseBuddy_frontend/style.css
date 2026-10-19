@@ -8349,7 +8349,7 @@ body.dark-mode .ai-chat-user .ai-message-text {
     transition: background-color 0.2s ease;
 }
 .ai-other-option-send:hover {
-    background: var(--primary-dark);
+    background: var(--primary-hover);
 }
 .ai-other-option-send:disabled {
     opacity: 0.6;
@@ -8364,6 +8364,21 @@ body.dark-mode .ai-chat-user .ai-message-text {
 .dark-mode .ai-other-option-input:focus {
     border-color: #00A19B;
     box-shadow: 0 0 0 3px rgba(0, 161, 155, 0.2);
+}
+
+/* --primary is intentionally light in the dark theme for general controls.
+   The inline answer action needs a stable, high-contrast action color. */
+body.dark-mode .ai-other-option-send {
+    background: #008f89;
+    color: #ffffff;
+    border: 1px solid #00a19b;
+}
+body.dark-mode .ai-other-option-send:hover:not(:disabled) {
+    background: #007a75;
+}
+body.dark-mode .ai-other-option-send:focus-visible {
+    outline: 2px solid #5eead4;
+    outline-offset: 2px;
 }
 .ai-chat-input-area {
     border-top: 1px solid var(--border-color);

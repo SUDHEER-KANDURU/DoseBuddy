@@ -202,6 +202,12 @@ test("style.css contains the ai-other-option-row and related classes", async () 
   assert.match(source, /\.ai-other-option-input[\s\S]{0,200}font-size:\s*16px/, "ai-other-option-input must have font-size: 16px");
 });
 
+test("dark mode gives the inline Other send action a readable action color", async () => {
+  const source = await readFile(new URL("../DoseBuddy_frontend/style.css", import.meta.url), "utf8");
+  assert.match(source, /body\.dark-mode \.ai-other-option-send\s*\{[\s\S]*?background:\s*#008f89/);
+  assert.match(source, /body\.dark-mode \.ai-other-option-send\s*\{[\s\S]*?color:\s*#ffffff/);
+  assert.match(source, /\.ai-other-option-send:focus-visible/);
+});
 test("style.css ai-other-option-row has flex display for inline layout", async () => {
   const source = await readFile(
     new URL("../DoseBuddy_frontend/style.css", import.meta.url),
