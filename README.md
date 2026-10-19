@@ -1,29 +1,27 @@
 <div align="center">
 
-
 <br/>
 
 # 💊 DoseBuddy
 
-### AI-Powered Medicine Reminder & Healthcare Assistant
+### Medicine Reminders, Health Tracking & AI Assistance
 
 <p>
-  <a href="https://www.java.com/"><img src="https://img.shields.io/badge/Java-17+-ED8B00?style=for-the-badge&logo=openjdk&logoColor=white" alt="Java"/></a>
-  <a href="https://spring.io/projects/spring-boot"><img src="https://img.shields.io/badge/Spring_Boot-3.x-6DB33F?style=for-the-badge&logo=springboot&logoColor=white" alt="Spring Boot"/></a>
-  <a href="https://www.mysql.com/"><img src="https://img.shields.io/badge/MySQL-8.0-4479A1?style=for-the-badge&logo=mysql&logoColor=white" alt="MySQL"/></a>
+  <a href="https://workers.cloudflare.com/"><img src="https://img.shields.io/badge/Cloudflare_Workers-Edge_API-F38020?style=for-the-badge&logo=cloudflareworkers&logoColor=white" alt="Cloudflare Workers"/></a>
+  <a href="https://developers.cloudflare.com/hyperdrive/"><img src="https://img.shields.io/badge/Cloudflare_Hyperdrive-MySQL-FF6633?style=for-the-badge&logo=cloudflare&logoColor=white" alt="Cloudflare Hyperdrive"/></a>
+  <a href="https://www.mysql.com/"><img src="https://img.shields.io/badge/MySQL-8.0+-4479A1?style=for-the-badge&logo=mysql&logoColor=white" alt="MySQL"/></a>
   <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript"><img src="https://img.shields.io/badge/JavaScript-ES6+-F7DF1E?style=for-the-badge&logo=javascript&logoColor=black" alt="JavaScript"/></a>
 </p>
 <p>
-  <a href="https://groq.com/"><img src="https://img.shields.io/badge/Groq_AI-LLaMA_3.3_70B-FF6B35?style=for-the-badge&logo=ai&logoColor=white" alt="Groq AI"/></a>
+  <a href="https://developer.mozilla.org/en-US/docs/Web/API/Push_API"><img src="https://img.shields.io/badge/Web_Push-VAPID-4285F4?style=for-the-badge&logo=googlechrome&logoColor=white" alt="Web Push"/></a>
+  <a href="https://groq.com/"><img src="https://img.shields.io/badge/Groq_AI-LLaMA-FF6B35?style=for-the-badge&logo=ai&logoColor=white" alt="Groq AI"/></a>
   <a href="https://ai.google.dev/"><img src="https://img.shields.io/badge/Google_Gemini-Vision_OCR-4285F4?style=for-the-badge&logo=google&logoColor=white" alt="Gemini"/></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-22c55e?style=for-the-badge" alt="MIT License"/></a>
 </p>
 
 <br/>
 
-**DoseBuddy** is a production-style, full-stack healthcare web application that combines intelligent medicine reminders, AI-powered health assistance, and prescription scanning — all in one clean, responsive interface.
-
-<br/>
+**DoseBuddy** is a full-stack healthcare web application for medication schedules, dose tracking, adherence insights, prescription extraction, and AI-assisted health guidance.
 
 <br/>
 
@@ -31,504 +29,339 @@
 
 ---
 
-##  About the Project
+## About the Project
 
-> *"Nearly 50% of patients with chronic conditions don't take their medications as prescribed — leading to preventable hospitalizations and worsening health outcomes."*
+DoseBuddy helps people maintain medication routines while keeping each dose traceable. The current application uses a static browser client, a Cloudflare Worker API, Hyperdrive-backed MySQL, and a scheduled Worker reconciliation job for dose occurrences.
 
-**DoseBuddy** was built to directly address this problem. It's a healthcare assistant that meets users where they are — helping them track medications, understand prescriptions, and get instant AI-powered health guidance without needing a doctor's appointment for every question.
-
-### What makes DoseBuddy different?
+### What DoseBuddy Provides
 
 | Challenge | DoseBuddy's Solution |
 |---|---|
-| Forgetting to take medicines | Smart scheduling + browser notifications |
-| Not understanding prescriptions | Gemini Vision OCR auto-extracts medicine details |
-| No access to quick health guidance | Groq LLaMA 3.3 AI assistant available 24/7 |
-| Difficulty tracking health trends | BMI, vitals, adherence streaks & visual reports |
-| Complex prescription documents | Drag-and-drop OCR scanner for images & PDFs |
+| Forgetting a scheduled dose | User-local schedules, foreground reminders, and eligible Web Push delivery |
+| Tracking whether a dose was taken | Authoritative dose occurrences and intake history |
+| Time-zone and DST errors | IANA time-zone storage and server-side occurrence resolution |
+| Duplicate reminder delivery | Stable event identities, delivery claims, and a retry ledger |
+| Prescription data entry | Gemini Vision OCR and structured medicine extraction |
+| Health questions and trends | Unified AI assistant, vitals, BMI, adherence, and reports |
 
-Built as a **portfolio-grade, production-style full-stack project**, DoseBuddy demonstrates end-to-end software engineering — from a secured Spring Boot REST API and MySQL persistence layer to a responsive vanilla JS frontend integrated with multiple AI providers.
+> **Reminder delivery:** browser notifications require permission, a valid Push subscription, configured VAPID credentials, and supported device settings. Provider acceptance does not prove that a device displayed or played a notification.
 
 ---
 
-##  Key Highlights
+## Key Highlights
 
 <div align="center">
 
-|  JWT Auth |  Prescription OCR |  Unified AI Assistant |  Health Analytics |
+| 🔐 JWT Auth | 💊 Dose Ledger | 🔔 Web Push | 🌍 Time Zones |
 |:---:|:---:|:---:|:---:|
-| Secure login & registration with token-based auth | Scan prescriptions via Gemini Vision API | Intelligent conversational AI for medicines, symptoms & health guidance | Visual reports, adherence tracking & health insights |
+| Access and refresh tokens | Pending, taken, and missed states | Service Worker notification rendering | IANA zones and DST-aware scheduling |
 
-|  Health Analytics |  Streak Tracking |  Vitals Monitor |  Dark Mode |
+| 🤖 AI Assistant | 📄 Prescription OCR | 📊 Health Analytics | 🌗 Themes |
 |:---:|:---:|:---:|:---:|
-| Adherence reports & dose history charts | Gamified daily dose consistency | Blood pressure, sugar, heart rate logs | Full light/dark theme support |
+| Health and medicine guidance | Extract medicine details from uploads | Adherence, history, BMI, and vitals | Responsive light and dark modes |
 
 </div>
 
 ---
 
-##  Features
+## Features
 
 <details>
-<summary><b> Core Healthcare Features</b></summary>
+<summary><b> Medication & Adherence</b></summary>
 <br/>
 
--  **Medication Management** — Add, edit, and delete medications with fully custom schedules
--  **Dose Reminders** — Time-based browser notifications for upcoming and missed doses
--  **Dose Tracking** — Mark doses as taken, missed, or skipped with complete history
--  **Adherence Streaks** — Gamified streak system to build consistent habits
--  **Health Reports** — Visual adherence statistics, dose history charts, and summaries
+- **Medication Management** — Create, update, and delete medications with multiple daily times
+- **Dose Occurrences** — Stable per-dose identities for pending, taken, and missed transitions
+- **Mark as Taken** — Authorized, idempotent intake updates with legacy-schema compatibility
+- **Missed-dose Reconciliation** — Scheduled Worker processing with a one-minute grace boundary
+- **Adherence Insights** — History, trends, streaks, and dashboard summaries
 
 </details>
 
 <details>
-<summary><b> AI-Powered Features</b></summary>
+<summary><b> Notifications</b></summary>
 <br/>
 
--  **Unified AI Assistant** — Conversational health AI that combines medicine information, symptom checking, drug interactions, and personalized guidance in one intelligent chat interface
--  **Prescription OCR** — Upload prescription images or PDFs for automatic medicine extraction and scheduling
+- **Foreground Alerts** — Browser notifications and optional sound when a page is active and browser policy permits
+- **Background Web Push** — Service Worker push handling and notification-click navigation
+- **Subscription Lifecycle** — VAPID public-key retrieval, authenticated subscribe/unsubscribe, expiration handling, and diagnostics
+- **Duplicate Prevention** — Stable notification event IDs and delivery-attempt claim records
+- **Time-zone-aware Scheduling** — User-local time, date boundaries, and daylight-saving transitions handled server-side
 
 </details>
 
 <details>
-<summary><b> Health Monitoring</b></summary>
+<summary><b> AI & Health Features</b></summary>
 <br/>
 
--  **BMI Calculator** — Calculate and track Body Mass Index with health category classification
--  **Vitals Tracker** — Log blood pressure, heart rate, blood sugar, temperature, and more
--  **Activity Feed** — Chronological log of all health-related actions and AI queries
-
-</details>
-
-<details>
-<summary><b> User & App Features</b></summary>
-<br/>
-
--  **JWT Authentication** — Secure login, registration, and session management
--  **Profile Management** — Update personal health details, preferences, and password
--  **Dark / Light Mode** — Full theme support across every view
--  **Responsive Design** — Mobile, tablet, and desktop friendly
+- **Unified AI Assistant** — Conversational medicine, symptom, and health guidance
+- **Prescription OCR** — Image and document extraction for medication details
+- **Vitals & BMI** — Record and review health measurements
+- **Caregiver Access** — Authorized patient/caregiver views where configured
 
 </details>
 
 ---
 
-##  AI Features
+## Tech Stack
 
-### 🤖 Unified AI Assistant
+### Current Runtime
 
-Experience intelligent, conversational health assistance that combines medicine information, symptom checking, and personalized guidance in one seamless chat interface.
-
-**Key Features:**
-```
-  CONVERSATIONAL FLOW      →  Natural language health questions and guidance
-  MEDICINE INFORMATION     →  Drug details, interactions, and safety warnings  
-  SYMPTOM ANALYSIS         →  Progressive questioning with differential diagnosis
-  PERSONALIZED CONTEXT     →  Uses your medication history for tailored responses
-  SAFETY MONITORING        →  Urgent symptom detection with emergency guidance
-  MEDICAL DISCLAIMERS      →  Clear professional advice and emergency contacts
-```
-
-**Smart Conversation Types:**
-- **Medicine Questions** — Drug information, interactions, side effects, timing
-- **Symptom Discussions** — Progressive symptom analysis with safety guidance  
-- **Health Guidance** — General health questions using your medication context
-- **Emergency Detection** — Immediate alerts for urgent symptoms with emergency contacts
-
----
-
-###  Prescription OCR Scanner
-
-
-| Upload Type | Processing Engine | Output |
-|---|---|---|
-| JPG / PNG image | Google Gemini Vision API | Extracted medicine list |
-| PDF / DOCX / TXT | Groq LLaMA structured parsing | Extracted medicine list |
-
-Automatically populates the medication schedule with **name, dosage, timing, and instructions** — no manual entry needed.
-
-> ⚠️ **Medical Disclaimer:** All AI responses are for informational purposes only and do not replace professional medical advice. Always consult a qualified healthcare provider.
-
----
-
-##  Tech Stack
-
-### Frontend
 | Technology | Role |
 |---|---|
-| HTML5 | Semantic single-page application structure |
-| CSS3 + CSS Variables | Custom design system, theming, dark/light mode |
-| Vanilla JavaScript ES6+ | SPA routing, API integration, DOM rendering |
-| Responsive CSS | Mobile-first layout with media queries |
+| Cloudflare Workers | TypeScript API and scheduled reconciliation |
+| Cloudflare Hyperdrive | Managed connection path to MySQL |
+| MySQL 8 | Users, medications, intake ledger, occurrences, subscriptions, and delivery attempts |
+| Cloudflare Workers Static Assets | Frontend hosting |
+| Vanilla JavaScript | SPA rendering, authenticated API client, Service Worker registration |
+| Service Worker + Push API | Background notification display on supported browsers |
+| VAPID | Web Push application-server authentication |
 
-### Backend
-| Technology | Role |
+### Supporting Services
+
+| Provider | Purpose |
 |---|---|
-| Java 17+ | Core application language |
-| Spring Boot 3.x | REST API framework and dependency injection |
-| Spring Security + JWT | Authentication, authorization, and token management |
-| Spring Data JPA + Hibernate | ORM, entity management, and database abstraction |
-| Maven | Build tool and dependency management |
-
-### Database
-| Technology | Role |
-|---|---|
-| MySQL 8.0 | Primary relational database |
-| Hibernate DDL | Auto schema generation and migration |
-
-### AI & External APIs
-| Provider | Model | Purpose |
-|---|---|---|
-| [Groq API](https://groq.com/) | LLaMA 3.3 70B Versatile | Unified AI Assistant, conversational health guidance, prescription text parsing |
-| [Google Gemini API](https://ai.google.dev/) | Gemini Vision | Prescription image OCR and medicine extraction |
+| Groq | Optional AI-assisted medicine and health guidance |
+| Google Gemini | Optional prescription-image extraction |
+| Legacy Spring Boot project | Retained under DoseBuddy_Backend; the Cloudflare Worker is the current API runtime |
 
 ---
 
-##  System Architecture
+## System Architecture
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                    USER BROWSER                         │
-│         HTML + CSS + Vanilla JavaScript (SPA)           │
-│    Dashboard · Medications · AI Assistant · Reports         │
-└──────────────────────┬──────────────────────────────────┘
-                       │  HTTP / REST API
-                       ▼
-┌─────────────────────────────────────────────────────────┐
-│              SPRING BOOT REST API                       │
-│   Controllers → Services → Repositories                 │
-│   Spring Security · JWT Auth · CORS                     │
-└──────────┬────────────────────────┬─────────────────────┘
-           │                        │
-           ▼                        ▼
-┌──────────────────┐    ┌───────────────────────────────┐
-│   MySQL 8.0      │    │        AI PROVIDERS           │
-│   Database       │    │  ┌─────────────────────────┐  │
-│                  │    │  │  Groq API (LLaMA 3.3)   │  │
-│  Users           │    │  │  Unified AI Assistant    │  │
-│  Medications     │    │  │  Health Conversations    │  │
-│  IntakeLogs      │    │  │  Prescription Parsing    │  │
-│  Vitals          │    │  └─────────────────────────┘  │
-│  Streaks         │    │  ┌─────────────────────────┐  │
-│  Activities      │    │  │  Gemini Vision API      │  │
-└──────────────────┘    │  │  Prescription OCR       │  │
-                        │  └─────────────────────────┘  │
-                        └───────────────────────────────┘
-```
+~~~
+┌──────────────────────────────────────────────────────────────────┐
+│                           USER BROWSER                            │
+│  Static SPA · Service Worker · Push Subscription · Optional Audio │
+└──────────────────────────────┬───────────────────────────────────┘
+                               │ HTTPS / JSON
+                               ▼
+┌──────────────────────────────────────────────────────────────────┐
+│                     CLOUDFLARE WORKERS                           │
+│ Auth · Medication API · Intake API · AI routes · Scheduled Cron  │
+└───────────────────────┬───────────────────────────────┬──────────┘
+                        │ Hyperdrive                     │ Web Push
+                        ▼                                ▼
+┌───────────────────────────────┐          ┌────────────────────────┐
+│            MYSQL              │          │   Browser Push Service  │
+│ users · medications · times   │          │ Service Worker displays │
+│ dose_occurrences · logs       │          │ system notification     │
+│ subscriptions · delivery log  │          └────────────────────────┘
+└───────────────────────────────┘
+~~~
+
+### Reminder Lifecycle
+
+1. A medication schedule is stored with the user's IANA time zone.
+2. The scheduled Worker reconciles due occurrences and writes authoritative state.
+3. After a committed reminder or missed-dose transition, eligible subscriptions are claimed.
+4. The Worker records each delivery attempt and sends a VAPID-signed Web Push request.
+5. When the browser receives the push, the Service Worker displays a system notification.
+
+The server can verify a state transition and provider response. Browser receipt and operating-system display remain device-dependent.
 
 ---
 
-##  Screenshots
+## Screenshots
 
-###  Dashboard
+### Dashboard
 ![Dashboard](Screenshots/Dashboard.png)
 
-###  Add Medicines
+### Add Medicines
 ![Add Medicines](Screenshots/Add%20Medicines.png)
 
 ### 🤖 Unified AI Assistant
 ![AI Assistant](Screenshots/AI.png)
 
-###  BMI Calculator
+### BMI Calculator
 ![BMI Calculator](Screenshots/BMI%20calculator.png)
 
-###  Medication History
+### Medication History
 ![History](Screenshots/History.png)
 
-###  Reports & Analytics
+### Reports & Analytics
 ![Reports](Screenshots/Reports.png)
 
-###  Vitals Log
+### Vitals Log
 ![Vitals Log](Screenshots/vitals%20log.png)
 
 ---
 
-##  Project Structure
+## Project Structure
 
-```
+~~~
 DoseBuddy/
-│
-├──  dosebuddy-backend/                    # Spring Boot REST API
-│   ├── src/main/java/com/example/dosebuddy/
-│   │   ├── config/                          # Security, CORS, startup config
-│   │   ├── controller/                      # REST API endpoint controllers
-│   │   │   ├── AuthController.java          # Login, register, JWT
-│   │   │   ├── MedicationController.java    # CRUD for medications
-│   │   │   ├── UnifiedAiController.java     # Unified AI assistant
-│   │   │   ├── PrescriptionController.java  # OCR upload & parsing
-│   │   │   ├── VitalController.java         # Vitals logging
-│   │   │   ├── BmiController.java           # BMI calculation
-│   │   │   ├── StreakController.java         # Adherence streaks
-│   │   │   ├── ActivityController.java      # Activity feed
-│   │   │   └── UserController.java          # Profile management
-│   │   ├── dto/                             # Request/Response DTOs
-│   │   ├── model/                           # JPA entity classes
-│   │   ├── repository/                      # Spring Data JPA repositories
-│   │   ├── service/
-│   │   │   ├── MedicineAiService.java       # Groq API integration
-│   │   │   ├── GeminiOcrService.java        # Gemini Vision API integration
-│   │   │   └── ...                          # Other business logic services
-│   │   └── DosebuddyApplication.java        # Application entry point
-│   ├── src/main/resources/
-│   │   ├── application.properties           # Base configuration
-│   │   └── application-local.properties     # Local secrets (gitignored)
-│   └── pom.xml                              # Maven dependencies
-│
-├──  dosebuddy-frontend/                   # Static SPA (no build step)
-│   ├── index.html                           # Single-page app shell
-│   ├── app.js                               # All JS logic (~4000+ lines)
-│   ├── style.css                            # Design system & components
-│   ├── responsive.css                       # Media query overrides
-│   └── notify-sound.mp3                     # Notification audio
-│
-├──  Screenshots/                          # README screenshots
+├── cloudflare-worker/              # Current TypeScript Worker API
+│   ├── index.ts                    # Routes, auth, Cron entry point
+│   ├── scheduling.ts               # IANA zone and DST occurrence resolution
+│   ├── dose-occurrences.ts         # Authoritative dose-state transitions
+│   ├── notification-delivery.ts    # Delivery claim and retry ledger
+│   └── web-push.ts                 # VAPID Web Push requests
+├── DoseBuddy_frontend/             # Static SPA and Service Worker
+│   ├── app.js                      # UI, API client, foreground reminders
+│   ├── sw.js                       # Background push and notification clicks
+│   ├── index.html                  # Application shell
+│   └── wrangler.jsonc              # Static asset Worker configuration
+├── DoseBuddy_Backend/              # Legacy Spring Boot implementation
+├── tests/                          # Unit, Worker-runtime, and MySQL integration tests
+├── database-migrations.sql         # Canonical additive MySQL migration
+├── wrangler.jsonc                  # API Worker and Cron configuration
 └── README.md
-```
+~~~
 
 ---
 
-##  API Endpoints
+## API Overview
 
 ### Authentication
-| Method | Endpoint | Description |
-|---|---|---|
-| `POST` | `/api/auth/register` | Register a new user |
-| `POST` | `/api/auth/login` | Login and receive JWT token |
 
-### Medications
 | Method | Endpoint | Description |
 |---|---|---|
-| `GET` | `/api/medications` | Get all medications for user |
-| `POST` | `/api/medications` | Add a new medication |
-| `PUT` | `/api/medications/{id}` | Update a medication |
-| `DELETE` | `/api/medications/{id}` | Delete a medication |
+| POST | /api/auth/signup | Create an account |
+| POST | /api/auth/login | Sign in and receive tokens |
+| POST | /api/auth/refresh | Refresh an access token |
 
-### Dose Tracking
-| Method | Endpoint | Description |
-|---|---|---|
-| `POST` | `/api/intake/mark` | Mark a dose as taken/missed/skipped |
-| `GET` | `/api/intake/history` | Get dose intake history |
-| `GET` | `/api/intake/daily-summary` | Get today's dose summary |
+### Medication & Intake
 
-### AI Features
 | Method | Endpoint | Description |
 |---|---|---|
-| `POST` | `/api/ai/chat` | Unified AI assistant with conversational health guidance |
-| `GET` | `/api/medicine/ai-info?name={medicine}` | Legacy medicine assistant (backward compatibility) |
-| `POST` | `/api/medicine/symptom-check` | Legacy symptom checker (backward compatibility) |
-| `POST` | `/api/prescription/upload` | Prescription OCR upload |
+| POST | /api/medications/add | Add medication and schedule |
+| GET | /api/medications/today/{userId} | Get today's medicines |
+| POST | /api/logs/mark | Mark an authorized dose taken or missed |
+| POST | /api/logs/mark-missed-batch | Reconcile eligible missed doses |
+| GET | /api/logs/today/{userId} | Read today's intake state |
 
-### Health Monitoring
+### Time Zone & Push
+
 | Method | Endpoint | Description |
 |---|---|---|
-| `POST` | `/api/vitals` | Log a vitals reading |
-| `GET` | `/api/vitals` | Get vitals history |
-| `POST` | `/api/bmi/calculate` | Calculate BMI |
-| `GET` | `/api/streaks` | Get adherence streak data |
+| GET / PUT | /api/user/time-zone | Read or save the user's IANA time zone |
+| GET | /api/push/vapid-key | Get the public VAPID key |
+| POST | /api/push/subscribe | Save a browser Push subscription |
+| POST | /api/push/unsubscribe | Disable a saved subscription |
+| POST | /api/push/test | Send a controlled test push to the authenticated user |
 
 ---
 
-##  Installation & Setup
+## Installation & Setup
 
 ### Prerequisites
 
-Ensure the following are installed on your machine:
-
-| Tool | Version | Download |
-|---|---|---|
-| Java JDK | 17+ | [adoptium.net](https://adoptium.net/) |
-| Maven | 3.8+ | [maven.apache.org](https://maven.apache.org/) |
-| MySQL | 8.0+ | [dev.mysql.com](https://dev.mysql.com/downloads/) |
-| Browser | Modern | Chrome / Firefox / Edge |
-
-You'll also need API keys from:
-- [Groq Console](https://console.groq.com/) — free tier available
-- [Google AI Studio](https://aistudio.google.com/) — free tier available
-
----
-
-### Step 1 — Clone the Repository
-
-```bash
-git clone https://github.com/SUDHEER-KANDURU/dosebuddy.git
-cd dosebuddy
-```
-
----
-
-### Step 2 — MySQL Database Setup
-
-```sql
--- Run in your MySQL client:
-CREATE DATABASE dosebuddy;
-CREATE USER 'dosebuddy_user'@'localhost' IDENTIFIED BY 'your_password';
-GRANT ALL PRIVILEGES ON dosebuddy.* TO 'dosebuddy_user'@'localhost';
-FLUSH PRIVILEGES;
-```
-
-> Hibernate will auto-create all tables on first run via `spring.jpa.hibernate.ddl-auto=update`.
-
----
-
-### Step 3 — API Key Setup
-
-**Groq API Key:**
-1. Sign up at [console.groq.com](https://console.groq.com/)
-2. Go to **API Keys** → **Create API Key**
-3. Copy the key (format: `gsk_...`)
-
-**Google Gemini API Key:**
-1. Visit [aistudio.google.com](https://aistudio.google.com/)
-2. Click **Get API Key** → **Create API key in new project**
-3. Copy the key (format: `AIza...`)
-
----
-
-### Step 4 — Backend Configuration
-
-Create `src/main/resources/application-local.properties` (this file is gitignored — never commit it):
-
-```properties
-# Database
-spring.datasource.url=jdbc:mysql://localhost:3306/dosebuddy
-spring.datasource.username=dosebuddy_user
-spring.datasource.password=your_password
-
-# AI API Keys
-GROQ_API_KEY=gsk_your_groq_api_key_here
-GEMINI_API_KEY=your_gemini_api_key_here
-
-# JWT
-jwt.secret=your_jwt_secret_minimum_32_characters_long
-
-# Optional: override default model
-groq.model=llama-3.3-70b-versatile
-```
-
----
-
-### Step 5 — Run the Backend
-
-```bash
-cd dosebuddy-backend
-
-# Linux / macOS
-./mvnw spring-boot:run -Dspring-boot.run.profiles=local
-
-# Windows
-mvnw.cmd spring-boot:run -Dspring-boot.run.profiles=local
-```
-
- Backend running at: `http://localhost:8080/api`
-
----
-
-### Step 6 — Run the Frontend
-
-The frontend is a static SPA — no build step required.
-
-```bash
-cd dosebuddy-frontend
-
-# Option 1: Python
-python -m http.server 5500
-
-# Option 2: Node.js
-npx serve .
-
-# Option 3: VS Code → Install "Live Server" → Click "Go Live"
-```
-
- Frontend running at: `http://localhost:5500`
-
-> Ensure `API_BASE` in `app.js` points to your backend:
-> ```javascript
-> const API_BASE = "http://localhost:8080/api";
-> ```
-
----
-
-##  Environment Variables
-
-| Variable | Required | Description | Example |
-|---|---|---|---|
-| `spring.datasource.url` |  | MySQL JDBC connection URL | `jdbc:mysql://localhost:3306/dosebuddy` |
-| `spring.datasource.username` |  | Database username | `dosebuddy_user` |
-| `spring.datasource.password` |  | Database password | `your_password` |
-| `GROQ_API_KEY` |  | Groq API key for LLM features | `gsk_...` |
-| `GEMINI_API_KEY` |  | Google Gemini key for OCR | `AIza...` |
-| `jwt.secret` |  | JWT signing secret (min 32 chars) | `my_super_secret_key_32chars_min` |
-| `groq.model` |  | Groq model override (optional) | `llama-3.3-70b-versatile` |
-
----
-
-##  How to Run
-
-### Development Mode
-
-```bash
-# Terminal 1 — Backend
-cd dosebuddy-backend
-mvnw.cmd spring-boot:run -Dspring-boot.run.profiles=local
-
-# Terminal 2 — Frontend
-cd dosebuddy-frontend
-npx serve .
-```
-
-Open `http://localhost:5500` in your browser.
-
-### Production Build
-
-```bash
-# Build the backend JAR
-cd dosebuddy-backend
-mvnw.cmd clean package -DskipTests
-
-# Run the production JAR
-java -jar target/dosebuddy-*.jar \
-  --spring.profiles.active=prod \
-  --GROQ_API_KEY=$GROQ_API_KEY \
-  --GEMINI_API_KEY=$GEMINI_API_KEY
-```
-
----
-
-##  Deployment
-
-| Layer | Recommended Platforms |
+| Tool | Version |
 |---|---|
-| **Frontend** | [Netlify](https://netlify.com) · [Vercel](https://vercel.com) · [GitHub Pages](https://pages.github.com) |
-| **Backend** | [Render](https://render.com) · [Railway](https://railway.app) · [AWS Elastic Beanstalk](https://aws.amazon.com/elasticbeanstalk/) |
-| **Database** | [Railway MySQL](https://railway.app) · [PlanetScale](https://planetscale.com) · [AWS RDS](https://aws.amazon.com/rds/) |
+| Node.js | Current LTS recommended |
+| npm | Bundled with Node.js |
+| MySQL | 8.0+ |
+| Wrangler | Installed through project dependencies |
+| Browser | Current Chrome, Edge, Firefox, or another Push-capable browser |
 
-### Quick Deploy to Railway (Backend + DB)
+### Step 1 — Install dependencies
 
-1. Push your repo to GitHub
-2. Create a new project at [railway.app](https://railway.app)
-3. Add a **MySQL** plugin and a **Spring Boot** service
-4. Set all environment variables in the Railway dashboard
-5. Railway auto-detects Spring Boot and deploys on every push
+~~~
+git clone https://github.com/SUDHEER-KANDURU/DoseBuddy.git
+cd DoseBuddy
+npm install
+~~~
 
-> After deploying, update `API_BASE` in `app.js` to your production backend URL, then redeploy the frontend.
+### Step 2 — Configure local secrets
+
+Keep secrets outside Git. The API Worker expects these secret names:
+
+| Secret | Required | Purpose |
+|---|---:|---|
+| JWT_SECRET | Yes | Signs access and refresh tokens |
+| VAPID_PUBLIC_KEY | For Web Push | Browser subscription public key |
+| VAPID_PRIVATE_KEY | For Web Push | Server-side VAPID signing key |
+| VAPID_EMAIL | For Web Push | VAPID contact subject |
+| GROQ_API_KEY | Optional | AI assistant |
+| GEMINI_API_KEY | Optional | Prescription OCR |
+
+Never place private keys, connection strings, or API keys in frontend files, source control, or screenshots.
+
+### Step 3 — Prepare a local database
+
+Use a dedicated disposable MySQL schema for local integration testing. Apply [database-migrations.sql](database-migrations.sql) only after reviewing it and confirming the target database.
+
+The migration adds scheduling, occurrence, Push-subscription, and delivery-attempt schema support. It is additive but should be tested against a backup or disposable restore before any production use.
+
+### Step 4 — Run checks
+
+~~~
+npm run test:unit
+npm run build
+npm run test:workerd
+npx wrangler deploy --dry-run
+~~~
+
+MySQL integration tests require a loopback-only disposable database URL supplied at runtime:
+
+~~~
+npm run test:integration
+~~~
+
+### Step 5 — Run locally
+
+~~~
+npx wrangler dev
+~~~
+
+The Worker requires a valid local database connection setup compatible with the configured Hyperdrive/MySQL access path. Do not point local test commands at a production database.
 
 ---
 
-##  Future Scope
+## Deployment
 
-- [ ]  **Progressive Web App (PWA)** — Installable on mobile with offline support and push notifications
-- [ ]  **Wearable Integration** — Sync with smartwatches for real-time health data
-- [ ]  **Cloud Prescription Storage** — Secure cloud storage for all uploaded prescriptions
-- [ ]  **Doctor Dashboard** — Share adherence reports and vitals with healthcare providers
-- [ ]  **AI Drug Interaction Checker** — Cross-reference multiple medications for dangerous interactions
-- [ ]  **Smart Health Analytics** — Weekly/monthly trend analysis with predictive insights
-- [ ]  **React Native Mobile App** — Native iOS/Android app using the existing Spring Boot API
-- [ ]  **Two-Factor Authentication** — Enhanced account security with 2FA
-- [ ]  **Multi-language Support** — i18n for regional language accessibility
+The repository contains two Cloudflare Worker configurations:
+
+| Component | Configuration | Purpose |
+|---|---|---|
+| API Worker | [wrangler.jsonc](wrangler.jsonc) | API, Cron reconciliation, Hyperdrive binding |
+| Frontend | [DoseBuddy_frontend/wrangler.jsonc](DoseBuddy_frontend/wrangler.jsonc) | Static application assets and Service Worker |
+
+Before deploying:
+
+1. Run the validation commands above.
+2. Confirm the intended Worker name and environment.
+3. Confirm Hyperdrive points to the intended MySQL database.
+4. Apply the reviewed schema migration through an approved database workflow.
+5. Configure Worker secrets using Cloudflare secrets management.
+6. Verify login, medication creation, timezone persistence, and a controlled push test.
+
+Do not treat a successful API response or a Web Push provider acceptance as proof of on-device notification display.
 
 ---
 
-##  Author
+## Testing
+
+The test suite covers:
+
+- JWT-protected Worker routes and authorization
+- Medication creation, deletion, and intake transitions
+- Time-zone validation, UTC boundaries, and DST scheduling
+- Dose occurrence concurrency and duplicate prevention
+- Push subscription, delivery claims, expiry, retries, and Service Worker payload handling
+- Migration convergence and local MySQL rollback recovery
+- AI-assistant and frontend regression behavior
+
+Run all non-MySQL checks with:
+
+~~~
+npm run verify
+~~~
+
+---
+
+## Future Scope
+
+- [ ] Installed-PWA and mobile notification experience validation
+- [ ] Native mobile clients for platform-specific sound and delivery guarantees
+- [ ] Caregiver escalation workflows
+- [ ] Expanded medication-interaction review
+- [ ] Multi-language accessibility support
+
+---
+
+## Author
 
 <div align="center">
 
@@ -536,7 +369,7 @@ java -jar target/dosebuddy-*.jar \
 
 **Sudheer Kanduru**
 
-*Full-Stack Developer · B.Tech CSE (AI & ML) · SRMIST · 3rd Year*
+*Full-Stack Developer · B.Tech CSE (AI & ML) · SRMIST*
 
 <br/>
 
@@ -544,15 +377,4 @@ java -jar target/dosebuddy-*.jar \
 
 <br/>
 
-*Built with love to make healthcare more accessible through technology.*
-
-<br/>
-
 </div>
-
----
-
-<div align="center">
-
-</div>
-
