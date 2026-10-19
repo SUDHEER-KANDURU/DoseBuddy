@@ -8004,10 +8004,9 @@ body.dark-mode .prx-modal-add-btn:hover:not(:disabled) {
 .ai-chat-container {
     display: flex;
     flex-direction: column;
-    /* Size to content so the input sits right under short conversations, but cap growth
-       so long conversations scroll inside a bounded area. */
+    /* Grow with content — no height cap. The page (.main-content) scrolls on
+       desktop; on mobile the .view-ai rules take over and scroll only messages. */
     height: auto;
-    max-height: 600px;
     border: 1px solid var(--border-color);
     border-radius: var(--radius-lg);
     background: var(--bg-primary);
@@ -8016,11 +8015,12 @@ body.dark-mode .prx-modal-add-btn:hover:not(:disabled) {
 }
 
 .ai-chat-messages {
-    /* Size to content (no forced flex:1 expansion that strands the input at the bottom),
-       and scroll only when the conversation exceeds the container's max-height. */
+.ai-chat-messages {
+    /* Grows with content on desktop (no scrolling here — page scrolls).
+       On mobile the .view-ai rules override to flex:1/overflow-y:auto. */
     flex: 0 1 auto;
     min-height: 0;
-    overflow-y: auto;
+    overflow-y: visible;
     padding: var(--space-4);
     display: flex;
     flex-direction: column;
@@ -8330,8 +8330,9 @@ body.dark-mode .prx-modal-add-btn:hover:not(:disabled) {
     height: 44px;
     border: none;
     border-radius: var(--radius-lg);
-    background: var(--primary);
-    color: white;
+    /* Always teal — never inherits --primary which becomes near-white in dark mode */
+    background: #00A19B;
+    color: #ffffff;
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -8341,7 +8342,7 @@ body.dark-mode .prx-modal-add-btn:hover:not(:disabled) {
 }
 
 .ai-send-btn:hover:not(:disabled) {
-    background: var(--primary-dark);
+    background: #008f89;
 }
 
 .ai-send-btn:disabled {
@@ -8426,13 +8427,9 @@ body.dark-mode .prx-modal-add-btn:hover:not(:disabled) {
         overflow-y: auto;
     }
 
-    /* Restore chat container for non-mobile / non-active state */
+    /* Restore normal overflow for non-active state */
     .ai-chat-container {
         overflow: hidden;
-    }
-
-    .ai-chat-messages {
-        overflow-y: auto;
     }
 
     /* Layout tweaks that apply regardless */
