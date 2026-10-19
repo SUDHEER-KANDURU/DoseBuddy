@@ -8004,9 +8004,10 @@ body.dark-mode .prx-modal-add-btn:hover:not(:disabled) {
 .ai-chat-container {
     display: flex;
     flex-direction: column;
-    /* Grow with content — no height cap. The page (.main-content) scrolls on
-       desktop; on mobile the .view-ai rules take over and scroll only messages. */
-    height: auto;
+    /* Fixed height on desktop so the chat box stays in view and messages scroll
+       inside it. On mobile the .view-ai rules take over the full viewport. */
+    height: 600px;
+    max-height: 80vh;
     border: 1px solid var(--border-color);
     border-radius: var(--radius-lg);
     background: var(--bg-primary);
@@ -8015,12 +8016,11 @@ body.dark-mode .prx-modal-add-btn:hover:not(:disabled) {
 }
 
 .ai-chat-messages {
-.ai-chat-messages {
-    /* Grows with content on desktop (no scrolling here — page scrolls).
-       On mobile the .view-ai rules override to flex:1/overflow-y:auto. */
-    flex: 0 1 auto;
+    /* The single scrollable region — input area is pinned below. */
+    flex: 1 1 0;
     min-height: 0;
-    overflow-y: visible;
+    overflow-y: auto;
+    scroll-behavior: smooth;
     padding: var(--space-4);
     display: flex;
     flex-direction: column;
@@ -8292,6 +8292,8 @@ body.dark-mode .prx-modal-add-btn:hover:not(:disabled) {
     border-top: 1px solid var(--border-color);
     padding: var(--space-4);
     background: var(--bg-secondary);
+    /* Never shrink — always pinned at the bottom of the chat container */
+    flex-shrink: 0;
 }
 
 .ai-chat-input-container {
@@ -8313,6 +8315,7 @@ body.dark-mode .prx-modal-add-btn:hover:not(:disabled) {
     line-height: 1.4;
     resize: none;
     font-family: inherit;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 #ai-chat-input:focus {
@@ -8459,15 +8462,62 @@ body.dark-mode .prx-modal-add-btn:hover:not(:disabled) {
 
 .dark-mode .ai-chat-input-area {
     border-color: var(--border-color-dark);
+    background: #1a1a1a;
 }
 
-.dark-mode .ai-starter-prompt:hover,
+.dark-mode #ai-chat-input {
+    background: #111111;
+    color: var(--text-primary);
+    border-color: #333333;
+}
+
+.dark-mode #ai-chat-input:focus {
+    border-color: #00A19B;
+    box-shadow: 0 0 0 3px rgba(0, 161, 155, 0.2);
+}
+
+/* Keep avatar always teal in both modes */
+.dark-mode .ai-avatar {
+    background: linear-gradient(135deg, #00A19B 0%, #008f89 100%);
+}
+
+/* Assistant message bubble in dark mode */
+.dark-mode .ai-chat-assistant .ai-message-text {
+    background: #1e1e1e;
+    border-color: #2a2a2a;
+    color: #f5f5f5;
+}
+
+/* Starter prompt buttons in dark mode */
+.dark-mode .ai-starter-prompt {
+    background: #1a1a1a;
+    border-color: #2a2a2a;
+    color: #f5f5f5;
+}
+
+.dark-mode .ai-starter-prompt:hover {
+    border-color: #00A19B;
+    background: #222222;
+}
+
+.dark-mode .ai-starter-prompt svg {
+    color: #00A19B;
+}
+
+.dark-mode .ai-starter-prompts,
 .dark-mode .ai-option-btn:hover {
     background: var(--bg-tertiary);
 }
 
-.dark-mode #ai-chat-input:focus {
-    box-shadow: 0 0 0 3px rgba(var(--primary-rgb), 0.2);
+.dark-mode .ai-option-btn {
+    background: #1a1a1a;
+    border-color: #2a2a2a;
+    color: #f5f5f5;
+}
+
+.dark-mode .ai-option-btn:hover {
+    border-color: #00A19B;
+    background: #222222;
 }
 
 /* FEAT-003: Enhanced AI Chat Specialized Components */
