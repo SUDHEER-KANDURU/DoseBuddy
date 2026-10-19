@@ -52,11 +52,11 @@ DoseBuddy helps people maintain medication routines while keeping each dose trac
 
 <div align="center">
 
-| 🔐 JWT Auth | 💊 Dose Ledger | 🔔 Web Push | 🌍 Time Zones |
+|  JWT Auth |  Dose Ledger |  Web Push |  Time Zones |
 |:---:|:---:|:---:|:---:|
 | Access and refresh tokens | Pending, taken, and missed states | Service Worker notification rendering | IANA zones and DST-aware scheduling |
 
-| 🤖 AI Assistant | 📄 Prescription OCR | 📊 Health Analytics | 🌗 Themes |
+|  AI Assistant |  Prescription OCR |  Health Analytics |  Themes |
 |:---:|:---:|:---:|:---:|
 | Health and medicine guidance | Extract medicine details from uploads | Adherence, history, BMI, and vitals | Responsive light and dark modes |
 
