@@ -8504,9 +8504,8 @@ body.dark-mode .prx-modal-add-btn:hover:not(:disabled) {
     color: #00A19B;
 }
 
-.dark-mode .ai-starter-prompts,
-.dark-mode .ai-option-btn:hover {
-    background: var(--bg-tertiary);
+.dark-mode .ai-starter-prompts {
+    /* grid wrapper — no background needed */
 }
 
 .dark-mode .ai-option-btn {
