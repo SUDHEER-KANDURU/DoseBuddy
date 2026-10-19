@@ -10,15 +10,21 @@ test("AI chat has one bounded message scroller and a pinned composer", async () 
     source("DoseBuddy_frontend/index.html"),
     source("DoseBuddy_frontend/style.css")
   ]);
-  const start = html.indexOf('<div class="ai-chat-container">');
-  const container = html.slice(start, html.indexOf("</section>", start));
-  assert.ok(container.indexOf('class="ai-chat-messages"') < container.indexOf('class="ai-chat-input-area"'));
-  assert.ok(container.indexOf('class="ai-disclaimer-card"') < container.indexOf('class="ai-chat-input-area"'));
+  const viewStart = html.indexOf('<section id="ai-view"');
+  const view = html.slice(viewStart, html.indexOf("</section>", viewStart));
+  const chatStart = view.indexOf('<div class="ai-chat-container">');
+  const disclaimerIndex = view.indexOf('class="ai-disclaimer-card"');
+  const chat = view.slice(chatStart, disclaimerIndex);
+  assert.ok(chat.indexOf('class="ai-chat-messages"') < chat.indexOf('class="ai-chat-input-area"'));
+  assert.equal(chat.indexOf('class="ai-disclaimer-card"'), -1, "disclaimer must not be conversation content");
+  assert.ok(disclaimerIndex > chatStart, "disclaimer must follow the chat panel");
   assert.match(css, /\.main-content\s*\{[\s\S]*?min-height:\s*0/);
   assert.match(css, /--app-viewport-height/);
   assert.match(css, /body\.view-ai #ai-view\s*\{[\s\S]*?display:\s*flex[\s\S]*?min-height:\s*0/);
   assert.match(css, /body\.view-ai \.ai-chat-messages\s*\{[\s\S]*?overflow-y:\s*auto/);
   assert.match(css, /body\.view-ai \.ai-chat-input-area\s*\{[\s\S]*?flex-shrink:\s*0/);
+  assert.match(css, /body\.view-ai #ai-view > \.ai-disclaimer-card/);
+  assert.doesNotMatch(css, /ai-chat-messages \.ai-disclaimer-card/);
 });
 
 test("AI chat decides whether to scroll before adding content", async () => {
@@ -35,10 +41,23 @@ test("AI chat decides whether to scroll before adding content", async () => {
   }
 });
 
-test("New Chat restores the disclaimer inside the scrolling history", async () => {
+test("New Chat restores only conversation content", async () => {
   const app = await source("DoseBuddy_frontend/app.js");
-  assert.match(app, /AI_CHAT_DISCLAIMER_HTML/);
-  assert.match(app, /AI_CHAT_WELCOME_HTML \+ AI_CHAT_DISCLAIMER_HTML/);
+  assert.doesNotMatch(app, /AI_CHAT_DISCLAIMER_HTML/);
+  assert.match(app, /chatMessages\.innerHTML = AI_CHAT_WELCOME_HTML/);
+});
+
+test("dark mode keeps outgoing chat messages distinct from the background", async () => {
+  const css = await source("DoseBuddy_frontend/style.css");
+  assert.match(css, /body\.dark-mode \.ai-chat-user \.ai-message-text\s*\{[\s\S]*?background:\s*#008f89/);
+  assert.match(css, /body\.dark-mode \.ai-chat-user \.ai-message-text\s*\{[\s\S]*?color:\s*#ffffff/);
+});
+test("guided choices use a compact grid while Other keeps a full inline row", async () => {
+  const css = await source("DoseBuddy_frontend/style.css");
+  assert.match(css, /\.ai-question-options\s*\{[\s\S]*?display:\s*grid/);
+  assert.match(css, /\.ai-option-btn\s*\{[\s\S]*?min-height:\s*44px/);
+  assert.match(css, /\.ai-other-option-row\s*\{[\s\S]*?grid-column:\s*1\s*\/\s*-1/);
+  assert.match(css, /@media \(max-width: 768px\)[\s\S]*?\.ai-other-option-row\s*\{\s*flex-wrap:\s*nowrap/);
 });
 
 test("AI chat tracks visual viewport height for mobile keyboard resizing", async () => {

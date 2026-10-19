@@ -8095,6 +8095,13 @@ body.dark-mode .prx-modal-add-btn:hover:not(:disabled) {
     border-bottom-right-radius: var(--radius-sm);
 }
 
+/* The global dark theme uses a light primary token for controls. Keep outgoing
+   chat messages visibly distinct and readable instead of inheriting that token. */
+body.dark-mode .ai-chat-user .ai-message-text {
+    background: #008f89;
+    color: #ffffff;
+}
+
 .ai-chat-assistant .ai-message-text {
     background: var(--bg-secondary);
     color: var(--text-primary);
@@ -8207,18 +8214,18 @@ body.dark-mode .prx-modal-add-btn:hover:not(:disabled) {
 }
 
 .ai-question-options {
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
     gap: var(--space-2);
     margin-top: var(--space-3);
-    margin-left: 44px; /* Account for avatar */
+    margin-left: 44px; /* Align with assistant message content. */
 }
 
 .ai-option-btn {
     display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    padding: var(--space-3);
+    align-items: center;
+    min-height: 44px;
+    padding: 10px var(--space-3);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
     background: var(--bg-primary);
@@ -8291,6 +8298,7 @@ body.dark-mode .prx-modal-add-btn:hover:not(:disabled) {
 /* ── AI Assistant "Other" inline option row ─────────────────────────────────── */
 .ai-other-option-row {
     display: flex;
+    grid-column: 1 / -1;
     align-items: center;
     gap: var(--space-2);
     padding: var(--space-2) 0;
@@ -8482,11 +8490,11 @@ body.view-ai .ai-chat-messages {
     -webkit-overflow-scrolling: touch;
 }
 
-/* The disclaimer belongs to the conversation history. It remains reachable by
-   scrolling messages but can never consume the composer's reserved space. */
-body.view-ai .ai-chat-messages .ai-disclaimer-card {
+/* The safety notice remains outside the conversation history. The chat panel
+   shrinks first, leaving messages as the only independently scrollable region. */
+body.view-ai #ai-view > .ai-disclaimer-card {
     flex: 0 0 auto;
-    margin: 0;
+    margin: var(--space-2) 0 0;
 }
 
 body.view-ai .ai-chat-input-area {
@@ -8503,8 +8511,8 @@ body.view-ai .ai-chat-input-area {
    The layout rules above already handle both desktop and mobile. This block
    keeps only mobile-specific tweaks. */
 @media (max-width: 768px) {
-    /* Disclaimer scrolls with the conversation on mobile. */
-    body.view-ai .ai-disclaimer-card {
+    /* Disclaimer stays below the chat panel on mobile. */
+    body.view-ai #ai-view > .ai-disclaimer-card {
         padding: var(--space-2) var(--space-3);
     }
 
@@ -8523,15 +8531,15 @@ body.view-ai .ai-chat-input-area {
     .ai-disclaimer-text  { font-size: 0.72rem; }
     .ai-starter-prompts  { grid-template-columns: 1fr; }
     .ai-chat-message     { max-width: 95%; }
-    .ai-question-options { margin-left: 0; }
+    .ai-question-options { margin-left: 0; grid-template-columns: 1fr; }
     .ai-option-btn       { font-size: 0.875rem; }
-    .ai-other-option-row { flex-wrap: wrap; }
+    .ai-other-option-row { flex-wrap: nowrap; }
     .ai-other-option-input { font-size: 16px; } /* Prevent iOS zoom */
     #ai-chat-input       { font-size: 16px; } /* Prevent iOS zoom */
 }
 
 @media (max-width: 480px) {
-    body.view-ai .ai-disclaimer-card {
+    body.view-ai #ai-view > .ai-disclaimer-card {
         padding: var(--space-2);
     }
 
