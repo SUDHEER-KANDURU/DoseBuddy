@@ -5219,6 +5219,15 @@ const aiConversationState = {
     conversationId: null,
     state: {}
 };
+let aiViewportObserverBound = false;
+let activeQuestionOptions = null;
+
+function syncAiViewportHeight() {
+    const height = window.visualViewport?.height || window.innerHeight;
+    if (Number.isFinite(height) && height > 0) {
+        document.documentElement.style.setProperty("--app-viewport-height", Math.round(height) + "px");
+    }
+}
 
 // Original welcome screen markup for the chat messages container. Kept in sync with
 // the initial content in index.html so "New Chat" can restore the exact same view.
@@ -5264,6 +5273,21 @@ const AI_CHAT_WELCOME_HTML = `
     </div>
 `;
 
+const AI_CHAT_DISCLAIMER_HTML = `
+    <div class="ai-disclaimer-card">
+        <div class="ai-disclaimer-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="18" height="18"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>
+        </div>
+        <div class="ai-disclaimer-content">
+            <h4 class="ai-disclaimer-title">Important Medical Disclaimer</h4>
+            <p class="ai-disclaimer-text">
+                AI-generated responses are for informational purposes only and should not replace professional medical advice.
+                Always consult with qualified healthcare providers for diagnosis and treatment. In case of emergency, call your local emergency services immediately.
+            </p>
+        </div>
+    </div>
+`;
+
 // Attach click handlers to the starter prompt buttons currently in the DOM. Called on
 // initial setup and again whenever the welcome screen is restored (e.g. "New Chat").
 function wireStarterPrompts() {
@@ -5296,13 +5320,14 @@ function startNewConversation() {
     aiConversationState.conversationId = null;
     aiConversationState.state = {};
     aiConversationState.isProcessing = false;
+    activeQuestionOptions = null;
 
     // Remove any lingering thinking indicator and restore the welcome screen.
     if (typeof hideChatThinking === "function") {
         hideChatThinking();
     }
     if (chatMessages) {
-        chatMessages.innerHTML = AI_CHAT_WELCOME_HTML;
+        chatMessages.innerHTML = AI_CHAT_WELCOME_HTML + AI_CHAT_DISCLAIMER_HTML;
         wireStarterPrompts();
     }
 
@@ -5322,6 +5347,13 @@ function setupUnifiedAiChat() {
     if (!chatInput || !chatSend || !chatMessages) {
         console.log("AI chat elements not found, skipping setup");
         return;
+    }
+
+    syncAiViewportHeight();
+    if (!aiViewportObserverBound) {
+        aiViewportObserverBound = true;
+        window.addEventListener("resize", syncAiViewportHeight);
+        window.visualViewport?.addEventListener("resize", syncAiViewportHeight);
     }
 
     // Auto-resize textarea
@@ -5454,6 +5486,7 @@ function handleAiResponse(data) {
 
 function addChatMessage(sender, content, messageType = "normal") {
     const chatMessages = document.getElementById("ai-chat-messages");
+    const shouldAutoScroll = isChatNearBottom(chatMessages);
     
     const messageDiv = document.createElement("div");
     messageDiv.className = `ai-chat-message ai-chat-${sender} ${messageType !== "normal" ? `ai-message-${messageType}` : ""}`;
@@ -5479,7 +5512,7 @@ function addChatMessage(sender, content, messageType = "normal") {
     }
 
     chatMessages.appendChild(messageDiv);
-    scrollChatToBottom();
+    scrollChatToBottom(shouldAutoScroll);
 }
 
 function isOtherOption(option) {
@@ -5495,8 +5528,15 @@ function isOtherOption(option) {
 
 function addQuestionOptions(data) {
     const chatMessages = document.getElementById("ai-chat-messages");
+    if (!chatMessages || !Array.isArray(data.questions)) return;
+    const shouldAutoScroll = isChatNearBottom(chatMessages);
+    if (activeQuestionOptions?.isConnected) {
+        activeQuestionOptions.querySelectorAll("button, input").forEach(control => { control.disabled = true; });
+        activeQuestionOptions.setAttribute("aria-disabled", "true");
+    }
     const optionsDiv = document.createElement("div");
     optionsDiv.className = "ai-question-options";
+    activeQuestionOptions = optionsDiv;
     // Track whether a submit for this option set is in flight to prevent duplicates.
     let otherSubmitting = false;
 
@@ -5522,7 +5562,10 @@ function addQuestionOptions(data) {
             const label = document.createElement("label");
             label.className = "ai-other-option-label";
             label.textContent = "Other:";
-            const inputId = "ai-other-input-" + Math.random().toString(36).slice(2, 8);
+            const suffix = Math.random().toString(36).slice(2, 8);
+            const inputId = "ai-other-input-" + suffix;
+            const labelId = "ai-other-label-" + suffix;
+            label.id = labelId;
             label.setAttribute("for", inputId);
 
             const input = document.createElement("input");
@@ -5539,21 +5582,43 @@ function addQuestionOptions(data) {
             sendBtn.setAttribute("aria-label", "Send custom answer");
             sendBtn.textContent = "Send";
 
-            const submitOther = () => {
+            // aria-labelledby wires the group to the visible "Other:" label so
+            // screen readers announce the group context ("Other:").
+            row.setAttribute("aria-labelledby", labelId);
+
+            const submitOther = async () => {
                 const customText = input.value.trim();
                 if (!customText) return;           // no empty/whitespace answers
-                if (otherSubmitting) return;        // no duplicate submission
+                if (otherSubmitting || activeQuestionOptions !== optionsDiv) return;
                 if (aiConversationState.isProcessing) return;
                 otherSubmitting = true;
                 sendBtn.disabled = true;
                 input.disabled = true;
-                // Show the user's actual typed answer in the conversation
+                input.value = "";
+                // Show the user's actual typed answer in the conversation.
                 addChatMessage("user", customText);
-                // Remove the entire option set
                 optionsDiv.remove();
-                // Send the custom text (NOT the word "Other") to the AI
-                sendOptionSelection(customText);
+                activeQuestionOptions = null;
+                try {
+                    // Send the custom text (NOT the word "Other") to the AI.
+                    const accepted = await sendOptionSelection(customText);
+                    if (accepted) return;
+                } catch (err) {
+                    console.error("Custom option request failed:", err);
+                }
+                // The request failed. Restore the same current question for a retry.
+                otherSubmitting = false;
+                input.value = customText;
+                input.disabled = false;
+                sendBtn.disabled = false;
+                activeQuestionOptions = optionsDiv;
+                chatMessages.appendChild(optionsDiv);
             };
+
+            input.addEventListener("input", () => {
+                sendBtn.disabled = !input.value.trim() || otherSubmitting || aiConversationState.isProcessing;
+            });
+            sendBtn.disabled = true;
 
             input.addEventListener("keydown", function(e) {
                 if (e.key === "Enter") {
@@ -5577,18 +5642,16 @@ function addQuestionOptions(data) {
         }
     });
     chatMessages.appendChild(optionsDiv);
-    scrollChatToBottom();
+    scrollChatToBottom(shouldAutoScroll);
 }
 
 function selectOption(value, optionsContainer) {
-    // Add user's selection as a message
+    // Ignore a response from an older question or a duplicate click.
+    if (optionsContainer !== activeQuestionOptions || aiConversationState.isProcessing) return;
+    activeQuestionOptions = null;
     addChatMessage("user", value);
-    
-    // Remove the options
     optionsContainer.remove();
-    
-    // Send the selection back to the AI
-    sendOptionSelection(value);
+    void sendOptionSelection(value);
 }
 
 async function sendOptionSelection(value) {
@@ -5634,6 +5697,7 @@ async function sendOptionSelection(value) {
         }
         
         handleAiResponse(data);
+        return true;
 
     } catch (error) {
         console.error("Option selection error:", error);
@@ -5647,6 +5711,7 @@ async function sendOptionSelection(value) {
         }
         
         addChatMessage("assistant", errorMessage, "error");
+        return false;
     } finally {
         hideChatThinking();
         aiConversationState.isProcessing = false;
@@ -5659,6 +5724,7 @@ async function sendOptionSelection(value) {
 function showChatThinking() {
     const chatMessages = document.getElementById("ai-chat-messages");
     if (!chatMessages) return;
+    const shouldAutoScroll = isChatNearBottom(chatMessages);
 
     // Never show more than one indicator at a time.
     hideChatThinking();
@@ -5684,7 +5750,7 @@ function showChatThinking() {
     `;
 
     chatMessages.appendChild(thinkingDiv);
-    scrollChatToBottom();
+    scrollChatToBottom(shouldAutoScroll);
 }
 
 function hideChatThinking() {
@@ -5703,17 +5769,22 @@ function updateSendButton() {
     }
 }
 
-function scrollChatToBottom() {
+function isChatNearBottom(chatMessages) {
+    if (!chatMessages) return false;
+    return chatMessages.scrollHeight - chatMessages.scrollTop - chatMessages.clientHeight < 120;
+}
+
+function scrollChatToBottom(shouldScroll) {
     const chatMessages = document.getElementById("ai-chat-messages");
-    if (chatMessages) {
-        setTimeout(() => {
-            // Only force-scroll when the user is already near the bottom (within ~120px),
-            // so a user reading older messages is not yanked back down on each new message.
-            const nearBottom = chatMessages.scrollHeight - chatMessages.scrollTop - chatMessages.clientHeight < 120;
-            if (nearBottom) {
-                chatMessages.scrollTop = chatMessages.scrollHeight;
-            }
-        }, 100);
+    if (!chatMessages) return;
+    // Callers that append content pass a pre-append snapshot. The fallback
+    // keeps this helper safe for direct callers that do not have one.
+    const nearBottom = chatMessages.scrollHeight - chatMessages.scrollTop - chatMessages.clientHeight < 120;
+    if (shouldScroll === false) return;
+    if (nearBottom) {
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    } else if (shouldScroll) {
+        chatMessages.scrollTop = chatMessages.scrollHeight;
     }
 }
 

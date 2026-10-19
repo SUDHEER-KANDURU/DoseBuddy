@@ -223,3 +223,25 @@ test("isOtherOption function is present at top level in app.js", async () => {
     "isOtherOption must be a named top-level function in app.js"
   );
 });
+
+test("guided questions reject stale selections and disable older controls", async () => {
+  const source = await loadAppSource();
+  const options = extractFunction(source, "addQuestionOptions");
+  const select = extractFunction(source, "selectOption");
+
+  assert.match(options, /activeQuestionOptions\?\.isConnected/, "a newer question must retire prior controls");
+  assert.match(options, /querySelectorAll\(["']button, input["']\)/, "older question controls must be disabled");
+  assert.match(select, /optionsContainer\s*!==\s*activeQuestionOptions/, "stale option clicks must be ignored");
+});
+
+test("custom guided answers clear on send and restore only after a failed request", async () => {
+  const source = await loadAppSource();
+  const options = extractFunction(source, "addQuestionOptions");
+  const send = extractFunction(source, "sendOptionSelection");
+
+  assert.match(options, /input\.value\s*=\s*["']["']/, "the inline field must clear once its answer is submitted");
+  assert.match(options, /const accepted\s*=\s*await\s+sendOptionSelection\(customText\)/, "custom submission must await the actual request outcome");
+  assert.match(options, /input\.value\s*=\s*customText/, "failed requests must restore the typed answer for retry");
+  assert.match(send, /return true/, "selection sender must report success to the inline row");
+  assert.match(send, /return false/, "selection sender must report failures to the inline row");
+});

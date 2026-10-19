@@ -135,7 +135,8 @@ p  { color: var(--text-secondary); }
   grid-template-areas: "sidebar topnav" "sidebar main";
   grid-template-columns: var(--sidebar-w) 1fr;
   grid-template-rows: var(--topnav-h) 1fr;
-  min-height: 100dvh;
+  height: var(--app-viewport-height, 100dvh);
+  min-height: var(--app-viewport-height, 100dvh);
 }
 
 /* Hidden until JS shows it */
@@ -309,6 +310,8 @@ p  { color: var(--text-secondary); }
   padding: var(--space-6);
   overflow-y: auto;
   min-width: 0;
+  min-height: 0;        /* allow the grid item and its AI flex child to shrink */
+  min-block-size: 0;
   max-width: 1400px;
   scroll-behavior: smooth;
 }
@@ -8004,10 +8007,7 @@ body.dark-mode .prx-modal-add-btn:hover:not(:disabled) {
 .ai-chat-container {
     display: flex;
     flex-direction: column;
-    /* Fixed height on desktop so the chat box stays in view and messages scroll
-       inside it. On mobile the .view-ai rules take over the full viewport. */
-    height: 600px;
-    max-height: 80vh;
+    /* No fixed height — container fills whatever space the flex parent gives it */
     border: 1px solid var(--border-color);
     border-radius: var(--radius-lg);
     background: var(--bg-primary);
@@ -8432,6 +8432,67 @@ body.dark-mode .prx-modal-add-btn:hover:not(:disabled) {
     to { transform: rotate(360deg); }
 }
 
+/* AI view: full-height flex column on ALL viewport widths
+   ─────────────────────────────────────────────────────────
+   These rules are unconditional (not inside any @media) so they apply to
+   desktop and mobile alike. The mobile @media block below keeps only the
+   mobile-specific tweaks (padding, order, font-size, grid-columns).       */
+
+body.view-ai .app-shell {
+    overflow: hidden; /* AI view has a definite viewport; messages own scrolling. */
+}
+
+body.view-ai .main-content {
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+body:not(.view-ai) .main-content {
+    overflow-y: auto;
+}
+
+body.view-ai #ai-view {
+    flex: 1 1 0;          /* fills all available space in .main-content flex column */
+    min-height: 0;        /* prevent flex default min-height:auto from blocking shrink */
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+body.view-ai #ai-view .page-header {
+    flex-shrink: 0;
+}
+
+body.view-ai .ai-chat-container {
+    flex: 1 1 0;
+    min-height: 0;
+    max-height: none;
+    height: auto;
+    overflow: hidden;
+    margin-bottom: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+body.view-ai .ai-chat-messages {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+/* The disclaimer belongs to the conversation history. It remains reachable by
+   scrolling messages but can never consume the composer's reserved space. */
+body.view-ai .ai-chat-messages .ai-disclaimer-card {
+    flex: 0 0 auto;
+    margin: 0;
+}
+
+body.view-ai .ai-chat-input-area {
+    flex-shrink: 0;
+}
+
 /* Mobile AI chat layout.
    When the AI view is active (body.view-ai) on mobile:
    - .main-content stops scrolling and becomes the height-constrained shell
@@ -8439,59 +8500,12 @@ body.dark-mode .prx-modal-add-btn:hover:not(:disabled) {
    - .ai-chat-messages is the ONE scroll region (the conversation)
    - .ai-chat-input-area is pinned at the bottom (flex-shrink:0)
    - The page itself does NOT scroll — the chat box stays fixed in place
-   Desktop (>=769px) is completely untouched. */
+   The layout rules above already handle both desktop and mobile. This block
+   keeps only mobile-specific tweaks. */
 @media (max-width: 768px) {
-    /* Lock page scroll when AI view is active */
-    body.view-ai .main-content {
-        overflow: hidden;
-        display: flex;
-        flex-direction: column;
-    }
-
-    /* AI view fills the entire main-content area */
-    body.view-ai #ai-view {
-        flex: 1 1 0;
-        min-height: 0;
-        display: flex;
-        flex-direction: column;
-        overflow: hidden;
-    }
-
-    /* Page header (Health Assistant title + New Chat) — fixed height, no shrink */
-    body.view-ai #ai-view .page-header {
-        flex-shrink: 0;
-    }
-
-    /* Disclaimer — compact, sits above the chat box, no shrink */
+    /* Disclaimer scrolls with the conversation on mobile. */
     body.view-ai .ai-disclaimer-card {
-        flex-shrink: 0;
-        order: -1;
         padding: var(--space-2) var(--space-3);
-    }
-
-    /* Chat container fills the remaining height */
-    body.view-ai .ai-chat-container {
-        flex: 1 1 0;
-        min-height: 0;
-        max-height: none;
-        height: auto;
-        overflow: hidden;
-        margin-bottom: 0;
-        display: flex;
-        flex-direction: column;
-    }
-
-    /* Messages: the single scroll region */
-    body.view-ai .ai-chat-messages {
-        flex: 1 1 0;
-        min-height: 0;
-        overflow-y: auto;
-        -webkit-overflow-scrolling: touch;
-    }
-
-    /* Input area pinned at bottom, never shrinks */
-    body.view-ai .ai-chat-input-area {
-        flex-shrink: 0;
     }
 
     /* Non-AI views on mobile: restore normal page scroll */
@@ -8527,65 +8541,65 @@ body.dark-mode .prx-modal-add-btn:hover:not(:disabled) {
 }
 
 /* Dark mode specific adjustments */
-.dark-mode .ai-chat-container {
+body.dark-mode .ai-chat-container {
     border-color: var(--border-color-dark);
 }
 
-.dark-mode .ai-chat-input-area {
+body.dark-mode .ai-chat-input-area {
     border-color: var(--border-color-dark);
     background: #1a1a1a;
 }
 
-.dark-mode #ai-chat-input {
+body.dark-mode #ai-chat-input {
     background: #111111;
     color: var(--text-primary);
     border-color: #333333;
 }
 
-.dark-mode #ai-chat-input:focus {
+body.dark-mode #ai-chat-input:focus {
     border-color: #00A19B;
     box-shadow: 0 0 0 3px rgba(0, 161, 155, 0.2);
 }
 
 /* Keep avatar always teal in both modes */
-.dark-mode .ai-avatar {
+body.dark-mode .ai-avatar {
     background: linear-gradient(135deg, #00A19B 0%, #008f89 100%);
 }
 
 /* Assistant message bubble in dark mode */
-.dark-mode .ai-chat-assistant .ai-message-text {
+body.dark-mode .ai-chat-assistant .ai-message-text {
     background: #1e1e1e;
     border-color: #2a2a2a;
     color: #f5f5f5;
 }
 
 /* Starter prompt buttons in dark mode */
-.dark-mode .ai-starter-prompt {
+body.dark-mode .ai-starter-prompt {
     background: #1a1a1a;
     border-color: #2a2a2a;
     color: #f5f5f5;
 }
 
-.dark-mode .ai-starter-prompt:hover {
+body.dark-mode .ai-starter-prompt:hover {
     border-color: #00A19B;
     background: #222222;
 }
 
-.dark-mode .ai-starter-prompt svg {
+body.dark-mode .ai-starter-prompt svg {
     color: #00A19B;
 }
 
-.dark-mode .ai-starter-prompts {
+body.dark-mode .ai-starter-prompts {
     /* grid wrapper — no background needed */
 }
 
-.dark-mode .ai-option-btn {
+body.dark-mode .ai-option-btn {
     background: #1a1a1a;
     border-color: #2a2a2a;
     color: #f5f5f5;
 }
 
-.dark-mode .ai-option-btn:hover {
+body.dark-mode .ai-option-btn:hover {
     border-color: #00A19B;
     background: #222222;
 }
