@@ -8359,73 +8359,98 @@ body.dark-mode .prx-modal-add-btn:hover:not(:disabled) {
     to { transform: rotate(360deg); }
 }
 
-/* Mobile responsive adjustments — AI Assistant.
-   On mobile the page scrolls naturally; the chat container expands to fit its
-   content (no internal scroll, no competing scroll containers). The fixed-height
-   viewport approach is removed — it caused the unwanted internal scrollbar visible
-   in the chat box. Desktop (>=769px) rules are untouched. */
+/* Mobile AI chat layout.
+   When the AI view is active (body.view-ai) on mobile:
+   - .main-content stops scrolling and becomes the height-constrained shell
+   - #ai-view fills it entirely as a flex column
+   - .ai-chat-messages is the ONE scroll region (the conversation)
+   - .ai-chat-input-area is pinned at the bottom (flex-shrink:0)
+   - The page itself does NOT scroll — the chat box stays fixed in place
+   Desktop (>=769px) is completely untouched. */
 @media (max-width: 768px) {
-    /* Let the page scroll; no fixed height on the view */
-    #ai-view {
-        display: block;
+    /* Lock page scroll when AI view is active */
+    body.view-ai .main-content {
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
     }
 
-    /* Chat container: expand to content, no height cap, no internal scroll */
-    .ai-chat-container {
-        max-height: none;
-        height: auto;
-        overflow: visible;
-        margin-bottom: var(--space-4);
+    /* AI view fills the entire main-content area */
+    body.view-ai #ai-view {
+        flex: 1 1 0;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
     }
 
-    /* Messages region: expand to content, no overflow scroll */
-    .ai-chat-messages {
-        flex: none;
-        overflow-y: visible;
-        overflow: visible;
+    /* Page header (Health Assistant title + New Chat) — fixed height, no shrink */
+    body.view-ai #ai-view .page-header {
+        flex-shrink: 0;
     }
 
-    /* Disclaimer: sits naturally in page flow (no reordering needed) */
-    .ai-disclaimer-card {
-        order: 0;
+    /* Disclaimer — compact, sits above the chat box, no shrink */
+    body.view-ai .ai-disclaimer-card {
+        flex-shrink: 0;
+        order: -1;
         padding: var(--space-2) var(--space-3);
     }
 
-    .ai-disclaimer-title {
-        font-size: 0.8rem;
+    /* Chat container fills the remaining height */
+    body.view-ai .ai-chat-container {
+        flex: 1 1 0;
+        min-height: 0;
+        max-height: none;
+        height: auto;
+        overflow: hidden;
+        margin-bottom: 0;
+        display: flex;
+        flex-direction: column;
     }
 
-    .ai-disclaimer-text {
-        font-size: 0.72rem;
+    /* Messages: the single scroll region */
+    body.view-ai .ai-chat-messages {
+        flex: 1 1 0;
+        min-height: 0;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
     }
 
-    .ai-starter-prompts {
-        grid-template-columns: 1fr;
+    /* Input area pinned at bottom, never shrinks */
+    body.view-ai .ai-chat-input-area {
+        flex-shrink: 0;
     }
 
-    .ai-chat-message {
-        max-width: 95%;
+    /* Non-AI views on mobile: restore normal page scroll */
+    body:not(.view-ai) .main-content {
+        overflow-y: auto;
     }
 
-    .ai-question-options {
-        margin-left: 0;
+    /* Restore chat container for non-mobile / non-active state */
+    .ai-chat-container {
+        overflow: hidden;
     }
 
-    .ai-option-btn {
-        font-size: 0.875rem;
+    .ai-chat-messages {
+        overflow-y: auto;
     }
 
-    #ai-chat-input {
-        font-size: 16px; /* Prevent zoom on iOS */
-    }
+    /* Layout tweaks that apply regardless */
+    .ai-disclaimer-title { font-size: 0.8rem; }
+    .ai-disclaimer-text  { font-size: 0.72rem; }
+    .ai-starter-prompts  { grid-template-columns: 1fr; }
+    .ai-chat-message     { max-width: 95%; }
+    .ai-question-options { margin-left: 0; }
+    .ai-option-btn       { font-size: 0.875rem; }
+    #ai-chat-input       { font-size: 16px; } /* Prevent iOS zoom */
 }
 
 @media (max-width: 480px) {
-    .ai-disclaimer-card {
+    body.view-ai .ai-disclaimer-card {
         padding: var(--space-2);
     }
 
-    .ai-chat-input-area {
+    body.view-ai .ai-chat-input-area {
         padding: var(--space-3);
     }
 }

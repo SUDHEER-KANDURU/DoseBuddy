@@ -759,7 +759,12 @@ function switchView(viewId) {
     }
 
     stopReminderAudio();
-    
+
+    // Toggle a body class so CSS can lock .main-content scroll when the AI
+    // chat view is active (on mobile the chat messages scroll internally,
+    // not the whole page).
+    document.body.classList.toggle("view-ai", viewId === "ai-view");
+
     document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
     const target = document.getElementById(viewId);
     if (target) target.classList.add("active");
