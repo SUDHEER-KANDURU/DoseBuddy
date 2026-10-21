@@ -8519,6 +8519,22 @@ body.view-ai .ai-chat-messages {
 body.view-ai #ai-view > .ai-disclaimer-card {
     flex: 0 0 auto;
     margin: var(--space-2) 0 0;
+    /* Smooth hide/show when keyboard opens/closes on mobile */
+    transition: opacity 0.2s ease, max-height 0.2s ease;
+    max-height: 200px;
+    overflow: hidden;
+}
+
+/* Hide disclaimer when the AI chat input is focused (keyboard open on mobile).
+   This frees the ~150px the disclaimer consumed, keeping the composer visible
+   above the keyboard without any jump or layout shift. */
+@media (max-width: 768px) {
+    body.view-ai.ai-keyboard-open #ai-view > .ai-disclaimer-card {
+        opacity: 0;
+        max-height: 0;
+        margin: 0;
+        pointer-events: none;
+    }
 }
 
 body.view-ai .ai-chat-input-area {

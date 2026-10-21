@@ -5350,6 +5350,20 @@ function setupUnifiedAiChat() {
         chatSend.disabled = !chatInput.value.trim() || aiConversationState.isProcessing;
     });
 
+    // Hide the medical disclaimer when the keyboard opens (input focused) so the
+    // composer stays visible above the keyboard on mobile.  A 300ms delay on blur
+    // prevents a flash if focus moves briefly to the send button.
+    let _aiKeyboardBlurTimer = null;
+    chatInput.addEventListener("focus", () => {
+        clearTimeout(_aiKeyboardBlurTimer);
+        document.body.classList.add("ai-keyboard-open");
+    });
+    chatInput.addEventListener("blur", () => {
+        _aiKeyboardBlurTimer = setTimeout(() => {
+            document.body.classList.remove("ai-keyboard-open");
+        }, 300);
+    });
+
     // Send message on Enter (not Shift+Enter)
     chatInput.addEventListener("keydown", (e) => {
         if (e.key === "Enter" && !e.shiftKey) {

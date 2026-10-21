@@ -669,7 +669,7 @@ img, canvas, svg, video { max-width: 100%; }
 /* Hide the medical disclaimer on very short viewports (keyboard open on
    small phones) so the composer is never pushed off-screen. The disclaimer
    is still visible when the keyboard is closed. */
-@media (max-width: 768px) and (max-height: 500px) {
+@media (max-width: 768px) and (max-height: 700px) {
   body.view-ai #ai-view > .ai-disclaimer-card {
     display: none;
   }
