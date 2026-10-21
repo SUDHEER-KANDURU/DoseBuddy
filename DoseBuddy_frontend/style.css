@@ -135,8 +135,9 @@ p  { color: var(--text-secondary); }
   grid-template-areas: "sidebar topnav" "sidebar main";
   grid-template-columns: var(--sidebar-w) 1fr;
   grid-template-rows: var(--topnav-h) 1fr;
-  height: var(--app-viewport-height, 100dvh);
-  min-height: var(--app-viewport-height, 100dvh);
+  height: var(--app-viewport-height, 100vh);           /* fallback */
+  height: var(--app-viewport-height, 100dvh);          /* preferred — dvh shrinks on keyboard open */
+  min-height: 0;                                       /* must NOT pin to viewport height; JS variable handles it */
 }
 
 /* Hidden until JS shows it */
@@ -8463,6 +8464,14 @@ body.dark-mode .ai-other-option-send:focus-visible {
 
 body.view-ai .app-shell {
     overflow: hidden; /* AI view has a definite viewport; messages own scrolling. */
+    /* Ensure min-height never re-pins the shell above the visual viewport */
+    min-height: 0;
+}
+
+/* In AI view the body must not act as a competing scroll region */
+body.view-ai {
+    min-height: 0;
+    overflow: hidden;
 }
 
 body.view-ai .main-content {

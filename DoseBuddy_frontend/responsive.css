@@ -642,8 +642,40 @@ img, canvas, svg, video { max-width: 100%; }
   .card         { box-shadow: none; border: 1px solid #ccc; }
 }
 
-/* ============================================================
-   MOBILE AUDIT FIXES — v2
+/* ── AI Chat — keyboard & scroll fix (mobile) ────────────── */
+/*
+   ROOT CAUSES:
+   1. On Android Chrome, 100vh does NOT shrink when the virtual keyboard
+      opens. The JS-driven --app-viewport-height variable (set from
+      window.visualViewport.height) already updates correctly, but
+      min-height:var(--app-viewport-height,100dvh) on .app-shell was
+      re-pinning the container to the pre-keyboard height.
+      Fixed in style.css: min-height:0 on .app-shell (height alone sets
+      the size; min-height must not re-assert the old value).
+   2. Document-level scroll was competing with the chat-panel scroll on
+      mobile, causing awkward dual-scroll behavior.
+   3. The medical disclaimer could push the composer off-screen on very
+      short viewports (e.g. 320px height after keyboard opens).
+*/
+@media (max-width: 768px) {
+  /* Prevent the document from scrolling while the AI chat is active.
+     The chat-messages region is the ONE scroll area.
+     :has() is supported on all modern browsers (Chrome 105+, Safari 15.4+). */
+  html:has(body.view-ai) {
+    overflow: hidden;
+  }
+}
+
+/* Hide the medical disclaimer on very short viewports (keyboard open on
+   small phones) so the composer is never pushed off-screen. The disclaimer
+   is still visible when the keyboard is closed. */
+@media (max-width: 768px) and (max-height: 500px) {
+  body.view-ai #ai-view > .ai-disclaimer-card {
+    display: none;
+  }
+}
+
+
    Issues addressed:
    1. Today's Medicines — stacked cards, no horizontal scroll
    2. Sidebar — sticky footer, nav scrolls, 100dvh enforced
