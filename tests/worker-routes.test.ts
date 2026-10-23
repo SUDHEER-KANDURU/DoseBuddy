@@ -252,7 +252,10 @@ test("today logs return a saved TAKEN dose for legacy schema without time_zone o
     medicationId: 7,
     medicationName: "Current med",
     dosage: "5mg",
-    status: "TAKEN"
+    status: "TAKEN",
+    occurrence_id: null,
+    occurrence_state: null,
+    snooze_until: null
   }]);
 });
 

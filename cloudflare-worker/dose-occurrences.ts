@@ -26,7 +26,7 @@ function missingOccurrenceTimestamp(error: unknown, allowed: Set<string>): strin
 
 async function updateOccurrenceState(
   db: SqlConnection,
-  state: "TAKEN" | "MISSED",
+  state: "TAKEN" | "MISSED" | "SKIPPED",
   occurrenceId: number,
   timestamps: string[],
   predicate: string
@@ -38,7 +38,9 @@ async function updateOccurrenceState(
   while (true) {
     const assignments = state === "TAKEN"
       ? [...remaining].map(column => column === "taken_at" ? "taken_at=NOW(3)" : column === "missed_at" ? "missed_at=NULL" : "updated_at=NOW(3)")
-      : [...remaining].map(column => column === "missed_at" ? "missed_at=NOW(3)" : "updated_at=NOW(3)");
+      : state === "MISSED"
+      ? [...remaining].map(column => column === "missed_at" ? "missed_at=NOW(3)" : "updated_at=NOW(3)")
+      : [...remaining].map(column => column === "skipped_at" ? "skipped_at=NOW(3)" : "updated_at=NOW(3)");
     const set = [`state='${state}'`, ...assignments].join(",");
     try {
       const [result] = await db.query(`UPDATE dose_occurrences SET ${set} WHERE id=? AND ${predicate}`, [occurrenceId]);
@@ -83,6 +85,12 @@ export async function markOccurrenceMissed(db: SqlConnection, occurrenceId: numb
 
 export async function markOccurrenceTaken(db: SqlConnection, occurrenceId: number): Promise<boolean> {
   return updateOccurrenceState(db, "TAKEN", occurrenceId, ["taken_at", "missed_at", "updated_at"], "state IN ('PENDING','MISSED')");
+}
+
+export async function markOccurrenceSkipped(db: SqlConnection, occurrenceId: number): Promise<boolean> {
+  // Predicate deliberately excludes MISSED: a patient cannot skip a dose that
+  // was already auto-missed. They must use TAKEN to correct a MISSED state.
+  return updateOccurrenceState(db, "SKIPPED", occurrenceId, ["skipped_at", "updated_at"], "state='PENDING'");
 }
 
 export async function transact<T>(db: SqlConnection, operation: () => Promise<T>): Promise<T> {

@@ -1,7 +1,7 @@
 import { createConnection } from "mysql2/promise";
 import bcrypt from "bcryptjs";
 import { addLocalDays, canonicalTimeZone, occurrencesThroughInstant, resolveLocalOccurrence, zonedParts } from "./scheduling.ts";
-import { markOccurrenceMissed, markOccurrenceTaken, transact, upsertOccurrence } from "./dose-occurrences.ts";
+import { markOccurrenceMissed, markOccurrenceSkipped, markOccurrenceTaken, transact, upsertOccurrence } from "./dose-occurrences.ts";
 import { buildDoseNotificationPayload, claimDeliveryAttempt, finalizeDelivery, notificationEventId, obsoleteClaim, occurrenceIsCurrent, releaseUnstartedClaim, startDeliveryDispatch, type DeliveryClaim, type DeliveryOccurrence } from "./notification-delivery.ts";
 import { sendWebPush, type PushSubscriptionData } from "./web-push.ts";
 
@@ -269,7 +269,7 @@ async function upsertIntakeLog(db: any, row: {
   date: string;
   time: string;
   scheduledAt: unknown;
-  status: "TAKEN" | "MISSED";
+  status: "TAKEN" | "MISSED" | "SKIPPED";
 }): Promise<{ insertId: number }> {
   const [existingLogs] = await query<any[]>(db,
     "SELECT id FROM intake_logs WHERE marker_user_id=? AND medication_id=? AND date=? AND TIME_FORMAT(time,'%H:%i')=? ORDER BY id DESC LIMIT 1 FOR UPDATE",
@@ -281,8 +281,11 @@ async function upsertIntakeLog(db: any, row: {
       const values = includeOccurrenceId
         ? [row.occurrenceId, row.status, row.status, row.status, row.date, row.time, existingId]
         : [row.status, row.status, row.status, row.date, row.time, existingId];
+      // TAKEN is always terminal and cannot be downgraded.
+      // SKIPPED is accepted only if the current status is not TAKEN.
+      // MISSED is accepted only if the current status is not TAKEN.
       await query(db,
-        `UPDATE intake_logs SET ${setOccurrence}status=IF(?='TAKEN','TAKEN',IF(status='TAKEN','TAKEN','MISSED')),
+        `UPDATE intake_logs SET ${setOccurrence}status=IF(?='TAKEN','TAKEN',IF(status='TAKEN','TAKEN',?)),
            taken_time=IF(?='TAKEN',NOW(),taken_time),
            missed_time=IF(?='TAKEN',NULL,IF(status='TAKEN',NULL,NOW())),
            scheduled_time=CONCAT(?,' ',?),updated_at=NOW() WHERE id=?`, values);
@@ -2813,9 +2816,31 @@ const worker = {
           logMap.set(`${l.medication_id}_${l.time}`, l);
         }
 
+        // Build an occurrence map for the same user+date so we can return
+        // occurrence_id, occurrence_state, and snooze_until in each dose item.
+        // Wrapped in try/catch with optionalTableMissing guard so legacy schemas
+        // (without dose_occurrences) degrade gracefully.
+        const occurrenceMap = new Map<string, Json>();
+        try {
+          const [occRows] = await query<Json[]>(
+            env,
+            "SELECT id AS occurrence_id, medication_id, TIME_FORMAT(local_time,'%H:%i') AS local_time, state, snooze_until FROM dose_occurrences WHERE user_id=? AND local_date=?",
+            [target.id, todayStr]
+          );
+          if (Array.isArray(occRows)) {
+            for (const o of occRows) {
+              occurrenceMap.set(`${o.medication_id}_${o.local_time}`, o);
+            }
+          }
+        } catch (occErr) {
+          if (!optionalTableMissing(occErr, "dose_occurrences")) throw occErr;
+          // Legacy schema: no occurrence data available — occurrenceMap stays empty.
+        }
+
         const doses = meds.map(m => {
           const rawTime = String(m.time_of_day || "00:00:00").substring(0, 5);
           const foundLog = logMap.get(`${m.med_id}_${rawTime}`);
+          const foundOcc = occurrenceMap.get(`${m.med_id}_${rawTime}`);
           let status = "PENDING";
           let logId = null;
 
@@ -2824,6 +2849,13 @@ const worker = {
             logId = foundLog.id;
           }
 
+          // occurrence_state from dose_occurrences takes precedence when available
+          // because it is the authoritative ledger. Fall back to intake_log status.
+          const occurrenceState: string | null = foundOcc ? String(foundOcc.state) : null;
+          const snoozeUntil: string | null = foundOcc?.snooze_until
+            ? new Date(foundOcc.snooze_until).toISOString()
+            : null;
+
           return {
             id: logId,
             date: todayStr,
@@ -2831,7 +2863,10 @@ const worker = {
             medicationId: m.med_id,
             medicationName: m.med_name,
             dosage: m.dosage,
-            status
+            status,
+            occurrence_id: foundOcc ? Number(foundOcc.occurrence_id) : null,
+            occurrence_state: occurrenceState,
+            snooze_until: snoozeUntil
           };
         });
 
@@ -2842,8 +2877,9 @@ const worker = {
       if (path === "/api/logs/mark" && request.method === "POST") {
         const { body: b } = await requestBody(request);
         if (!b.medicationId || !b.date || !b.time) return json({ message: "Missing required fields" }, 400);
-        const status = String(b.status || "TAKEN").toUpperCase();
-        if (status !== "TAKEN" && status !== "MISSED") return json({ message: "Invalid dose status" }, 400);
+        const statusRaw = String(b.status || "TAKEN").toUpperCase();
+        if (!["TAKEN", "MISSED", "SKIPPED"].includes(statusRaw)) return json({ message: "Invalid dose status" }, 400);
+        const status = statusRaw as "TAKEN" | "MISSED" | "SKIPPED";
         let db: any = null;
         try {
           db = await getDbConnection(env);
@@ -2875,9 +2911,13 @@ const worker = {
                 medicationId: Number(med.id), userId: Number(med.user_id), scheduleVersion: Number(med.schedule_version ?? 1),
                 localDate: b.date, localTime, scheduledAtUtc: mysqlDateTime(resolveLocalOccurrence(b.date, localTime, zone))
               });
-              changed = status === "TAKEN"
-                ? await markOccurrenceTaken(db, occurrenceId)
-                : await markOccurrenceMissed(db, occurrenceId);
+              if (status === "TAKEN") {
+                changed = await markOccurrenceTaken(db, occurrenceId);
+              } else if (status === "SKIPPED") {
+                changed = await markOccurrenceSkipped(db, occurrenceId);
+              } else {
+                changed = await markOccurrenceMissed(db, occurrenceId);
+              }
             } catch (occErr) {
               if (!optionalTableMissing(occErr, "dose_occurrences")) throw occErr;
               occurrenceId = null;
@@ -2894,9 +2934,12 @@ const worker = {
             if (changed) {
               const activityMsg = status === "TAKEN"
                 ? `Took ${med.name} (${med.dosage}) at ${localTime}`
+                : status === "SKIPPED"
+                ? `Skipped ${med.name} (${med.dosage}) scheduled for ${localTime}`
                 : `Missed ${med.name} (${med.dosage}) scheduled for ${localTime}`;
+              const activityType = status === "TAKEN" ? "DOSE_TAKEN" : status === "SKIPPED" ? "DOSE_SKIPPED" : "DOSE_MISSED";
               await query(db, "INSERT INTO activities (user_id,type,message,related_entity_type,related_entity_id,created_at) VALUES (?,?,?,?,?,NOW())",
-                [actor.id, status === "TAKEN" ? "DOSE_TAKEN" : "DOSE_MISSED", activityMsg, "INTAKE_LOG", logResult.insertId]);
+                [actor.id, activityType, activityMsg, "INTAKE_LOG", logResult.insertId]);
             }
             return { success: true, logId: logResult.insertId };
           });
@@ -2970,6 +3013,53 @@ const worker = {
         } catch (error) {
           const message = error instanceof Error ? error.message : "Unable to mark dose missed";
           return json({ message }, message === "Access denied" ? 403 : 400);
+        } finally {
+          if (db) await db.end();
+        }
+      }
+
+      // ── Dose Snooze ─────────────────────────────────────────────────────────
+      const snoozeRoute = path.match(/^\/api\/doses\/(\d+)\/snooze$/);
+      if (snoozeRoute && request.method === "POST") {
+        const { body: b } = await requestBody(request);
+        const minutes = Number(b.minutes);
+        if (![15, 30, 60].includes(minutes)) return json({ message: "minutes must be 15, 30, or 60" }, 400);
+        const occurrenceId = Number(snoozeRoute[1]);
+        let db: any = null;
+        try {
+          db = await getDbConnection(env);
+          const result = await transact(db, async () => {
+            const [rows] = await db.query(
+              "SELECT id, user_id, medication_id, state, snooze_until FROM dose_occurrences WHERE id=? FOR UPDATE",
+              [occurrenceId]
+            );
+            const row = rows?.[0];
+            if (!row) throw Object.assign(new Error("Occurrence not found"), { statusCode: 404 });
+            const owner = await getUser(db, Number(row.user_id));
+            if (!owner || !accessible(actor, owner)) throw new Error("Access denied");
+            if (row.state !== "PENDING") throw Object.assign(
+              new Error(`Cannot snooze a dose that is already ${row.state}`),
+              { statusCode: 409 }
+            );
+            const snoozeUntil = mysqlDateTime(new Date(Date.now() + minutes * 60_000));
+            await db.query(
+              "UPDATE dose_occurrences SET snooze_until=?,updated_at=NOW(3) WHERE id=?",
+              [snoozeUntil, occurrenceId]
+            );
+            return { occurrenceId, snoozeUntil: new Date(Date.now() + minutes * 60_000).toISOString() };
+          });
+          return json(result);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Unable to snooze dose";
+          const statusCode = (error as any).statusCode;
+          if (message === "Access denied") return json({ message }, 403);
+          if (statusCode === 404) return json({ message }, 404);
+          if (statusCode === 409) return json({ message }, 409);
+          if (!optionalTableMissing(error, "dose_occurrences")) {
+            console.error("[Dose Snooze] Persistence failed", error instanceof Error ? error.message : error);
+            return json({ message: "Snooze could not be saved because of a server error. Please try again." }, 500);
+          }
+          return json({ message: "Snooze is not available on this deployment" }, 503);
         } finally {
           if (db) await db.end();
         }
@@ -3316,7 +3406,7 @@ const worker = {
 
         const days = Math.min(3650, Math.max(0, parseInt(url.searchParams.get("days") || "0", 10)));
         const zone = canonicalTimeZone(target.time_zone);
-        if (!zone) return json({ total: 0, taken: 0, missed: 0, pending: 0, adherencePercentage: 0, missedToday: 0, missedThisWeek: 0, missedThisMonth: 0, mostMissedMedicine: "-", mostMissedCount: 0 });
+        if (!zone) return json({ total: 0, taken: 0, missed: 0, skipped: 0, pending: 0, adherencePercentage: 0, missedToday: 0, missedThisWeek: 0, missedThisMonth: 0, mostMissedMedicine: "-", mostMissedCount: 0 });
         const today = zonedParts(Date.now(), zone).date;
         const filter = days > 0 ? "AND date>=?" : "";
 
@@ -3326,6 +3416,7 @@ const worker = {
              COUNT(*) AS total,
              SUM(status='TAKEN') AS taken,
              SUM(status='MISSED') AS missed,
+             SUM(status='SKIPPED') AS skipped,
              SUM(date=? AND status='MISSED') AS missedToday,
              SUM(date>=? AND status='MISSED') AS missedThisWeek,
              SUM(date>=? AND status='MISSED') AS missedThisMonth
@@ -3336,8 +3427,30 @@ const worker = {
         const total = Number(counts[0]?.total || 0);
         const taken = Number(counts[0]?.taken || 0);
         const missed = Number(counts[0]?.missed || 0);
-        const completed = taken + missed;
+        const skipped = Number(counts[0]?.skipped || 0);
+        // Adherence formula: taken / (taken + missed + skipped). Pending doses do not
+        // reduce the rate because they may still be taken; they are reported separately
+        // for UI display only. Do not silently change this formula without updating this
+        // comment and the corresponding test.
+        const completed = taken + missed + skipped;
         const adherencePercentage = completed > 0 ? Math.round((taken * 1000.0) / completed) / 10.0 : 0.0;
+
+        // Query dose_occurrences for PENDING records within the date window so that
+        // genuinely outstanding doses are surfaced to the UI. Wrapped in try/catch
+        // with optionalTableMissing guard so legacy schemas degrade to pending=0.
+        let pending = 0;
+        try {
+          const pendingFilter = days > 0 ? "AND local_date>=?" : "";
+          const [pendingRows] = await query<Json[]>(
+            env,
+            `SELECT COUNT(*) AS pending FROM dose_occurrences WHERE user_id=? AND state='PENDING' AND local_date<=? ${pendingFilter}`,
+            days > 0 ? [target.id, today, addLocalDays(today, -(days - 1))] : [target.id, today]
+          );
+          pending = Number(pendingRows[0]?.pending || 0);
+        } catch (pendingErr) {
+          if (!optionalTableMissing(pendingErr, "dose_occurrences")) throw pendingErr;
+          // Legacy schema without dose_occurrences: pending stays 0.
+        }
 
         const [mostMissedRows] = await query<Json[]>(
           env,
@@ -3349,7 +3462,8 @@ const worker = {
           total,
           taken,
           missed,
-          pending: 0,
+          skipped,
+          pending,
           adherencePercentage,
           missedToday: Number(counts[0]?.missedToday || 0),
           missedThisWeek: Number(counts[0]?.missedThisWeek || 0),

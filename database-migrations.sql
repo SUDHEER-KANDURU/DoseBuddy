@@ -223,3 +223,14 @@ PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 SET @sql = IF((SELECT COUNT(*) FROM information_schema.key_column_usage WHERE constraint_schema=DATABASE() AND table_name='push_delivery_attempts' AND column_name='subscription_id' AND referenced_table_name='push_subscriptions' AND referenced_column_name='id')=0,
   'ALTER TABLE push_delivery_attempts ADD CONSTRAINT fk_delivery_subscription FOREIGN KEY (subscription_id) REFERENCES push_subscriptions(id) ON DELETE CASCADE', 'DO 0');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- FEAT-001: Dose lifecycle — SKIPPED terminal state and snooze support.
+-- dose_occurrences.state VARCHAR(16) now accepts: 'PENDING','TAKEN','MISSED','SKIPPED'
+-- intake_logs.status VARCHAR now accepts: 'TAKEN','MISSED','SKIPPED'
+-- No DDL is required for VARCHAR columns — values are stored directly.
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='dose_occurrences' AND column_name='skipped_at')=0,
+  'ALTER TABLE dose_occurrences ADD COLUMN skipped_at DATETIME(3) NULL', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+SET @sql = IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='dose_occurrences' AND column_name='snooze_until')=0,
+  'ALTER TABLE dose_occurrences ADD COLUMN snooze_until DATETIME(3) NULL', 'DO 0');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
