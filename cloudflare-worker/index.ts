@@ -212,9 +212,10 @@ function timeZoneSchemaNotReady(error: unknown) {
 }
 
 function columnMissing(error: unknown, column: string) {
-  const e = error as { code?: unknown; message?: unknown; sqlMessage?: unknown };
+  const e = error as { code?: unknown; errno?: unknown; message?: unknown; sqlMessage?: unknown };
   const message = [e.message, e.sqlMessage].filter(value => typeof value === "string").join(" ");
-  return e.code === "ER_BAD_FIELD_ERROR" && new RegExp(`\\b${column}\\b`, "i").test(message);
+  const isBadField = e.code === "ER_BAD_FIELD_ERROR" || e.errno === 1054;
+  return isBadField && new RegExp(`\\b${column}\\b`, "i").test(message);
 }
 
 // True ONLY when `error` confirms the named optional notification-era table is
@@ -2818,15 +2819,28 @@ const worker = {
 
         // Build an occurrence map for the same user+date so we can return
         // occurrence_id, occurrence_state, and snooze_until in each dose item.
-        // Wrapped in try/catch with optionalTableMissing guard so legacy schemas
-        // (without dose_occurrences) degrade gracefully.
+        // Wrapped in try/catch with optionalTableMissing and columnMissing guards
+        // so legacy schemas (without dose_occurrences or without snooze_until)
+        // degrade gracefully.
         const occurrenceMap = new Map<string, Json>();
         try {
-          const [occRows] = await query<Json[]>(
-            env,
-            "SELECT id AS occurrence_id, medication_id, TIME_FORMAT(local_time,'%H:%i') AS local_time, state, snooze_until FROM dose_occurrences WHERE user_id=? AND local_date=?",
-            [target.id, todayStr]
-          );
+          let occRows: Json[] | undefined;
+          try {
+            const [rows] = await query<Json[]>(
+              env,
+              "SELECT id AS occurrence_id, medication_id, TIME_FORMAT(local_time,'%H:%i') AS local_time, state, snooze_until FROM dose_occurrences WHERE user_id=? AND local_date=?",
+              [target.id, todayStr]
+            );
+            occRows = rows;
+          } catch (columnErr) {
+            if (!columnMissing(columnErr, "snooze_until")) throw columnErr;
+            const [fallbackRows] = await query<Json[]>(
+              env,
+              "SELECT id AS occurrence_id, medication_id, TIME_FORMAT(local_time,'%H:%i') AS local_time, state FROM dose_occurrences WHERE user_id=? AND local_date=?",
+              [target.id, todayStr]
+            );
+            occRows = fallbackRows;
+          }
           if (Array.isArray(occRows)) {
             for (const o of occRows) {
               occurrenceMap.set(`${o.medication_id}_${o.local_time}`, o);
@@ -3055,7 +3069,7 @@ const worker = {
           if (message === "Access denied") return json({ message }, 403);
           if (statusCode === 404) return json({ message }, 404);
           if (statusCode === 409) return json({ message }, 409);
-          if (!optionalTableMissing(error, "dose_occurrences")) {
+          if (!optionalTableMissing(error, "dose_occurrences") && !columnMissing(error, "snooze_until")) {
             console.error("[Dose Snooze] Persistence failed", error instanceof Error ? error.message : error);
             return json({ message: "Snooze could not be saved because of a server error. Please try again." }, 500);
           }

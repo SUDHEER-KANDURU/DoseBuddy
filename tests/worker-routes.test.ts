@@ -259,6 +259,95 @@ test("today logs return a saved TAKEN dose for legacy schema without time_zone o
   }]);
 });
 
+test("today logs degrade gracefully when dose_occurrences lacks snooze_until column", async () => {
+  class MissingSnoozeColumnDb extends RouteDbAdapter {
+    async query(statement: string, values: unknown[] = []): Promise<any> {
+      if (statement.includes("FROM dose_occurrences") && statement.includes("snooze_until")) {
+        this.calls.push([statement, values]);
+        throw Object.assign(new Error("Unknown column 'snooze_until' in 'field list'"), { code: "ER_BAD_FIELD_ERROR", errno: 1054 });
+      }
+      if (statement.includes("FROM dose_occurrences") && !statement.includes("snooze_until")) {
+        this.calls.push([statement, values]);
+        return [[{ occurrence_id: 42, medication_id: 7, local_time: "08:00", state: "PENDING" }], undefined];
+      }
+      if (statement.includes("FROM medications m JOIN medication_times") && statement.includes("m.user_id=?")) {
+        this.calls.push([statement, values]);
+        return [[{ med_id: 7, med_name: this.medication.name, dosage: this.medication.dosage, time_of_day: "08:00:00" }], undefined];
+      }
+      if (statement.startsWith("SELECT id, medication_id, DATE_FORMAT(date")) {
+        this.calls.push([statement, values]);
+        return [[], undefined];
+      }
+      return super.query(statement, values);
+    }
+  }
+
+  const db = new MissingSnoozeColumnDb();
+  const { accessToken } = await login(db);
+  const today = await worker.fetch(authorized("/api/logs/today/1?date=2026-10-31", accessToken), env(db));
+  assert.equal(today.status, 200);
+  assert.deepEqual(await today.json(), [{
+    id: null,
+    date: "2026-10-31",
+    time: "08:00",
+    medicationId: 7,
+    medicationName: "Current med",
+    dosage: "5mg",
+    status: "PENDING",
+    occurrence_id: 42,
+    occurrence_state: "PENDING",
+    snooze_until: null
+  }]);
+});
+
+test("today logs returns HTTP 200 with empty array when user has zero scheduled medications even if snooze_until is missing", async () => {
+  class EmptyMedsDb extends RouteDbAdapter {
+    async query(statement: string, values: unknown[] = []): Promise<any> {
+      if (statement.includes("FROM medications m JOIN medication_times") && statement.includes("m.user_id=?")) {
+        this.calls.push([statement, values]);
+        return [[], undefined];
+      }
+      if (statement.startsWith("SELECT id, medication_id, DATE_FORMAT(date")) {
+        this.calls.push([statement, values]);
+        return [[], undefined];
+      }
+      if (statement.includes("FROM dose_occurrences") && statement.includes("snooze_until")) {
+        this.calls.push([statement, values]);
+        throw Object.assign(new Error("Unknown column 'snooze_until' in 'field list'"), { code: "ER_BAD_FIELD_ERROR", errno: 1054 });
+      }
+      if (statement.includes("FROM dose_occurrences") && !statement.includes("snooze_until")) {
+        this.calls.push([statement, values]);
+        return [[], undefined];
+      }
+      return super.query(statement, values);
+    }
+  }
+
+  const db = new EmptyMedsDb();
+  const { accessToken } = await login(db);
+  const today = await worker.fetch(authorized("/api/logs/today/1?date=2026-10-31", accessToken), env(db));
+  assert.equal(today.status, 200);
+  assert.deepEqual(await today.json(), []);
+});
+
+test("snooze route returns HTTP 503 instead of 500 when snooze_until column is missing", async () => {
+  class MissingSnoozeColumnDb extends RouteDbAdapter {
+    async query(statement: string, values: unknown[] = []): Promise<any> {
+      if (statement.includes("SELECT id, user_id, medication_id, state, snooze_until FROM dose_occurrences")) {
+        this.calls.push([statement, values]);
+        throw Object.assign(new Error("Unknown column 'snooze_until' in 'field list'"), { code: "ER_BAD_FIELD_ERROR", errno: 1054 });
+      }
+      return super.query(statement, values);
+    }
+  }
+
+  const db = new MissingSnoozeColumnDb();
+  const { accessToken } = await login(db);
+  const resp = await worker.fetch(authorized("/api/doses/42/snooze", accessToken, "POST", { minutes: 15 }), env(db));
+  assert.equal(resp.status, 503);
+  assert.deepEqual(await resp.json(), { message: "Snooze is not available on this deployment" });
+});
+
 test("medication ownership is enforced by the production update route", async () => {
   const db = new RouteDbAdapter();
   const { accessToken } = await login(db, caregiver.email);
