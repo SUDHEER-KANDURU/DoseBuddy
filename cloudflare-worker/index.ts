@@ -280,15 +280,15 @@ async function upsertIntakeLog(db: any, row: {
     const update = async (includeOccurrenceId: boolean) => {
       const setOccurrence = includeOccurrenceId ? "occurrence_id=?," : "";
       const values = includeOccurrenceId
-        ? [row.occurrenceId, row.status, row.status, row.status, row.date, row.time, existingId]
-        : [row.status, row.status, row.status, row.date, row.time, existingId];
+        ? [row.occurrenceId, row.status, row.status, row.status, row.status, row.date, row.time, existingId]
+        : [row.status, row.status, row.status, row.status, row.date, row.time, existingId];
       // TAKEN is always terminal and cannot be downgraded.
       // SKIPPED is accepted only if the current status is not TAKEN.
       // MISSED is accepted only if the current status is not TAKEN.
       await query(db,
         `UPDATE intake_logs SET ${setOccurrence}status=IF(?='TAKEN','TAKEN',IF(status='TAKEN','TAKEN',?)),
            taken_time=IF(?='TAKEN',NOW(),taken_time),
-           missed_time=IF(?='TAKEN',NULL,IF(status='TAKEN',NULL,NOW())),
+           missed_time=IF(?='MISSED',IF(status='TAKEN',NULL,NOW()),NULL),
            scheduled_time=CONCAT(?,' ',?),updated_at=NOW() WHERE id=?`, values);
     };
     if (row.occurrenceId == null) {
@@ -317,7 +317,7 @@ async function upsertIntakeLog(db: any, row: {
       `INSERT INTO intake_logs (${columns}) VALUES (${valuesSql})
        ON DUPLICATE KEY UPDATE status=IF(VALUES(status)='TAKEN','TAKEN',status),
          taken_time=IF(VALUES(status)='TAKEN',NOW(),taken_time),
-         missed_time=IF(VALUES(status)='TAKEN',NULL,IF(status='TAKEN',NULL,NOW())),
+         missed_time=IF(VALUES(status)='MISSED',IF(status='TAKEN',NULL,NOW()),NULL),
          updated_at=NOW(),id=LAST_INSERT_ID(id)`, values);
     return result;
   };

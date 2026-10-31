@@ -15,8 +15,9 @@ export interface OccurrenceIdentity {
 }
 
 function missingOccurrenceTimestamp(error: unknown, allowed: Set<string>): string | null {
-  const e = error as { code?: unknown; message?: unknown; sqlMessage?: unknown };
-  if (e.code !== "ER_BAD_FIELD_ERROR") return null;
+  const e = error as { code?: unknown; errno?: unknown; message?: unknown; sqlMessage?: unknown };
+  const isBadField = e.code === "ER_BAD_FIELD_ERROR" || e.errno === 1054;
+  if (!isBadField) return null;
   const message = [e.message, e.sqlMessage].filter(value => typeof value === "string").join(" ");
   for (const column of allowed) {
     if (new RegExp(`\\b${column}\\b`, "i").test(message)) return column;

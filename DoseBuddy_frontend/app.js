@@ -2942,6 +2942,8 @@ async function markDoseTaken(userId, medId, dateStr, timeStr, medName = "", targ
         status: "TAKEN",
     };
 
+    const initialButtonText = targetButton ? targetButton.textContent : "";
+
     if (targetButton) {
         targetButton.textContent = "Marking...";
         targetButton.disabled = true;
@@ -2957,7 +2959,7 @@ async function markDoseTaken(userId, medId, dateStr, timeStr, medName = "", targ
             const detail = await res.text().catch(() => "");
             console.error("Failed to save dose status:", res.status, detail);
             if (targetButton) {
-                targetButton.textContent = "Mark taken";
+                targetButton.textContent = initialButtonText || "Mark taken";
                 targetButton.disabled = false;
             }
             let message = "Failed to mark dose as taken. Please try again.";
@@ -2985,7 +2987,7 @@ async function markDoseTaken(userId, medId, dateStr, timeStr, medName = "", targ
     } catch (err) {
         console.error(err);
         if (targetButton) {
-            targetButton.textContent = "Mark taken";
+            targetButton.textContent = initialButtonText || "Mark taken";
             targetButton.disabled = false;
         }
         showToast("Network error. Please try again.", "error");

@@ -1315,3 +1315,151 @@ test("ai chat personal-phrase MEDICINE_INFO returns QUESTION/MEDICINE_SELECTION 
     globalThis.fetch = originalFetch;
   }
 });
+
+test("mark dose as TAKEN correctly updates an existing intake log row (e.g. MISSED to TAKEN) with exact parameter binding", async () => {
+  class StrictExistingLogDb extends RouteDbAdapter {
+    existingLog = { id: 42, marker_user_id: 1, medication_id: 7, date: "2026-10-31", time: "20:53:00", status: "MISSED" };
+    updatedStatus: string | null = null;
+    updatedValues: unknown[] | null = null;
+
+    async query(statement: string, values: unknown[] = []): Promise<any> {
+      // Validate that all prepared statements have matching ? placeholder count and values array length
+      const expectedParams = (statement.match(/\?/g) || []).length;
+      if (values.length !== expectedParams) {
+        throw Object.assign(
+          new Error(`Incorrect number of arguments for prepared statement (expected ${expectedParams}, got ${values.length})`),
+          { code: "ER_WRONG_ARGUMENTS", errno: 1210 }
+        );
+      }
+
+      if (statement.includes("FROM intake_logs WHERE marker_user_id=?") && statement.includes("FOR UPDATE")) {
+        this.calls.push([statement, values]);
+        return [[this.existingLog], undefined];
+      }
+
+      if (statement.startsWith("UPDATE intake_logs")) {
+        this.calls.push([statement, values]);
+        this.updatedValues = values;
+        this.updatedStatus = String(values[1]); // row.status
+        return [{ affectedRows: 1 }, undefined];
+      }
+
+      if (statement.includes("FROM dose_occurrences WHERE medication_id=?")) {
+        this.calls.push([statement, values]);
+        return [[{ id: 101, state: "MISSED" }], undefined];
+      }
+
+      return super.query(statement, values);
+    }
+  }
+
+  const db = new StrictExistingLogDb();
+  const { accessToken } = await login(db);
+  const resp = await worker.fetch(authorized("/api/logs/mark", accessToken, "POST", {
+    medicationId: 7,
+    date: "2026-10-31",
+    time: "20:53",
+    status: "TAKEN"
+  }), env(db));
+
+  assert.equal(resp.status, 200);
+  const body = await resp.json() as any;
+  assert.equal(body.success, true);
+  assert.equal(body.logId, 42);
+  assert.equal(db.updatedStatus, "TAKEN");
+  assert.ok(db.calls.some(([sql]) => sql.startsWith("UPDATE intake_logs") && sql.includes("occurrence_id=?")));
+});
+
+test("mark dose as SKIPPED correctly updates an existing intake log without setting missed_time", async () => {
+  class StrictSkipDb extends RouteDbAdapter {
+    existingLog = { id: 43, marker_user_id: 1, medication_id: 7, date: "2026-10-31", time: "20:53:00", status: "PENDING" };
+    updatedValues: unknown[] | null = null;
+
+    async query(statement: string, values: unknown[] = []): Promise<any> {
+      const expectedParams = (statement.match(/\?/g) || []).length;
+      if (values.length !== expectedParams) {
+        throw Object.assign(
+          new Error(`Incorrect number of arguments for prepared statement (expected ${expectedParams}, got ${values.length})`),
+          { code: "ER_WRONG_ARGUMENTS", errno: 1210 }
+        );
+      }
+
+      if (statement.includes("FROM intake_logs WHERE marker_user_id=?") && statement.includes("FOR UPDATE")) {
+        this.calls.push([statement, values]);
+        return [[this.existingLog], undefined];
+      }
+
+      if (statement.startsWith("UPDATE intake_logs")) {
+        this.calls.push([statement, values]);
+        this.updatedValues = values;
+        return [{ affectedRows: 1 }, undefined];
+      }
+
+      return super.query(statement, values);
+    }
+  }
+
+  const db = new StrictSkipDb();
+  const { accessToken } = await login(db);
+  const resp = await worker.fetch(authorized("/api/logs/mark", accessToken, "POST", {
+    medicationId: 7,
+    date: "2026-10-31",
+    time: "20:53",
+    status: "SKIPPED"
+  }), env(db));
+
+  assert.equal(resp.status, 200);
+  const body = await resp.json() as any;
+  assert.equal(body.success, true);
+  assert.equal(body.logId, 43);
+});
+
+test("mark dose updates legacy intake_logs when occurrence_id column is missing", async () => {
+  class MissingOccurrenceColumnDb extends RouteDbAdapter {
+    existingLog = { id: 44, marker_user_id: 1, medication_id: 7, date: "2026-10-31", time: "20:53:00", status: "MISSED" };
+    fallbackUpdateCalled = false;
+
+    async query(statement: string, values: unknown[] = []): Promise<any> {
+      const expectedParams = (statement.match(/\?/g) || []).length;
+      if (values.length !== expectedParams) {
+        throw Object.assign(
+          new Error(`Incorrect number of arguments for prepared statement (expected ${expectedParams}, got ${values.length})`),
+          { code: "ER_WRONG_ARGUMENTS", errno: 1210 }
+        );
+      }
+
+      if (statement.includes("FROM intake_logs WHERE marker_user_id=?") && statement.includes("FOR UPDATE")) {
+        this.calls.push([statement, values]);
+        return [[this.existingLog], undefined];
+      }
+
+      if (statement.startsWith("UPDATE intake_logs") && statement.includes("occurrence_id=?")) {
+        this.calls.push([statement, values]);
+        throw Object.assign(new Error("Unknown column 'occurrence_id' in 'field list'"), { code: "ER_BAD_FIELD_ERROR", errno: 1054 });
+      }
+
+      if (statement.startsWith("UPDATE intake_logs") && !statement.includes("occurrence_id=?")) {
+        this.calls.push([statement, values]);
+        this.fallbackUpdateCalled = true;
+        return [{ affectedRows: 1 }, undefined];
+      }
+
+      return super.query(statement, values);
+    }
+  }
+
+  const db = new MissingOccurrenceColumnDb();
+  const { accessToken } = await login(db);
+  const resp = await worker.fetch(authorized("/api/logs/mark", accessToken, "POST", {
+    medicationId: 7,
+    date: "2026-10-31",
+    time: "20:53",
+    status: "TAKEN"
+  }), env(db));
+
+  assert.equal(resp.status, 200);
+  const body = await resp.json() as any;
+  assert.equal(body.success, true);
+  assert.equal(body.logId, 44);
+  assert.equal(db.fallbackUpdateCalled, true);
+});
