@@ -397,6 +397,7 @@ const ACTIVITY_TYPES = {
     MEDICINE_ADDED:        { icon: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/></svg>`, dot: "activity-dot-added",    badge: "badge-blue",   label: "Medicine Added"    },
     DOSE_TAKEN:            { icon: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>`, dot: "activity-dot-taken",    badge: "badge-green",  label: "Dose Taken"        },
     DOSE_MISSED:           { icon: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>`, dot: "activity-dot-missed",   badge: "badge-red",    label: "Missed Dose"       },
+    DOSE_SKIPPED:          { icon: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6l4 2m6-2a8 8 0 11-16 0 8 8 0 0116 0z"/></svg>`, dot: "activity-dot-skipped", badge: "badge-amber", label: "Dose Skipped"     },
     DOSE_SCHEDULED:        { icon: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.253M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5"/></svg>`, dot: "activity-dot-pending",  badge: "badge-blue",   label: "Dose Scheduled"    },
     BMI_CALCULATED:        { icon: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/></svg>`, dot: "activity-dot-bmi",      badge: "badge-purple", label: "BMI Updated"       },
     SYMPTOM_CHECK:         { icon: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z"/></svg>`, dot: "activity-dot-symptom",  badge: "badge-orange", label: "Symptom Check"     },
@@ -551,7 +552,7 @@ async function logMissedDoseActivities(meds, todayStr) {
             const doseMinutes = h * 60 + m;
             if (nowMinutes - doseMinutes > 5) {
                 const status = getDoseStatus(currentUser.id, med.id, todayStr, timeStr);
-                if (status !== "TAKEN" && status !== "MISSED") {
+                if (status !== "TAKEN" && status !== "MISSED" && status !== "SKIPPED") {
                     missedEntries.push({
                         userId: currentUser.id,
                         medicationId: med.id,
@@ -2419,13 +2420,14 @@ async function renderDashboard() {
 
         tbody.innerHTML = "";
         noMedsMsg.style.display = "none";
-        // On mobile (≤767px) the table is reflowed as cards using display:block
-        scheduleTable.style.display = window.innerWidth <= 767 ? "block" : "table";
+        // Clear inline display style so CSS stylesheet rules (table on desktop, cards on mobile) apply
+        scheduleTable.style.display = "";
 
         const nowMinutes = today.getHours() * 60 + today.getMinutes();
         let totalDoses = 0;
         let takenDoses = 0;
         let missedDoses = 0;
+        let skippedDoses = 0;
 
         meds.forEach((med) => {
             if (!Array.isArray(med.times)) return;
@@ -2444,6 +2446,14 @@ async function renderDashboard() {
                 );
                 if (doseStatus === "TAKEN")  takenDoses++;
                 if (doseStatus === "MISSED") missedDoses++;
+                if (doseStatus === "SKIPPED") skippedDoses++;
+                // Resolve the matching log entry (carries occurrence_id / snooze_until
+                // added by FEAT-001) so the status pill, snooze badge, and action
+                // controls can use the backend occurrence state.
+                const doseLog = logs.find(
+                    (l) => (l.medId === med.id || l.medicationId === med.id) && l.date === todayStr && l.time === displayTime
+                ) || null;
+                const occurrenceId = doseLog && doseLog.occurrence_id != null ? Number(doseLog.occurrence_id) : null;
                 const timeCell = document.createElement("td");
                 timeCell.textContent = displayTime;
                 const nameCell = document.createElement("td");
@@ -2461,6 +2471,9 @@ async function renderDashboard() {
                 if (doseStatus === "TAKEN") {
                     statusSpan.classList.add("status-taken");
                     statusSpan.textContent = "Taken";
+                } else if (doseStatus === "SKIPPED") {
+                    statusSpan.classList.add("status-skipped");
+                    statusSpan.textContent = "Skipped";
                 } else if (doseStatus === "MISSED") {
                     statusSpan.classList.add("status-missed");
                     statusSpan.textContent = "Missed";
@@ -2479,32 +2492,101 @@ async function renderDashboard() {
                 }
                 statusCell.appendChild(statusSpan);
 
+                let snoozeBadge = null;
+                if (doseStatus === "PENDING" && doseLog && doseLog.snooze_until) {
+                    const snoozeDate = new Date(doseLog.snooze_until);
+                    if (!isNaN(snoozeDate.getTime()) && snoozeDate.getTime() > Date.now()) {
+                        snoozeBadge = document.createElement("span");
+                        snoozeBadge.className = "snooze-badge";
+                        snoozeBadge.textContent = "Snoozed " + snoozeDate.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+                        statusCell.appendChild(snoozeBadge);
+                    }
+                }
+
                 const actionCell = document.createElement("td");
-                const btn = document.createElement("button");
+                const actionWrapper = document.createElement("div");
+                actionWrapper.className = "action-cell dose-action-group";
+
+                const lockGroup = () => actionWrapper.querySelectorAll("button, select").forEach((el) => (el.disabled = true));
 
                 if (doseStatus === "TAKEN") {
-                    btn.textContent = "Taken";
-                    btn.className = "action-btn action-btn-disabled";
-                    btn.disabled = true;
-                } else {
-                    // A MISSED dose can still be corrected if the patient did
-                    // take it late; the Worker serializes this against Cron.
-                    btn.textContent = doseStatus === "MISSED" ? "Mark taken late" : "Mark taken";
-                    btn.className = "action-btn action-btn-take";
-                    btn.addEventListener("click", async (event) => {
-                        const clickedButton = event.currentTarget;
-                        const saved = await markDoseTaken(
-                            currentUser.id,
-                            med.id,
-                            todayStr,
-                            displayTime,
-                            med.name,
-                            clickedButton
-                        );
-                        if (saved) {
-                            renderDashboard().catch(err => console.warn("Dashboard refresh after dose update failed:", err));
-                        }
+                    const takenBtn = document.createElement("button");
+                    takenBtn.textContent = "Taken";
+                    takenBtn.className = "action-btn action-btn-disabled";
+                    takenBtn.disabled = true;
+                    actionWrapper.appendChild(takenBtn);
+                } else if (doseStatus === "SKIPPED") {
+                    const skippedBtn = document.createElement("button");
+                    skippedBtn.textContent = "Skipped";
+                    skippedBtn.className = "action-btn action-btn-disabled";
+                    skippedBtn.disabled = true;
+                    actionWrapper.appendChild(skippedBtn);
+                } else if (doseStatus === "MISSED") {
+                    // A MISSED dose can still be corrected late; the Worker serializes this.
+                    const lateBtn = document.createElement("button");
+                    lateBtn.textContent = "Mark taken late";
+                    lateBtn.className = "action-btn action-btn-take";
+                    lateBtn.addEventListener("click", async (event) => {
+                        lockGroup();
+                        const saved = await markDoseTaken(currentUser.id, med.id, todayStr, displayTime, med.name, event.currentTarget);
+                        if (saved) renderDashboard().catch((err) => console.warn("Dashboard refresh after dose update failed:", err));
                     });
+                    actionWrapper.appendChild(lateBtn);
+                } else {
+                    // PENDING: Mark taken + Skip + Snooze (snooze hidden when occurrence_id is null/legacy).
+                    const takeBtn = document.createElement("button");
+                    takeBtn.textContent = "Mark taken";
+                    takeBtn.className = "action-btn action-btn-take";
+                    takeBtn.addEventListener("click", async (event) => {
+                        lockGroup();
+                        const saved = await markDoseTaken(currentUser.id, med.id, todayStr, displayTime, med.name, event.currentTarget);
+                        if (saved) renderDashboard().catch((err) => console.warn("Dashboard refresh after dose update failed:", err));
+                    });
+                    actionWrapper.appendChild(takeBtn);
+
+                    const skipBtn = document.createElement("button");
+                    skipBtn.textContent = "Skip";
+                    skipBtn.className = "action-btn action-btn-skip";
+                    skipBtn.addEventListener("click", async (event) => {
+                        lockGroup();
+                        await markDoseSkipped(currentUser.id, med.id, todayStr, displayTime, med.name, event.currentTarget);
+                    });
+                    actionWrapper.appendChild(skipBtn);
+
+                    if (occurrenceId != null) {
+                        const snoozeSelect = document.createElement("select");
+                        snoozeSelect.className = "snooze-select";
+                        snoozeSelect.title = "Snooze reminder";
+                        const placeholder = document.createElement("option");
+                        placeholder.value = "";
+                        placeholder.textContent = "Snooze…";
+                        snoozeSelect.appendChild(placeholder);
+                        [15, 30, 60].forEach((mins) => {
+                            const opt = document.createElement("option");
+                            opt.value = String(mins);
+                            opt.textContent = `${mins} min`;
+                            snoozeSelect.appendChild(opt);
+                        });
+                        snoozeSelect.addEventListener("change", async (event) => {
+                            const sel = event.currentTarget;
+                            const mins = Number(sel.value);
+                            if (!mins) return;
+                            lockGroup();
+                            const res = await snoozeDose(occurrenceId, mins);
+                            if (res.ok && res.snoozeUntil) {
+                                const d = new Date(res.snoozeUntil);
+                                if (!snoozeBadge) {
+                                    snoozeBadge = document.createElement("span");
+                                    snoozeBadge.className = "snooze-badge";
+                                    statusCell.appendChild(snoozeBadge);
+                                }
+                                snoozeBadge.textContent = "Snoozed " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+                                snoozeBadge.style.display = "";
+                            }
+                            sel.disabled = false; // allow re-snoozing; other controls stay locked while pending
+                        });
+                        actionWrapper.appendChild(snoozeSelect);
+                    }
                 }
 
                 let deleteBtn = null;
@@ -2523,12 +2605,7 @@ async function renderDashboard() {
                         deleteBtn.disabled = true;
                     }
                 }
-                const actionWrapper = document.createElement("div");
-                actionWrapper.className = "action-cell";
-                actionWrapper.appendChild(btn);
-                if (deleteBtn) {
-                    actionWrapper.appendChild(deleteBtn);
-                }
+                if (deleteBtn) actionWrapper.appendChild(deleteBtn);
                 actionCell.appendChild(actionWrapper);
 
                 tr.appendChild(timeCell);
@@ -2547,14 +2624,14 @@ async function renderDashboard() {
         const pendingElem  = document.getElementById("pendingDoses");
         const adherenceElem = document.getElementById("adherence");
 
-        const pending = Math.max(0, totalDoses - takenDoses - missedDoses);
+        const pending = Math.max(0, totalDoses - takenDoses - missedDoses - skippedDoses);
         const completedDoses = takenDoses + missedDoses;
         const percent = completedDoses === 0 ? 0 : Math.round((takenDoses / completedDoses) * 100);
 
         if (statsElem && totalDoses > 0) {
             statsElem.textContent =
                 `Today: ${totalDoses} doses · ` +
-                `${takenDoses} taken · ${missedDoses > 0 ? missedDoses + " missed · " : ""}${pending} pending`;
+                `${takenDoses} taken · ${missedDoses > 0 ? missedDoses + " missed · " : ""}${skippedDoses > 0 ? skippedDoses + " skipped · " : ""}${pending} pending`;
         }
 
         if (totalElem)    totalElem.textContent    = totalDoses;
@@ -2792,6 +2869,7 @@ async function renderHistory() {
                 tr.classList.add("hist-row-missed");
                 tr.style.boxShadow = "0 0 0 1px rgba(239, 68, 68, 0.2)";
             }
+            if (statusLower === "skipped") tr.classList.add("hist-row-skipped");
             if (statusLower === "pending") tr.classList.add("hist-row-pending");
 
             const dateTd = document.createElement("td");
@@ -2815,6 +2893,7 @@ async function renderHistory() {
             statusPill.className = "status-pill";
             if (statusLower === "taken")        statusPill.classList.add("status-taken");
             else if (statusLower === "missed")  statusPill.classList.add("status-missed");
+            else if (statusLower === "skipped") statusPill.classList.add("status-skipped");
             else                                statusPill.classList.add("status-pending");
             statusPill.textContent = log.status;
             statusTd.appendChild(statusPill);
@@ -2847,6 +2926,7 @@ function getDoseStatus(userId, medId, dateStr, timeStr) {
     // ordering.
     const statuses = entries.map(entry => (entry.status || "").toUpperCase());
     if (statuses.includes("TAKEN")) return "TAKEN";
+    if (statuses.includes("SKIPPED")) return "SKIPPED";
     if (statuses.includes("MISSED")) return "MISSED";
     return "PENDING";
 }
@@ -2910,6 +2990,98 @@ async function markDoseTaken(userId, medId, dateStr, timeStr, medName = "", targ
         }
         showToast("Network error. Please try again.", "error");
         return false;
+    }
+}
+
+async function markDoseSkipped(userId, medId, dateStr, timeStr, medName = "", targetButton = null) {
+    const body = { userId, medicationId: medId, date: dateStr, time: timeStr, status: "SKIPPED" };
+    if (targetButton) {
+        targetButton.textContent = "Skipping...";
+        targetButton.disabled = true;
+    }
+    try {
+        const res = await authFetch(`${API_BASE}/logs/mark`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+        });
+        // 409 (already terminal) is idempotent — treat as success.
+        if (res.status === 409) {
+            invalidateDataCache("/logs/today/", "/logs/summary/", "/logs/adherence/", "/streaks/");
+            renderDashboard().catch((err) => console.warn("Dashboard refresh after skip failed:", err));
+            return true;
+        }
+        if (!res.ok) {
+            const detail = await res.text().catch(() => "");
+            console.error("Failed to skip dose:", res.status, detail);
+            if (targetButton) {
+                targetButton.textContent = "Skip";
+                targetButton.disabled = false;
+            }
+            let message = "Failed to skip dose. Please try again.";
+            try {
+                const errBody = JSON.parse(detail);
+                if (typeof errBody.message === "string" && errBody.message) message = errBody.message;
+            } catch { /* keep the safe generic message for non-JSON errors */ }
+            showToast(message, "error", 6000);
+            return false;
+        }
+        const entry = logs.find((l) => (l.medId === medId || l.medicationId === medId) && l.date === dateStr && l.time === timeStr);
+        if (entry) entry.status = "SKIPPED";
+        invalidateDataCache("/logs/today/", "/logs/summary/", "/logs/adherence/", "/streaks/");
+        if (medName) {
+            addNotification(
+                "adherence",
+                `${medName} marked as skipped`,
+                `Dose at ${timeStr} skipped for ${dateStr}.`
+            );
+        }
+        renderDashboard().catch((err) => console.warn("Dashboard refresh after skip failed:", err));
+        return true;
+    } catch (err) {
+        console.error(err);
+        if (targetButton) {
+            targetButton.textContent = "Skip";
+            targetButton.disabled = false;
+        }
+        showToast("Network error. Please try again.", "error");
+        return false;
+    }
+}
+
+async function snoozeDose(occurrenceId, minutes) {
+    if (occurrenceId == null) return { ok: false, snoozeUntil: null };
+    try {
+        const res = await authFetch(`${API_BASE}/doses/${occurrenceId}/snooze`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ minutes }),
+        });
+        if (res.status === 409) {
+            showToast("This dose has already been completed", "error", 6000);
+            return { ok: false, snoozeUntil: null };
+        }
+        if (!res.ok) {
+            const detail = await res.text().catch(() => "");
+            console.error("Failed to snooze dose:", res.status, detail);
+            let message = "Could not snooze the dose. Please try again.";
+            try {
+                const errBody = JSON.parse(detail);
+                if (typeof errBody.message === "string" && errBody.message) message = errBody.message;
+            } catch { /* keep the safe generic message for non-JSON errors */ }
+            showToast(message, "error", 6000);
+            return { ok: false, snoozeUntil: null };
+        }
+        const data = await res.json().catch(() => ({}));
+        const snoozeUntil = data.snoozeUntil || null;
+        const entry = logs.find((l) => l.occurrence_id === Number(occurrenceId));
+        if (entry) entry.snooze_until = snoozeUntil;
+        addNotification("adherence", `Reminder snoozed for ${minutes} minutes`, `Dose reminder rescheduled.`);
+        return { ok: true, snoozeUntil };
+    } catch (err) {
+        console.error(err);
+        showToast("Network error. Please try again.", "error");
+        return { ok: false, snoozeUntil: null };
     }
 }
 
@@ -3677,25 +3849,32 @@ function adashRenderDonut(stats, todayLogs, meds) {
     // is marked TAKEN or MISSED. Pending = scheduled - logged.
     let taken   = 0;
     let missed  = 0;
+    let skipped = 0;
     let pending = 0;
 
     if (Array.isArray(todayLogs) && Array.isArray(meds) && meds.length > 0) {
         // Use today's actual log records + schedule for an accurate breakdown.
         // This path runs even when todayLogs is empty (all doses still pending).
-        taken  = todayLogs.filter(l => (l.status || "").toUpperCase() === "TAKEN").length;
-        missed = todayLogs.filter(l => (l.status || "").toUpperCase() === "MISSED").length;
+        // SKIPPED counts as non-taken (matches the backend adherence formula): it
+        // is subtracted from pending and gets its own amber segment; pending shifted
+        // to neutral gray so the two amber/gray segments stay distinct.
+        taken   = todayLogs.filter(l => (l.status || "").toUpperCase() === "TAKEN").length;
+        missed  = todayLogs.filter(l => (l.status || "").toUpperCase() === "MISSED").length;
+        skipped = todayLogs.filter(l => (l.status || "").toUpperCase() === "SKIPPED").length;
         const totalScheduled = meds.reduce((sum, m) => sum + (Array.isArray(m.times) ? m.times.length : 0), 0);
-        pending = Math.max(0, totalScheduled - taken - missed);
+        pending = Math.max(0, totalScheduled - taken - missed - skipped);
     } else if (stats) {
         // Fallback: use backend stats when meds/todayLogs are unavailable
         taken   = stats.takenDoses   || 0;
         missed  = stats.missedDoses  || 0;
+        skipped = stats.skipped      || 0;
         pending = stats.pendingDoses || 0;
     }
 
     // Update legend values
     setText("adash-dl-taken",   taken);
     setText("adash-dl-missed",  missed);
+    setText("adash-dl-skipped", skipped);
     setText("adash-dl-pending", pending);
 
     if (adashDonutChart) { adashDonutChart.destroy(); adashDonutChart = null; }
@@ -3704,7 +3883,7 @@ function adashRenderDonut(stats, todayLogs, meds) {
 
     const isDark = document.body.classList.contains("dark-mode");
 
-    const total = taken + missed + pending;
+    const total = taken + missed + skipped + pending;
     if (total === 0) {
         // Show placeholder
         adashDonutChart = new Chart(ctx, {
@@ -3725,10 +3904,10 @@ function adashRenderDonut(stats, todayLogs, meds) {
     adashDonutChart = new Chart(ctx, {
         type: "doughnut",
         data: {
-            labels: ["Taken", "Missed", "Pending"],
+            labels: ["Taken", "Missed", "Skipped", "Pending"],
             datasets: [{
-                data: [taken, missed, pending],
-                backgroundColor: ["#00A19B", "#dc2626", "#d97706"],
+                data: [taken, missed, skipped, pending],
+                backgroundColor: ["#00A19B", "#dc2626", "#f59e0b", "#9ca3af"],
                 borderColor: isDark ? "#111" : "#f5f1ec",
                 borderWidth: 3,
                 hoverOffset: 8

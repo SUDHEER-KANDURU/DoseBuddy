@@ -219,7 +219,8 @@ img, canvas, svg, video { max-width: 100%; }
 @media (max-width: 480px) {
   /* schedule-table handled in FIX 1b — no min-width override needed */
   .history-table  { min-width: 360px; font-size: 0.72rem; }
-  .action-cell    { flex-direction: column; gap: 4px; }
+  .action-cell    { flex-direction: column; align-items: stretch; gap: 5px; }
+  .schedule-table .action-btn { width: 100%; text-align: center; justify-content: center; }
 }
 @media (max-width: 375px) {
   /* schedule-table handled in FIX 1c */
@@ -710,7 +711,7 @@ img, canvas, svg, video { max-width: 100%; }
   #schedule-table tr,
   #schedule-table td,
   #schedule-table th {
-    display: block;
+    display: block !important;
     border: none;
     padding: 0;
     margin: 0;
