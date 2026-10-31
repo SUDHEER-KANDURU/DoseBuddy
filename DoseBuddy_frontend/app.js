@@ -1,12 +1,8 @@
-﻿import { escapeHtml, renderMarkdown } from "./markdown.js";
+import { escapeHtml, renderMarkdown } from "./markdown.js";
 import { canonicalDoseTag } from "./dose-tag.js";
+import { resolveApiBase } from "./api-base.js";
 
-const API_BASE_URL = (window.APP_CONFIG && window.APP_CONFIG.apiBaseUrl)
-    ? window.APP_CONFIG.apiBaseUrl
-    : "https://dosebuddy.sudheerkanduru-5588.workers.dev";
-const API_BASE = (window.APP_CONFIG && window.APP_CONFIG.apiBase)
-    ? window.APP_CONFIG.apiBase
-    : `${API_BASE_URL}/api`;
+const API_BASE = resolveApiBase(typeof window !== "undefined" ? window.APP_CONFIG : undefined);
 const LS_CURRENT_USER_KEY = "dosebuddy_current_user";
 
 const LS_ACCESS_TOKEN_KEY  = "dosebuddy_access_token";
