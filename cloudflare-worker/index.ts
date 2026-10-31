@@ -1225,14 +1225,88 @@ function createUrgentWarningResponse(message: string, conversationId: string, co
   };
 }
 
-function detectIntent(message: string, userMedications: any[]): string {
+const MEDICINE_REFERENCE_MARKER = "__UNRESOLVED_MEDICINE_REFERENCE__";
+
+function isPlausibleBareMedicineName(message: string): boolean {
+  if (!message || typeof message !== "string") return false;
+  const trimmed = message.trim().replace(/[.,!?;:]+$/, "");
+  if (!trimmed) return false;
+  const words = trimmed.split(/\s+/);
+  if (words.length < 1 || words.length > 4) return false;
+  const lower = trimmed.toLowerCase();
+  const nonMedicineWords = [
+    'hi', 'hello', 'hey', 'thanks', 'thank', 'yes', 'no', 'ok', 'okay', 'help', 'please',
+    'what', 'why', 'how', 'when', 'where', 'who', 'i', 'me', 'my', 'you', 'it', 'is', 'am', 'are'
+  ];
+  if (words.length === 1 && nonMedicineWords.includes(lower)) return false;
+  if (nonMedicineWords.includes(lower)) return false;
+  return /^[a-z0-9][a-z0-9'’\-. +/]*$/i.test(trimmed);
+}
+
+function isMedicinePronounOrReference(phrase: string): boolean {
+  if (!phrase || typeof phrase !== "string") return false;
+  const normalized = phrase.trim().toLowerCase().replace(/[.,!?;:]+$/, "");
+  const referencePhrases = [
+    "that medicine",
+    "this medicine",
+    "the medicine",
+    "that medication",
+    "this medication",
+    "the medication",
+    "that supplement",
+    "this supplement",
+    "the supplement",
+    "that drug",
+    "this drug",
+    "the drug",
+    "that pill",
+    "this pill",
+    "the pill",
+    "that product",
+    "this product",
+    "the product",
+    "it",
+    "that",
+    "this"
+  ];
+  return referencePhrases.includes(normalized);
+}
+
+function resolveAntecedentMedicine(conversationState: any, history: Array<{ role: string; content: string }> = []): string | null {
+  if (conversationState?.lastMedicineName && typeof conversationState.lastMedicineName === "string") {
+    return conversationState.lastMedicineName;
+  }
+  if (Array.isArray(history)) {
+    for (let i = history.length - 1; i >= 0; i--) {
+      const turn = history[i];
+      if (turn && typeof turn.content === "string") {
+        const text = turn.content.trim();
+        if (isPlausibleBareMedicineName(text)) {
+          return text;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function detectIntent(message: string, userMedications: any[], conversationState: any = {}): string {
   if (!message || typeof message !== 'string') {
     return "GENERAL";
   }
   
   const lowerMessage = message.toLowerCase().trim();
   const words = lowerMessage.split(/\s+/);
-  
+
+  // If the previous turn asked for a medicine or supplement name, and this turn is not
+  // an emergency, greeting, or symptom, route directly to MEDICINE_INFO.
+  if (conversationState?.waitingForMedicineName) {
+    const greetings = ['hi', 'hello', 'hey', 'thanks', 'thank', 'help', 'please'];
+    if (!greetings.includes(lowerMessage) && !containsUrgentSymptoms(message)) {
+      return "MEDICINE_INFO";
+    }
+  }
+
   // Handle single-word queries
   if (words.length === 1) {
     const word = words[0];
@@ -1257,10 +1331,6 @@ function detectIntent(message: string, userMedications: any[]): string {
 
     // A single alphabetic token typed on its own is almost always a medicine/
     // supplement NAME the user wants to look up (e.g. "paniclips", "saridon").
-    // Route it to MEDICINE_INFO instead of GENERAL; otherwise it dead-ended in the
-    // general handler and the AI free-associated on the characters (reading
-    // "paniclips" as panic/anxiety). processMedicineInfoIntent handles unknown
-    // names gracefully (asks to confirm spelling, no fabrication).
     if (/^[a-z][a-z0-9'\-]*$/.test(word)) {
       return "MEDICINE_INFO";
     }
@@ -1292,17 +1362,8 @@ function detectIntent(message: string, userMedications: any[]): string {
       lowerMessage.includes('when do i take') || lowerMessage.includes('when should i take')) {
     return "SCHEDULE";
   }
-  
-  if (hasMedicineKeyword && (hasMedicineAction || lowerMessage.includes('what is') || lowerMessage.includes('tell me'))) {
-    return "MEDICINE_INFO";
-  }
-  
-  // Check if message mentions any user medication by name
-  if (userMedications.some(med => med.name && lowerMessage.includes(med.name.toLowerCase()))) {
-    return "MEDICINE_INFO";
-  }
-  
-  // Enhanced symptom detection - handle complex phrases like "headache body pains"
+
+  // Symptom detection
   const symptomKeywords = ['symptom', 'symptoms', 'pain', 'pains', 'ache', 'aches', 'hurt', 'sore', 'sick', 'nausea', 'dizzy', 'fever', 'headache', 'stomach', 'chest', 'back', 'joint', 'muscle', 'body'];
   const symptomIndicators = ['feel', 'feeling', 'have', 'having', 'experiencing', 'suffering', 'getting', 'been'];
   const temporalIndicators = ['for', 'since', 'from', 'days', 'hours', 'weeks', 'yesterday', 'today', 'ago'];
@@ -1310,15 +1371,10 @@ function detectIntent(message: string, userMedications: any[]): string {
   const hasSymptom = symptomKeywords.some(keyword => lowerMessage.includes(keyword));
   const hasIndicator = symptomIndicators.some(indicator => lowerMessage.includes(indicator));
   const hasTemporal = temporalIndicators.some(temporal => lowerMessage.includes(temporal));
-  
-  // "headache body pains" or "I have headache" or "feeling pain for 4 days"
-  if (hasSymptom && (hasIndicator || hasTemporal || words.length <= 4)) {
-    return "SYMPTOM_CHECK";
-  }
-  
+
   // Check for side effect concerns
   if (lowerMessage.includes('side effect') || lowerMessage.includes('adverse') || lowerMessage.includes('reaction') ||
-      (lowerMessage.includes('cause') && hasMedicineKeyword) ||
+      (lowerMessage.includes('cause') && (hasMedicineKeyword || Boolean(conversationState?.lastMedicineName))) ||
       (lowerMessage.includes('after taking') || lowerMessage.includes('from taking'))) {
     return "SIDE_EFFECT";
   }
@@ -1326,7 +1382,7 @@ function detectIntent(message: string, userMedications: any[]): string {
   // Check for interaction queries
   if ((lowerMessage.includes('interact') || lowerMessage.includes('interaction') || 
        lowerMessage.includes('together') || lowerMessage.includes('combine') || 
-       lowerMessage.includes('mix') || lowerMessage.includes('with')) && hasMedicineKeyword) {
+       lowerMessage.includes('mix') || lowerMessage.includes('with')) && (hasMedicineKeyword || Boolean(conversationState?.lastMedicineName))) {
     return "INTERACTION";
   }
 
@@ -1345,47 +1401,111 @@ function detectIntent(message: string, userMedications: any[]): string {
     return "PRESCRIPTION";
   }
 
-  // Bare medicine-name query (reached for 2-word messages; single words are
-  // handled in the single-word block above): a short alphabetic phrase with no
-  // question/greeting/symptom signals is a MEDICINE_INFO lookup rather than a
-  // GENERAL fallback. Example: "vitamin d", "saridon tablet". This prevents the
-  // AI from free-associating on an unrecognized name.
-  const trimmed = lowerMessage.trim();
-  const nonMedicineWords = ['hi', 'hello', 'hey', 'thanks', 'thank', 'yes', 'no', 'ok', 'okay', 'help', 'please'];
-  const isPlausibleMedicineName =
-    words.length >= 1 && words.length <= 2 &&
-    /^[a-z][a-z0-9'’\- ]*$/.test(trimmed) &&
-    !nonMedicineWords.includes(trimmed) &&
-    !hasSymptom && !hasIndicator && !hasTemporal;
-  if (isPlausibleMedicineName) {
+  if (hasMedicineKeyword && (hasMedicineAction || lowerMessage.includes('what is') || lowerMessage.includes('tell me'))) {
+    return "MEDICINE_INFO";
+  }
+
+  // Follow-up query referencing a previous medicine in context
+  if (Boolean(conversationState?.lastMedicineName) && (
+      isMedicinePronounOrReference(lowerMessage) ||
+      lowerMessage.includes('what is that') ||
+      lowerMessage.includes('what is it') ||
+      lowerMessage.includes('used for') ||
+      lowerMessage.includes('what does it do') ||
+      lowerMessage.includes('tell me more')
+  )) {
+    return "MEDICINE_INFO";
+  }
+
+  // Check if message mentions any user medication by name
+  if (userMedications.some(med => med.name && lowerMessage.includes(med.name.toLowerCase()))) {
+    return "MEDICINE_INFO";
+  }
+
+  // "headache body pains" or "I have headache" or "feeling pain for 4 days"
+  if (hasSymptom && (hasIndicator || hasTemporal || words.length <= 4)) {
+    return "SYMPTOM_CHECK";
+  }
+
+  // Bare medicine-name query (1-4 words, e.g. "Liv-52 DS", "vitamin d", "saridon tablet", "fish oil")
+  if (isPlausibleBareMedicineName(lowerMessage) && !hasSymptom && !hasIndicator && !hasTemporal) {
     return "MEDICINE_INFO";
   }
 
   return "GENERAL";
 }
 
-function extractMedicineName(message: string, userMedications: any[]): string | null {
-  // First check if message contains any of user's current medications
-  for (const med of userMedications) {
-    const medName = med.name || "";
-    if (medName && message.toLowerCase().includes(medName.toLowerCase())) {
-      return medName;
-    }
-  }
+function extractMedicineName(
+  message: string,
+  userMedications: any[] = [],
+  conversationState: any = {},
+  history: Array<{ role: string; content: string }> = []
+): string | null {
+  if (!message || typeof message !== "string") return null;
+  const trimmed = message.trim();
+  const lowerMessage = trimmed.toLowerCase();
 
-  // Extract medicine name from natural language
+  // Natural language query patterns
   const patterns = [
-    /\babout\s+([\w\s]+?)\s*[.?!]?$/i,
-    /\bwhat\s+is\s+([\w\s]+?)\s*[.?!]?$/i,
-    /\btell\s+me\s+about\s+([\w\s]+?)\s*[.?!]?$/i,
-    /\binformation\s+on\s+([\w\s]+?)\s*[.?!]?$/i
+    /\bwhat\s+(?:is|are)\s+([\w\s'’\-.]+?)\s+(?:used|prescribed|indicated|good)\s+for\b/i,
+    /\bwhat\s+does\s+([\w\s'’\-.]+?)\s+do\b/i,
+    /\b(?:uses|benefits|indications)\s+of\s+([\w\s'’\-.]+?)[.?!]?$/i,
+    /\btell\s+me\s+about\s+([\w\s'’\-.]+?)[.?!]?$/i,
+    /\b(?:information|info|details)\s+(?:on|about)\s+([\w\s'’\-.]+?)[.?!]?$/i,
+    /\bhow\s+does\s+([\w\s'’\-.]+?)\s+work\b/i,
+    /\bhow\s+(?:should|do|can)\s+i\s+take\s+([\w\s'’\-.]+?)[.?!]?$/i,
+    /\b(?:side\s+effects\s+of|adverse\s+effects\s+of)\s+([\w\s'’\-.]+?)[.?!]?$/i,
+    /\bwhat\s+(?:is|are)\s+([\w\s'’\-.]+?)[.?!]?$/i,
+    /\babout\s+([\w\s'’\-.]+?)[.?!]?$/i
   ];
 
   for (const pattern of patterns) {
     const match = message.match(pattern);
     if (match) {
-      return match[1].trim();
+      let candidate = match[1].trim();
+      candidate = candidate.replace(/\s+(?:used|prescribed|indicated|good)\s+for$/i, "");
+      candidate = candidate.replace(/[.,!?;:]+$/, "").trim();
+
+      if (isPersonalMedicationPhrase(candidate, message)) {
+        return candidate;
+      }
+
+      if (isMedicinePronounOrReference(candidate)) {
+        const resolved = resolveAntecedentMedicine(conversationState, history);
+        return resolved || MEDICINE_REFERENCE_MARKER;
+      }
+
+      if (candidate.length > 0) {
+        return candidate;
+      }
     }
+  }
+
+  // Check if message is a pronoun/anaphoric question
+  if (isMedicinePronounOrReference(trimmed) ||
+      /\b(about\s+it|take\s+it|taking\s+it|its\s+uses|its\s+side\s+effects|does\s+it\s+have|is\s+it\s+safe)\b/i.test(lowerMessage)) {
+    const resolved = resolveAntecedentMedicine(conversationState, history);
+    return resolved || MEDICINE_REFERENCE_MARKER;
+  }
+
+  // Check if message contains any of user's current medications
+  for (const med of userMedications) {
+    const medName = med.name || "";
+    if (medName && lowerMessage.includes(medName.toLowerCase())) {
+      return medName;
+    }
+  }
+
+  // If conversation was waiting for a medicine name
+  if (conversationState?.waitingForMedicineName) {
+    if (isPlausibleBareMedicineName(trimmed)) {
+      return trimmed;
+    }
+  }
+
+  // Bare plausible medicine name
+  if (isPlausibleBareMedicineName(trimmed)) {
+    return trimmed;
   }
 
   return null;
@@ -1564,40 +1684,32 @@ function getActivityType(intent: string): string {
   }
 }
 
-async function processMedicineInfoIntent(env: Env, message: string, conversationId: string, conversationState: any, userMedications: any[]): Promise<any> {
+async function processMedicineInfoIntent(
+  env: Env,
+  message: string,
+  conversationId: string,
+  conversationState: any,
+  userMedications: any[],
+  history: Array<{ role: string; content: string }> = []
+): Promise<any> {
   const response: any = {
     intent: "MEDICINE_INFO",
     conversationId
   };
 
-  const medicineName = extractMedicineName(message, userMedications);
-  
-  // Check if the original message itself is a general medicine name
-  const lowerMessage = message.toLowerCase().trim();
-  const words = lowerMessage.split(/\s+/);
-  const knownMedicines = ['zinc', 'aspirin', 'ibuprofen', 'acetaminophen', 'paracetamol', 'vitamins', 'iron', 'calcium', 'vitamin'];
-  
+  const medicineName = extractMedicineName(message, userMedications, conversationState, history);
   let finalMedicineName = medicineName;
-  
-  // If no medicine extracted but the message looks like a general medicine query
-  if (!finalMedicineName) {
-    // Check if it's a single word that's a known medicine/supplement
-    if (words.length === 1 && knownMedicines.some(med => lowerMessage.includes(med))) {
-      finalMedicineName = lowerMessage;
-    }
-    // Check for patterns like "vitamin D", "vitamin C" etc
-    else if (words.length === 2 && words[0] === 'vitamin') {
-      finalMedicineName = message.trim();
-    }
-    // Check for simple "what is X" patterns
-    else if (words.length >= 3 && (lowerMessage.startsWith('what is ') || lowerMessage.startsWith('what are '))) {
-      const potentialMedicine = words.slice(2).join(' ');
-      finalMedicineName = potentialMedicine;
-    }
-    // Single bare word routed here by detectIntent is the medicine name itself.
-    else if (words.length === 1 && /^[a-z][a-z0-9'\-]*$/.test(lowerMessage)) {
-      finalMedicineName = message.trim();
-    }
+
+  // If the query was an anaphoric reference (e.g. "what is that medicine used for?")
+  // but no antecedent medicine was in recent context/history, ask for clarification.
+  if (finalMedicineName === MEDICINE_REFERENCE_MARKER) {
+    response.messageType = "QUESTION";
+    response.message = "Which medicine or supplement are you asking about? Please provide the name so I can share its uses and safety information.";
+    response.questionType = "TEXT_INPUT";
+    response.placeholder = "Enter medicine name...";
+    conversationState.waitingForMedicineName = true;
+    response.conversationState = conversationState;
+    return response;
   }
 
   // Non-specific personal phrasing like "Tell me about one of my medicines"
@@ -1621,11 +1733,13 @@ async function processMedicineInfoIntent(env: Env, message: string, conversation
         value: "custom"
       });
       response.questions = questions;
+      conversationState.waitingForMedicineName = true;
       response.conversationState = conversationState;
       return response;
     }
     response.messageType = "RESPONSE";
     response.message = "You don't have any medicines saved in DoseBuddy yet. Add one using the 'Add Medicine' section, or tell me the name of a specific medicine or supplement you'd like to learn about.";
+    conversationState.waitingForMedicineName = true;
     response.conversationState = conversationState;
     return response;
   }
@@ -1634,30 +1748,27 @@ async function processMedicineInfoIntent(env: Env, message: string, conversation
   // 1. We couldn't identify any medicine name AND
   // 2. The user has medications AND  
   // 3. The query seems like it's asking about personal medications
+  const lowerMessage = message.toLowerCase().trim();
   if (!finalMedicineName && userMedications.length > 0) {
-    // Check if query is asking about personal medications
     const personalIndicators = ['my medicine', 'my medication', 'my pills', 'medicines i take', 'medications i take', 'medicines am i taking', 'medications am i taking', 'am i taking'];
     const isPersonalQuery = personalIndicators.some(indicator => lowerMessage.includes(indicator));
     
     if (isPersonalQuery) {
-      // Ask user to select from their medications
       response.messageType = "QUESTION";
       response.message = "I can help you learn about medicines. Which medicine would you like to know about?";
       response.questionType = "MEDICINE_SELECTION";
-      
       const questions = userMedications.map(med => ({
         id: med.id?.toString() || "unknown",
         text: `${med.name} (${med.dosage || "N/A"})`,
         value: med.name
       }));
-      
       questions.push({
         id: "custom",
         text: "Other medicine not in my list",
         value: "custom"
       });
-      
       response.questions = questions;
+      conversationState.waitingForMedicineName = true;
       response.conversationState = conversationState;
       return response;
     }
@@ -1669,23 +1780,38 @@ async function processMedicineInfoIntent(env: Env, message: string, conversation
     response.message = "What specific medicine, supplement, or health topic would you like to learn about?";
     response.questionType = "TEXT_INPUT";
     response.placeholder = "Enter medicine name...";
+    conversationState.waitingForMedicineName = true;
     response.conversationState = conversationState;
     return response;
   }
   
-  // Provide medicine information using existing callAi function.
-  // Treat the input strictly as the NAME of a medicine/supplement. Do not
-  // reinterpret, split, or free-associate on the characters (e.g. do not read
-  // an unknown name as unrelated words or symptoms). If the name is not a
-  // recognized medicine, say so plainly instead of inventing an unrelated topic.
-  const prompt =
-    `The following is the NAME of a medicine or supplement the user asked about: "${finalMedicineName}".\n` +
-    `Provide concise information about this medicine: what it is, common uses, common side effects, and safety guidance. ` +
-    `Treat "${finalMedicineName}" strictly as a medicine/supplement name — do not split it into other words, ` +
-    `do not interpret it as a symptom or emotion, and do not answer about an unrelated topic. ` +
-    `If you do not recognize "${finalMedicineName}" as a known medicine or supplement, say clearly that you don't ` +
-    `recognize it, ask the user to double-check the spelling or provide the brand/generic name, and do not fabricate details. ` +
-    `Keep it concise and non-diagnostic, and remind the user to confirm with their pharmacist or healthcare provider.`;
+  // Save the identified medicine to conversationState for future follow-up turns
+  conversationState.lastMedicineName = finalMedicineName;
+  conversationState.waitingForMedicineName = false;
+
+  const isSpecificQuestion = !isPlausibleBareMedicineName(message) &&
+    lowerMessage !== finalMedicineName.toLowerCase();
+
+  let prompt: string;
+  if (isSpecificQuestion) {
+    prompt =
+      `The following is the NAME of a medicine or supplement the user asked about: "${finalMedicineName}".\n` +
+      `The user specifically asked: "${message}".\n` +
+      `Provide a concise (2-4 sentences), non-diagnostic, educational answer addressing what "${finalMedicineName}" is used for or what the user asked about it. ` +
+      `Do not diagnose, prescribe, provide unsupported dosing instructions, or guarantee health outcomes. ` +
+      `If you do not recognize "${finalMedicineName}" as a known medicine or supplement, say clearly that you don't recognize it, ask the user to double-check the spelling or provide the brand/generic name, and do not fabricate details. ` +
+      `Advise consulting a healthcare provider or pharmacist for personalized medical advice.`;
+  } else {
+    prompt =
+      `The following is the NAME of a medicine or supplement the user asked about: "${finalMedicineName}".\n` +
+      `Provide concise information about this medicine: what it is, common uses, common side effects, and safety guidance. ` +
+      `Treat "${finalMedicineName}" strictly as a medicine/supplement name — do not split it into other words, ` +
+      `do not interpret it as a symptom or emotion, and do not answer about an unrelated topic. ` +
+      `If you do not recognize "${finalMedicineName}" as a known medicine or supplement, say clearly that you don't ` +
+      `recognize it, ask the user to double-check the spelling or provide the brand/generic name, and do not fabricate details. ` +
+      `Keep it concise and non-diagnostic, do not provide unsupported dosing instructions, and remind the user to confirm with their pharmacist or healthcare provider.`;
+  }
+
   const aiResponse = await callAi(env, prompt);
   const medicineInfo = await aiResponse.text();
   
@@ -1949,15 +2075,27 @@ async function generateSymptomAnalysis(env: Env, conversationState: any, convers
   return response;
 }
 
-async function processSideEffectIntent(env: Env, message: string, conversationId: string, conversationState: any, userMedications: any[]): Promise<any> {
+async function processSideEffectIntent(
+  env: Env,
+  message: string,
+  conversationId: string,
+  conversationState: any,
+  userMedications: any[],
+  history: Array<{ role: string; content: string }> = []
+): Promise<any> {
   const response: any = {
     intent: "SIDE_EFFECT",
     conversationId
   };
 
   const currentQuestion = conversationState.currentQuestion;
+  const referencedMed = conversationState.lastMedicineName || extractMedicineName(message, userMedications, conversationState, history);
+  if (referencedMed && referencedMed !== MEDICINE_REFERENCE_MARKER) {
+    conversationState.lastMedicineName = referencedMed;
+    response.medicineName = referencedMed;
+  }
   
-  if (!currentQuestion && userMedications.length > 0) {
+  if (!currentQuestion && userMedications.length > 0 && !referencedMed) {
     conversationState.currentQuestion = "which-medicine";
     
     response.messageType = "QUESTION";
@@ -1975,9 +2113,11 @@ async function processSideEffectIntent(env: Env, message: string, conversationId
     return response;
   }
   
-  // The user has indicated which medicine (or "not sure"/"any"). Produce a real
-  // AI-backed, concise answer with safety framing instead of a static deflection.
+  // The user has indicated which medicine (or "not sure"/"any" or follow-up).
   let sideEffectContext = `User's side-effect concern: ${message}\n`;
+  if (referencedMed && referencedMed !== MEDICINE_REFERENCE_MARKER) {
+    sideEffectContext += `Referenced medicine/supplement: ${referencedMed}\n`;
+  }
   if (userMedications.length > 0) {
     const medNames = userMedications.map(med => `${med.name} ${med.dosage || ""}`.trim());
     sideEffectContext += `Current medications: ${medNames.join(", ")}\n`;
@@ -1985,7 +2125,7 @@ async function processSideEffectIntent(env: Env, message: string, conversationId
   const sideEffectPrompt =
     `A patient is concerned about a possible medication side effect. ${sideEffectContext}` +
     `Give a concise (2-4 sentences), non-diagnostic answer about whether this is a commonly reported side effect ` +
-    `and what to watch for. Do not diagnose or prescribe. Advise consulting their pharmacist or healthcare provider, ` +
+    `and what to watch for. Do not diagnose, prescribe, or provide unsupported dosage instructions. Advise consulting their pharmacist or healthcare provider, ` +
     `and to seek urgent medical care if symptoms are severe or worsening.`;
   const sideEffectResp = await callAi(env, sideEffectPrompt);
   const sideEffectAnalysis = await sideEffectResp.text();
@@ -1998,14 +2138,30 @@ async function processSideEffectIntent(env: Env, message: string, conversationId
   return response;
 }
 
-async function processInteractionIntent(env: Env, message: string, conversationId: string, conversationState: any, userMedications: any[]): Promise<any> {
+async function processInteractionIntent(
+  env: Env,
+  message: string,
+  conversationId: string,
+  conversationState: any,
+  userMedications: any[],
+  history: Array<{ role: string; content: string }> = []
+): Promise<any> {
   const response: any = {
     intent: "INTERACTION",
     conversationId,
     messageType: "RESPONSE"
   };
 
+  const referencedMed = conversationState.lastMedicineName || extractMedicineName(message, userMedications, conversationState, history);
+  if (referencedMed && referencedMed !== MEDICINE_REFERENCE_MARKER) {
+    response.medicineName = referencedMed;
+    conversationState.lastMedicineName = referencedMed;
+  }
+
   let interactionContext = `User's interaction question: ${message}\n`;
+  if (referencedMed && referencedMed !== MEDICINE_REFERENCE_MARKER) {
+    interactionContext += `Referenced medicine/supplement: ${referencedMed}\n`;
+  }
   if (userMedications.length > 0) {
     const medNames = userMedications.map(med => `${med.name} ${med.dosage || ""}`.trim());
     interactionContext += `Current medications: ${medNames.join(", ")}\n`;
@@ -2025,12 +2181,40 @@ async function processInteractionIntent(env: Env, message: string, conversationI
   return response;
 }
 
-async function processScheduleIntent(env: Env, message: string, conversationId: string, conversationState: any, userMedications: any[]): Promise<any> {
+async function processScheduleIntent(
+  env: Env,
+  message: string,
+  conversationId: string,
+  conversationState: any,
+  userMedications: any[],
+  history: Array<{ role: string; content: string }> = []
+): Promise<any> {
   const response: any = {
     intent: "SCHEDULE",
     conversationId,
     messageType: "RESPONSE"
   };
+
+  const referencedMed = conversationState.lastMedicineName || extractMedicineName(message, userMedications, conversationState, history);
+  if (referencedMed && referencedMed !== MEDICINE_REFERENCE_MARKER) {
+    response.medicineName = referencedMed;
+  }
+
+  // Clearly distinguish personal scheduled medications from general medicine queries
+  const isMedSpecific = referencedMed && referencedMed !== MEDICINE_REFERENCE_MARKER;
+  const isMedInUserList = isMedSpecific && userMedications.some(m => m.name && m.name.toLowerCase() === referencedMed.toLowerCase());
+
+  if (isMedSpecific && !isMedInUserList) {
+    let msg = `"${referencedMed}" is not in your scheduled medications in DoseBuddy.`;
+    if (userMedications.length > 0) {
+      msg += ` Your current DoseBuddy medications are: ${userMedications.map(m => m.name).join(", ")}.`;
+    }
+    msg += ` You can add it anytime from the 'Add Medicine' section. For timing and administration guidance, please refer to the packaging or consult your pharmacist or healthcare provider.`;
+    response.message = msg;
+    conversationState.completed = true;
+    response.conversationState = conversationState;
+    return response;
+  }
 
   if (userMedications.length === 0) {
     response.message = "You don't have any medicines scheduled in DoseBuddy yet. " +
@@ -2105,7 +2289,16 @@ async function processGeneralHealthIntent(env: Env, message: string, conversatio
   return response;
 }
 
-async function processUnifiedChat(env: Env, message: string, conversationId: string, conversationState: any, user: any, userMedications: any[], isOptionSelection: boolean = false): Promise<any> {
+async function processUnifiedChat(
+  env: Env,
+  message: string,
+  conversationId: string,
+  conversationState: any,
+  user: any,
+  userMedications: any[],
+  isOptionSelection: boolean = false,
+  history: Array<{ role: string; content: string }> = []
+): Promise<any> {
   // Initialize conversation state if not provided
   if (!conversationState || typeof conversationState !== "object") {
     conversationState = {};
@@ -2122,7 +2315,7 @@ async function processUnifiedChat(env: Env, message: string, conversationId: str
   // question that is already in flight (an option selection, or a same-intent
   // follow-up such as "Since yesterday" while a symptom question is open).
   const previousIntent = conversationState.currentIntent;
-  const detected = detectIntent(message, userMedications);
+  const detected = detectIntent(message, userMedications, conversationState);
   // A follow-up continues the question in flight when it is an option
   // selection, when it classifies as the same intent, or when it carries no
   // recognizable new intent on its own (e.g. "Since yesterday" -> GENERAL).
@@ -2159,19 +2352,19 @@ async function processUnifiedChat(env: Env, message: string, conversationId: str
   // Process based on intent
   switch (currentIntent) {
     case "MEDICINE_INFO":
-      return await processMedicineInfoIntent(env, message, conversationId, conversationState, userMedications);
+      return await processMedicineInfoIntent(env, message, conversationId, conversationState, userMedications, history);
       
     case "SYMPTOM_CHECK":
       return await processSymptomCheckIntent(env, message, conversationId, conversationState, userMedications);
       
     case "SIDE_EFFECT":
-      return await processSideEffectIntent(env, message, conversationId, conversationState, userMedications);
+      return await processSideEffectIntent(env, message, conversationId, conversationState, userMedications, history);
       
     case "INTERACTION":
-      return await processInteractionIntent(env, message, conversationId, conversationState, userMedications);
+      return await processInteractionIntent(env, message, conversationId, conversationState, userMedications, history);
       
     case "SCHEDULE":
-      return await processScheduleIntent(env, message, conversationId, conversationState, userMedications);
+      return await processScheduleIntent(env, message, conversationId, conversationState, userMedications, history);
       
     case "PRESCRIPTION":
       return await processPrescriptionIntent(env, message, conversationId, conversationState);
@@ -2487,6 +2680,9 @@ const worker = {
         const conversationId = String(b.conversationId ?? "");
         const conversationState = b.conversationState || {};
         const isOptionSelection = b.isOptionSelection === true;
+        const history: Array<{ role: string; content: string }> = Array.isArray(b.history)
+          ? b.history
+          : (Array.isArray(conversationState.history) ? conversationState.history : []);
         
         if (!message) {
           return json({ success: false, error: "Message is required" }, 400);
@@ -2501,7 +2697,7 @@ const worker = {
             [actor.id, today, today]
           );
 
-          const chatResponse = await processUnifiedChat(env, message, conversationId, conversationState, actor, userMedications, isOptionSelection);
+          const chatResponse = await processUnifiedChat(env, message, conversationId, conversationState, actor, userMedications, isOptionSelection, history);
           
           // Log activity based on intent
           const intent = chatResponse.intent || "GENERAL";

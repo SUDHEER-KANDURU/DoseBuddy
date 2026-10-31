@@ -5392,7 +5392,8 @@ function setupAiHandlers() {
 const aiConversationState = {
     isProcessing: false,
     conversationId: null,
-    state: {}
+    state: {},
+    history: []
 };
 let aiViewportObserverBound = false;
 let activeQuestionOptions = null;
@@ -5479,6 +5480,7 @@ function startNewConversation() {
     // Reset conversation state.
     aiConversationState.conversationId = null;
     aiConversationState.state = {};
+    aiConversationState.history = [];
     aiConversationState.isProcessing = false;
     activeQuestionOptions = null;
 
@@ -5577,6 +5579,14 @@ async function sendChatMessage() {
     chatInput.value = "";
     chatInput.style.height = "auto";
 
+    if (!Array.isArray(aiConversationState.history)) {
+        aiConversationState.history = [];
+    }
+    aiConversationState.history.push({ role: "user", content: message });
+    if (aiConversationState.history.length > 20) {
+        aiConversationState.history = aiConversationState.history.slice(-20);
+    }
+
     // Show a thinking indicator while we wait for the assistant's reply
     showChatThinking();
 
@@ -5596,7 +5606,8 @@ async function sendChatMessage() {
             body: JSON.stringify({
                 message: message,
                 conversationId: aiConversationState.conversationId,
-                conversationState: aiConversationState.state
+                conversationState: aiConversationState.state,
+                history: aiConversationState.history
             })
         });
 
@@ -5616,6 +5627,12 @@ async function sendChatMessage() {
 
         // Update conversation state
         aiConversationState.state = data.conversationState || {};
+        if (data.message) {
+            aiConversationState.history.push({ role: "assistant", content: data.message });
+            if (aiConversationState.history.length > 20) {
+                aiConversationState.history = aiConversationState.history.slice(-20);
+            }
+        }
 
         // Handle response based on type
         handleAiResponse(data);
@@ -5839,6 +5856,14 @@ async function sendOptionSelection(value) {
     aiConversationState.isProcessing = true;
     updateSendButton();
 
+    if (!Array.isArray(aiConversationState.history)) {
+        aiConversationState.history = [];
+    }
+    aiConversationState.history.push({ role: "user", content: String(value) });
+    if (aiConversationState.history.length > 20) {
+        aiConversationState.history = aiConversationState.history.slice(-20);
+    }
+
     // Show a thinking indicator while we wait for the assistant's reply
     showChatThinking();
 
@@ -5851,6 +5876,7 @@ async function sendOptionSelection(value) {
                 message: String(value), // Ensure it's a string
                 conversationId: aiConversationState.conversationId,
                 conversationState: aiConversationState.state,
+                history: aiConversationState.history,
                 isOptionSelection: true
             })
         });
@@ -5868,6 +5894,12 @@ async function sendOptionSelection(value) {
         // Validate response data before using
         if (data.conversationState) {
             aiConversationState.state = data.conversationState;
+        }
+        if (data.message) {
+            aiConversationState.history.push({ role: "assistant", content: data.message });
+            if (aiConversationState.history.length > 20) {
+                aiConversationState.history = aiConversationState.history.slice(-20);
+            }
         }
         
         handleAiResponse(data);
