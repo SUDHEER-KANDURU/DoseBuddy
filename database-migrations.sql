@@ -234,3 +234,32 @@ PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 SET @sql = IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='dose_occurrences' AND column_name='snooze_until')=0,
   'ALTER TABLE dose_occurrences ADD COLUMN snooze_until DATETIME(3) NULL', 'DO 0');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+
+-- AI Conversational Memory and Health Assistant History
+CREATE TABLE IF NOT EXISTS ai_conversations (
+    id VARCHAR(64) PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    title VARCHAR(255) NOT NULL DEFAULT 'New Conversation',
+    summary TEXT NULL,
+    active_topic VARCHAR(255) NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_ai_conversations_user (user_id, updated_at),
+    CONSTRAINT fk_ai_conversations_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS ai_messages (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    conversation_id VARCHAR(64) NOT NULL,
+    user_id BIGINT NOT NULL,
+    role VARCHAR(32) NOT NULL,
+    content MEDIUMTEXT NOT NULL,
+    intent VARCHAR(64) NULL,
+    active_topic VARCHAR(255) NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_ai_messages_conv (conversation_id, created_at),
+    INDEX idx_ai_messages_user (user_id, created_at),
+    CONSTRAINT fk_ai_messages_conv FOREIGN KEY (conversation_id) REFERENCES ai_conversations(id) ON DELETE CASCADE,
+    CONSTRAINT fk_ai_messages_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);

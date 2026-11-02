@@ -77,7 +77,7 @@ async function refreshAccessToken() {
 async function authFetch(url, options = {}) {
     const startTime = performance.now();
     console.log(`[AuthFetch] Starting request to ${url}`);
-    
+
     // Refresh proactively if the token is about to expire
     if (isAccessTokenExpired()) {
         const newToken = await refreshAccessToken();
@@ -96,24 +96,24 @@ async function authFetch(url, options = {}) {
     // Allow database-backed medication changes enough time to complete before
     // the client gives up. The previous 5s cutoff could abort a valid write.
     const timeoutMs = options.timeout || 15000;
-    
+
     const controller = new AbortController();
     const timeoutId = setTimeout(() => {
         console.log(`[AuthFetch] Request timeout after ${timeoutMs}ms for ${url}`);
         controller.abort();
     }, timeoutMs);
 
-    const fetchOptions = { 
-        cache: "no-store", 
-        ...options, 
+    const fetchOptions = {
+        cache: "no-store",
+        ...options,
         headers,
-        signal: controller.signal 
+        signal: controller.signal
     };
-    
+
     try {
         let response = await fetch(url, fetchOptions);
         clearTimeout(timeoutId);
-        
+
         const fetchTime = performance.now() - startTime;
         console.log(`[AuthFetch] Initial response in ${fetchTime.toFixed(2)}ms, status: ${response.status}`);
 
@@ -125,27 +125,27 @@ async function authFetch(url, options = {}) {
                 throw new Error("Session expired. Please log in again.");
             }
             const retryHeaders = { ...headers, "Authorization": `Bearer ${newToken}` };
-            
+
             // Set new timeout for retry
             const retryController = new AbortController();
             const retryTimeoutId = setTimeout(() => {
                 console.log(`[AuthFetch] Retry timeout after ${timeoutMs}ms for ${url}`);
                 retryController.abort();
             }, timeoutMs);
-            
+
             try {
-                response = await fetch(url, { 
-                    cache: "no-store", 
-                    ...options, 
-                    headers: retryHeaders, 
-                    signal: retryController.signal 
+                response = await fetch(url, {
+                    cache: "no-store",
+                    ...options,
+                    headers: retryHeaders,
+                    signal: retryController.signal
                 });
                 clearTimeout(retryTimeoutId);
             } catch (retryError) {
                 clearTimeout(retryTimeoutId);
                 throw retryError;
             }
-            
+
             const totalTime = performance.now() - startTime;
             console.log(`[AuthFetch] Retry response in ${(performance.now() - retryStartTime).toFixed(2)}ms, total: ${totalTime.toFixed(2)}ms`);
         } else {
@@ -274,7 +274,7 @@ function registerServiceWorker() {
             _swRegistration = reg;
             console.log("[DoseBuddy SW] Registered successfully. Scope:", reg.scope);
             console.log("[DoseBuddy SW] Registration state:", reg.active ? "active" : "pending");
-            
+
             // Keep our reference up-to-date if the SW updates itself
             reg.addEventListener("updatefound", () => {
                 console.log("[DoseBuddy SW] Service Worker update found");
@@ -314,18 +314,18 @@ const NOTIFICATION_ICON = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/20
  */
 async function showDoseBuddySystemNotification(title, options = {}) {
     console.log("[DoseBuddy Notifications] Attempting to show system notification:", title);
-    
+
     try {
         if (!("Notification" in window)) {
             console.warn("[DoseBuddy Notifications] Notification API not supported in this browser");
             return { ok: false, reason: "unsupported" };
         }
-        
+
         if (Notification.permission === "denied") {
             console.warn("[DoseBuddy Notifications] Notification permission denied by user");
             return { ok: false, reason: "permission-denied" };
         }
-        
+
         if (Notification.permission !== "granted") {
             console.warn("[DoseBuddy Notifications] Notification permission not granted. Current state:", Notification.permission);
             return { ok: false, reason: "permission-not-granted" };
@@ -338,13 +338,13 @@ async function showDoseBuddySystemNotification(title, options = {}) {
                 const reg = _swRegistration || await navigator.serviceWorker.ready;
                 if (reg && typeof reg.showNotification === "function") {
                     console.log("[DoseBuddy Notifications] Using Service Worker registration:", reg.scope);
-                    
+
                     await reg.showNotification(title, {
                         icon:  NOTIFICATION_ICON,
                         badge: NOTIFICATION_ICON,
                         ...options,
                     });
-                    
+
                     console.log("[DoseBuddy Notifications] ✓ Service Worker notification sent successfully");
                     return { ok: true, method: "service-worker" };
                 } else {
@@ -361,15 +361,15 @@ async function showDoseBuddySystemNotification(title, options = {}) {
         // Fallback: Direct Notification API
         try {
             console.log("[DoseBuddy Notifications] Using fallback: direct 'new Notification()'");
-            
+
             const notification = new Notification(title, {
                 icon: NOTIFICATION_ICON,
                 badge: NOTIFICATION_ICON,
                 ...options,
             });
-            
+
             console.log("[DoseBuddy Notifications] ✓ Direct notification created successfully");
-            
+
             // Handle notification events
             notification.onshow = () => console.log("[DoseBuddy Notifications] Direct notification shown");
             notification.onerror = (err) => console.error("[DoseBuddy Notifications] Direct notification error:", err);
@@ -378,14 +378,14 @@ async function showDoseBuddySystemNotification(title, options = {}) {
                 window.focus();
                 notification.close();
             };
-            
+
             return { ok: true, method: "direct" };
-            
+
         } catch (directError) {
             console.error("[DoseBuddy Notifications] Direct notification failed:", directError.message);
             return { ok: false, reason: "direct-notification-failed", error: directError };
         }
-        
+
     } catch (err) {
         console.error("[DoseBuddy Notifications] System notification completely failed:", err.message, err);
         return { ok: false, reason: "error", error: err };
@@ -660,10 +660,10 @@ document.addEventListener("DOMContentLoaded", () => {
     setupNotificationsUI();
     setupPrescriptionUpload();
     registerServiceWorker();   // register sw.js for system notifications
-    
+
     setHamburgerVisible(!!currentUser);
 
-    
+
     // ── Notification permission: never auto-request on load ─────────────────
     // Modern browsers require a user gesture before showing the permission
     // dialog. Auto-requesting on load is silently ignored or blocked.
@@ -929,15 +929,15 @@ function switchToSignupMode() {
     document.getElementById("login-form").style.display = "none";
     document.getElementById("signup-form").style.display = "block";
     document.getElementById("signup-switch-text").style.display = "block";
-    
+
     const card = document.querySelector(".auth-card");
     if (card) card.classList.add("auth-card-wide");
-    
+
     goToSignupStep(1);
 }
 
 function setupSignupSteps() {
-    
+
     document.getElementById("step1-next-btn")?.addEventListener("click", () => {
         if (validateSignupStep1()) goToSignupStep(2);
     });
@@ -1236,9 +1236,9 @@ function setupIntlCountryPickers() {
                     renderList(INTL_COUNTRIES);
                     return;
                 }
-                const filtered = INTL_COUNTRIES.filter(c => 
-                    c.name.toLowerCase().includes(q) || 
-                    c.dial.toLowerCase().includes(q) || 
+                const filtered = INTL_COUNTRIES.filter(c =>
+                    c.name.toLowerCase().includes(q) ||
+                    c.dial.toLowerCase().includes(q) ||
                     c.code.toLowerCase().includes(q)
                 );
                 renderList(filtered);
@@ -1432,7 +1432,7 @@ function updatePasswordStrength(val, fillId, labelId, wrapId) {
 }
 
 function setupLegalModals() {
- 
+
     document.getElementById("open-terms-btn")?.addEventListener("click", (e) => {
         e.preventDefault();
         document.getElementById("terms-modal").style.display = "flex";
@@ -1446,7 +1446,7 @@ function setupLegalModals() {
         document.body.style.overflow = "hidden";
     });
 
-   
+
     document.getElementById("terms-modal-close")?.addEventListener("click", () => {
         document.getElementById("terms-modal").style.display = "none";
         document.body.style.overflow = "";
@@ -2033,7 +2033,7 @@ function setupNav() {
 }
 
 function setThemeToggleVisible(show) {
-    
+
 }
 
 let userMenuOpen = false;
@@ -2086,9 +2086,9 @@ function closeUserMenu() {
 }
 
 function updateUserMenuInfo() {
-    
+
     const avatarEl = document.getElementById("nav-user-avatar");
-    
+
     if (avatarEl && currentUser) {
         const displayName = currentUser.name || "User";
         const initial = displayName.trim().charAt(0).toUpperCase() || "U";
@@ -2295,13 +2295,13 @@ function isMedicationActiveToday(med, todayStr) {
     const start = medicationCalendarDate(med.startDate);
     const end   = medicationCalendarDate(med.endDate);
     console.log(`[DoseBuddy DEBUG] isMedicationActiveToday: med="${med.name}" today="${todayStr}" start="${start}" end="${end}"`);
-    
+
     // Missing dates → treat as active (backward-compat with older records)
     if (!start && !end) {
         console.log(`[DoseBuddy DEBUG] isMedicationActiveToday: med="${med.name}" - no start/end dates, treating as active`);
         return true;
     }
-    
+
     // String comparison works for ISO "YYYY-MM-DD" format
     if (start && start > todayStr) {
         console.log(`[DoseBuddy DEBUG] isMedicationActiveToday: med="${med.name}" - not started yet (${start} > ${todayStr})`);
@@ -2311,7 +2311,7 @@ function isMedicationActiveToday(med, todayStr) {
         console.log(`[DoseBuddy DEBUG] isMedicationActiveToday: med="${med.name}" - expired (${end} < ${todayStr})`);
         return false; // already expired
     }
-    
+
     console.log(`[DoseBuddy DEBUG] isMedicationActiveToday: med="${med.name}" - ACTIVE for today`);
     return true;
 }
@@ -2639,7 +2639,7 @@ async function renderDashboard() {
         if (pendingElem)  pendingElem.textContent  = pending;
         if (adherenceElem) adherenceElem.textContent = percent + "%";
         updateMissedDoseNotifications(meds, todayStr);
-        
+
         console.log(`[FEAT-001 DEBUG] About to call scheduleMedicineReminders() with ${meds.length} medications`);
         console.log(`[FEAT-001 DEBUG] Pre-scheduler state:`);
         console.log(`[FEAT-001 DEBUG] - currentUser exists: ${!!currentUser}`);
@@ -2647,11 +2647,11 @@ async function renderDashboard() {
         console.log(`[FEAT-001 DEBUG] - medsCache length: ${medsCache ? medsCache.length : 'N/A'}`);
         console.log(`[FEAT-001 DEBUG] - typeof scheduleMedicineReminders: ${typeof scheduleMedicineReminders}`);
         console.log(`[FEAT-001 DEBUG] - Current _doseTimers count: ${Object.keys(_doseTimers).length}`);
-        
+
         // Clear any existing timers before scheduling new ones
         _clearDoseTimers();
         console.log(`[FEAT-001 DEBUG] Cleared existing timers, _doseTimers count: ${Object.keys(_doseTimers).length}`);
-        
+
         try {
             // Retry logic: if medsCache is empty but meds were fetched successfully, wait and retry
             if (meds.length > 0 && (!medsCache || medsCache.length === 0)) {
@@ -2659,12 +2659,12 @@ async function renderDashboard() {
                 await new Promise(resolve => setTimeout(resolve, 100));
                 console.log(`[FEAT-001 DEBUG] After retry delay - medsCache length: ${medsCache ? medsCache.length : 'still null'}`);
             }
-            
+
             scheduleMedicineReminders();
             console.log(`[FEAT-001 DEBUG] scheduleMedicineReminders() call completed successfully`);
             console.log(`[FEAT-001 DEBUG] Post-scheduler _doseTimers count: ${Object.keys(_doseTimers).length}`);
             console.log(`[FEAT-001 DEBUG] Active timer keys:`, Object.keys(_doseTimers));
-            
+
             // Verify timers were actually created
             if (meds.length > 0 && Object.keys(_doseTimers).length === 0) {
                 console.error(`[FEAT-001 DEBUG] ERROR: No timers created despite having ${meds.length} medications!`);
@@ -2676,7 +2676,7 @@ async function renderDashboard() {
                     console.log(`[FEAT-001 DEBUG] Retry completed - _doseTimers count: ${Object.keys(_doseTimers).length}`);
                 }, 200);
             }
-            
+
         } catch (error) {
             console.error(`[FEAT-001 DEBUG] scheduleMedicineReminders() call FAILED:`, error);
             console.error(`[FEAT-001 DEBUG] Error stack:`, error.stack);
@@ -2685,7 +2685,7 @@ async function renderDashboard() {
             console.error(`[FEAT-001 DEBUG] - medsCache: ${medsCache ? medsCache.length + ' items' : 'null/undefined'}`);
             console.error(`[FEAT-001 DEBUG] - meds array: ${meds.length} items`);
         }
-        
+
         // Also run checkReminders immediately to catch any existing missed doses
         console.log(`[DoseBuddy DEBUG] Running immediate checkReminders after dashboard load`);
         checkReminders();
@@ -4224,7 +4224,7 @@ Each insight has: title (string), message (string), type (one of: success, warni
 Patient data:
 - Medication adherence: ${adherence}% (${taken} taken, ${missed} missed)
 - ${bmiStr}
-- ${vitalsStr}  
+- ${vitalsStr}
 - Adherence streak: ${streakStr}
 - Most missed medicine: ${stats.mostMissedMedicine || "None"}
 
@@ -4600,22 +4600,22 @@ function _playNotifSound(label) {
 window.testMissedDoseSound = function() {
     console.log("=== TESTING MISSED DOSE SOUND (MP3) ===");
     console.log("1. Checking audio element...");
-    
+
     const audio = document.getElementById("notify-sound");
     if (audio) {
         console.log("✅ Audio element found");
         console.log("   src:", audio.src);
         console.log("   readyState:", audio.readyState);
         console.log("   error:", audio.error);
-        
+
         console.log("2. Testing playMissedDoseAlert() (should use MP3)...");
         const result = playMissedDoseAlert();
         console.log("   Result:", result);
-        
+
     } else {
         console.error("❌ No audio element found with id 'notify-sound'");
     }
-    
+
     return "Test completed - check console output above";
 };
 
@@ -4633,7 +4633,7 @@ window.testSchedulerDebug = function() {
     console.log("Last scheduled date:", _lastScheduledDate || "(never)");
     console.log("Fired reminder keys count:", firedReminderKeys.size);
     console.log("Fired missed alert keys count:", firedMissedAlertKeys.size);
-    
+
     if (medsCache && medsCache.length > 0) {
         console.log("=== MEDICATIONS DETAIL ===");
         medsCache.forEach((med, i) => {
@@ -4642,7 +4642,7 @@ window.testSchedulerDebug = function() {
             console.log(`   Active today: ${isMedicationActiveToday ? isMedicationActiveToday(med, new Date().toISOString().split('T')[0]) : 'unknown'}`);
         });
     }
-    
+
     return {
         hasUser: !!currentUser,
         medsCount: medsCache ? medsCache.length : 0,
@@ -4731,7 +4731,7 @@ function triggerDoseNotification(med, dateStr, displayTime) {
             console.log(`[DoseBuddy Notifications] ✓ Browser notification sent successfully via ${result.method}`);
         } else {
             console.log(`[DoseBuddy Notifications] Browser notification failed: ${result.reason}`);
-            
+
             // Provide user feedback for notification failures
             if (result.reason === "permission-denied") {
                 console.log("[DoseBuddy Notifications] Showing permission denied guidance to user");
@@ -4868,34 +4868,34 @@ function cancelTimersForMedication(medId) { _cancelDoseTimersForMed(medId); }
 // window (clearScheduledTimeouts is called before we get here via renderDash).
 function scheduleMedicineReminders() {
     console.log(`[FEAT-001 Scheduler] scheduleMedicineReminders called at ${new Date().toLocaleTimeString()}`);
-    
+
     try {
         console.log(`[FEAT-001 Scheduler] Input validation:`);
         console.log(`[FEAT-001 Scheduler] - currentUser: ${!!currentUser} (${currentUser ? currentUser.id : 'N/A'})`);
         console.log(`[FEAT-001 Scheduler] - medsCache: ${medsCache ? 'exists' : 'null/undefined'}`);
         console.log(`[FEAT-001 Scheduler] - medsCache.length: ${medsCache ? medsCache.length : 'N/A'}`);
         console.log(`[FEAT-001 Scheduler] - medsCache is array: ${Array.isArray(medsCache)}`);
-        
+
         if (!currentUser) {
             console.log(`[FEAT-001 Scheduler] EARLY EXIT - no currentUser`);
             return;
         }
-        
+
         if (!medsCache) {
             console.log(`[FEAT-001 Scheduler] EARLY EXIT - medsCache is null/undefined`);
             return;
         }
-        
+
         if (!Array.isArray(medsCache)) {
             console.log(`[FEAT-001 Scheduler] EARLY EXIT - medsCache is not an array:`, typeof medsCache);
             return;
         }
-        
+
         if (medsCache.length === 0) {
             console.log(`[FEAT-001 Scheduler] EARLY EXIT - medsCache is empty array`);
             return;
         }
-        
+
         console.log(`[FEAT-001 Scheduler] ✓ All validation checks passed, proceeding with scheduling`);
 
         const now   = new Date();
@@ -4904,9 +4904,9 @@ function scheduleMedicineReminders() {
             String(now.getMonth() + 1).padStart(2, "0"),
             String(now.getDate()).padStart(2, "0")
         ].join("-");
-        
+
         console.log(`[FEAT-001 Scheduler] Date/time context:`);
-        console.log(`[FEAT-001 Scheduler] - today: ${today}`); 
+        console.log(`[FEAT-001 Scheduler] - today: ${today}`);
         console.log(`[FEAT-001 Scheduler] - now: ${now.getHours()}:${now.getMinutes()}:${now.getSeconds()}`);
         console.log(`[FEAT-001 Scheduler] - _lastScheduledDate: "${_lastScheduledDate}"`);
 
@@ -4930,34 +4930,34 @@ function scheduleMedicineReminders() {
         let skipped    = 0;
 
     console.log(`[FEAT-001 Scheduler] Processing ${medsCache.length} medications...`);
-    
+
     for (const med of medsCache) {
         processed++;
         console.log(`[FEAT-001 Scheduler] Processing med ${processed}/${medsCache.length}: ${med.name}, id: ${med.id}`);
-        
+
         if (!isMedicationActiveToday(med, today)) {
             skipped++;
             console.log(`[FEAT-001 Scheduler] SKIP med="${med.name}" reason="not active today"`);
             continue;
         }
-        
+
         if (!Array.isArray(med.times)) {
             skipped++;
             console.log(`[FEAT-001 Scheduler] SKIP med="${med.name}" reason="times not array" times:`, med.times);
             continue;
         }
-        
+
         console.log(`[FEAT-001 Scheduler] med="${med.name}" has ${med.times.length} dose times:`, med.times);
 
         for (let timeIndex = 0; timeIndex < med.times.length; timeIndex++) {
             const timeObj = med.times[timeIndex];
             const rawTime    = timeObj.timeOfDay || "";
             const timeStr    = rawTime.substring(0, 5);
-            
+
             console.log(`[FEAT-001 Scheduler] Processing time ${timeIndex + 1}/${med.times.length} for ${med.name}`);
             console.log(`[FEAT-001 Scheduler] - rawTime: "${rawTime}"`);
             console.log(`[FEAT-001 Scheduler] - timeStr: "${timeStr}"`);
-            
+
             if (!timeStr || timeStr.length < 5) {
                 console.log(`[FEAT-001 Scheduler] SKIP med="${med.name}" time="${timeStr}" reason="invalid time format"`);
                 continue;
@@ -4968,7 +4968,7 @@ function scheduleMedicineReminders() {
                 console.log(`[FEAT-001 Scheduler] SKIP med="${med.name}" time="${timeStr}" reason="parsed time is NaN" hh=${hh} mm=${mm}`);
                 continue;
             }
-            
+
             const status = getDoseStatus(currentUser.id, med.id, today, timeStr);
             console.log(`[FEAT-001 Scheduler] med="${med.name}" time=${timeStr} status="${status}"`);
 
@@ -4984,7 +4984,7 @@ function scheduleMedicineReminders() {
             console.log(`[FEAT-001 Scheduler] Timer calculations for ${med.name} at ${timeStr}:`);
             console.log(`[FEAT-001 Scheduler] - doseAt: ${doseAt.toLocaleTimeString()}`);
             console.log(`[FEAT-001 Scheduler] - reminderDelay: ${reminderDelay}ms (${Math.round(reminderDelay/1000)}s)`);
-            
+
             let reminderId = null;
             if (reminderDelay > 0) {
                 const capturedMed  = med;
@@ -5008,7 +5008,7 @@ function scheduleMedicineReminders() {
             // ── Missed-dose timeout ─────────────────────────────────────
             const missedDelay = missedMs - nowMs;
             console.log(`[FEAT-001 Scheduler] - missedDelay: ${missedDelay}ms (${Math.round(missedDelay/1000)}s)`);
-            
+
             let missedId = null;
             if (missedDelay > 0) {
                 const capturedMed  = med;
@@ -5026,12 +5026,12 @@ function scheduleMedicineReminders() {
             }
 
             _doseTimers[timerKey] = { reminderId, missedId };
-            
+
             console.log(`[FEAT-001 Scheduler] ✓ Registered timer entry: ${timerKey}`);
             console.log(`[FEAT-001 Scheduler] med="${med.name}" dose=${timeStr} | reminderIn=${reminderDelay > 0 ? Math.round(reminderDelay/1000)+'s' : 'catch-up'} | missedIn=${missedDelay > 0 ? Math.round(missedDelay/1000)+'s' : 'immediate'}`);
         }
     }
-    
+
     const totalTimers = Object.keys(_doseTimers).length;
     console.log(`[FEAT-001 Scheduler] ═══ SCHEDULING COMPLETE ═══`);
     console.log(`[FEAT-001 Scheduler] Summary:`);
@@ -5041,14 +5041,14 @@ function scheduleMedicineReminders() {
     console.log(`[FEAT-001 Scheduler] - Total timer entries created: ${totalTimers}`);
     console.log(`[FEAT-001 Scheduler] - Active timer keys: [${Object.keys(_doseTimers).join(', ')}]`);
     console.log(`[FEAT-001 Scheduler] - Date: ${today}`);
-    
+
     // Verify timers were created correctly
     if (processed > skipped && totalTimers === 0) {
         console.error(`[FEAT-001 Scheduler] ❌ ERROR: No timers created despite processing ${processed - skipped} active medications!`);
     } else if (totalTimers > 0) {
         console.log(`[FEAT-001 Scheduler] ✅ SUCCESS: Timer system is active with ${totalTimers} entries`);
     }
-    
+
     } catch (error) {
         console.error(`[FEAT-001 Scheduler] ❌ FATAL ERROR in scheduleMedicineReminders:`, error);
         console.error(`[FEAT-001 Scheduler] Stack:`, error.stack);
@@ -5123,7 +5123,7 @@ function _handleMissedDoseCheck(med, dateStr, timeStr) {
                 console.log(`[DoseBuddy Notifications] ✓ Missed dose notification sent successfully via ${r.method} for ${med.name}`);
             } else {
                 console.log(`[DoseBuddy Notifications] Missed dose notification failed: ${r.reason} for ${med.name}`);
-                
+
                 // Provide user feedback for missed dose notification failures
                 if (r.reason === "permission-denied") {
                     showToast("Browser notifications are blocked. Please enable them to receive missed dose alerts.", "warning", 8000);
@@ -5156,7 +5156,7 @@ function _handleMissedDoseCheck(med, dateStr, timeStr) {
 
 // ── SECONDARY: 15-second safety-net ─────────────────────────────────────────
 // This safety net serves two purposes:
-// 1. Catch missed doses (PENDING -> MISSED after grace period) 
+// 1. Catch missed doses (PENDING -> MISSED after grace period)
 // 2. Catch dose-time reminders if the primary scheduler fails (backup within 1min of dose time)
 // Checks every 15s for better responsiveness based on user feedback.
 function checkReminders() {
@@ -5192,17 +5192,17 @@ function checkReminders() {
 
             const doseMinutes = hh * 60 + mm;
             const diff = nowMinutes - doseMinutes; // >0 = past, <0 = future
-            
+
             console.log(`[DoseBuddy CheckReminders] ${med.name} at ${displayTime}: ${diff} minutes late`);
 
             // NEW: Check if this is dose time (within 1 minute) and primary scheduler might have missed it
             if (diff >= 0 && diff < 1) {
                 const status = getDoseStatus(currentUser.id, med.id, todayStr, displayTime);
                 const reminderKey = doseEventId("REMINDER", currentUser.id, med.id, Number(med.scheduleVersion ?? 0), todayStr, displayTime.slice(0, 5));
-                
+
                 if (status === "PENDING" && !firedReminderKeys.has(reminderKey)) {
                     console.log(`[DoseBuddy CheckReminders] ⚡ BACKUP REMINDER: ${med.name} at ${displayTime} (primary scheduler may have missed it)`);
-                    
+
                     // Fire the dose reminder as backup
                     triggerDoseNotification(med, todayStr, displayTime);
                     processedCount++;
@@ -5213,26 +5213,26 @@ function checkReminders() {
             if (diff >= MISSED_GRACE_MIN) {
                 const status = getDoseStatus(currentUser.id, med.id, todayStr, displayTime);
                 console.log(`[DoseBuddy CheckReminders] ${med.name} status: ${status}`);
-                
+
                 if (status === "PENDING") {
                     const missedKey = doseEventId("MISSED", currentUser.id, med.id, Number(med.scheduleVersion ?? 0), todayStr, displayTime.slice(0, 5));
                     if (!firedMissedAlertKeys.has(missedKey)) {
                         firedMissedAlertKeys.add(missedKey);
-                        
+
                         console.log(`[DoseBuddy CheckReminders] PROCESSING MISSED: ${med.name} (${diff} min late)`);
-                        
+
                         // Play the single reminder asset whenever a tab is open; the
                         // shared player honors the sound-alerts preference and no-ops
                         // silently if autoplay is blocked.
                         console.log(`[DoseBuddy CheckReminders] Playing missed dose sound for ${med.name}`);
                         playMissedDoseAlert();
-                        
+
                         // Mark as missed immediately
                         markDoseMissed(currentUser.id, med.id, todayStr, displayTime).then(() => {
                             console.log(`[DoseBuddy CheckReminders] Server marked ${med.name} as MISSED`);
-                            
+
                             // Update local logs array
-                            const existing = logs.find(l => 
+                            const existing = logs.find(l =>
                                 (l.medicationId === med.id || l.medId === med.id) &&
                                 l.date === todayStr && l.time === displayTime
                             );
@@ -5241,7 +5241,7 @@ function checkReminders() {
                             } else {
                                 logs.push({ medicationId: med.id, date: todayStr, time: displayTime, status: "MISSED" });
                             }
-                            
+
                             // Add in-app notification
                             addNotification(
                                 "missed",
@@ -5249,7 +5249,7 @@ function checkReminders() {
                                 `Scheduled at ${displayTime} — not taken`
                             );
                             console.log(`[DoseBuddy CheckReminders] Added missed notification for ${med.name}`);
-                            
+
                             // **ADD BROWSER NOTIFICATION (WAS MISSING!)**
                             console.log(`[DoseBuddy CheckReminders] Sending browser notification for missed dose: ${med.name}`);
                             showDoseBuddySystemNotification(`Missed dose: ${med.name}`, {
@@ -5265,25 +5265,25 @@ function checkReminders() {
                             }).catch(err => {
                                 console.error("[DoseBuddy CheckReminders] Browser notification error:", err);
                             });
-                            
+
                             // Update dashboard status cell immediately
                             _updateDashboardStatusCell(med.id, displayTime, "MISSED");
                             console.log(`[DoseBuddy CheckReminders] Updated dashboard cell to MISSED`);
-                            
+
                             // Refresh notification badge
                             refreshNotifBadge();
-                            
+
                         }).catch(err => {
                             console.error(`[DoseBuddy CheckReminders] Failed to mark missed:`, err);
                         });
-                        
+
                         processedCount++;
                     }
                 }
             }
         }
     }
-    
+
     if (processedCount > 0) {
         console.log(`[DoseBuddy CheckReminders] Processed ${processedCount} missed doses`);
     }
@@ -5400,6 +5400,58 @@ const aiConversationState = {
 let aiViewportObserverBound = false;
 let activeQuestionOptions = null;
 
+function getAiStorageKey() {
+    return (typeof currentUser !== "undefined" && currentUser?.id)
+        ? `dosebuddy_ai_chat_${currentUser.id}`
+        : "dosebuddy_ai_chat_guest";
+}
+
+function saveAiConversationLocally() {
+    try {
+        const key = getAiStorageKey();
+        const chatMessages = document.getElementById("ai-chat-messages");
+        const hasWelcome = chatMessages?.querySelector(".ai-welcome-message") !== null;
+        if (hasWelcome && (!aiConversationState.history || aiConversationState.history.length === 0)) {
+            localStorage.removeItem(key);
+            return;
+        }
+        const data = {
+            conversationId: aiConversationState.conversationId,
+            state: aiConversationState.state,
+            history: aiConversationState.history,
+            html: chatMessages ? chatMessages.innerHTML : ""
+        };
+        localStorage.setItem(key, JSON.stringify(data));
+    } catch (e) {
+        console.warn("Failed to save AI chat locally:", e);
+    }
+}
+
+function loadAiConversationLocally() {
+    try {
+        const key = getAiStorageKey();
+        const saved = localStorage.getItem(key);
+        if (!saved) return false;
+        const data = JSON.parse(saved);
+        if (!data || !Array.isArray(data.history) || data.history.length === 0) return false;
+
+        aiConversationState.conversationId = data.conversationId || null;
+        aiConversationState.state = data.state || {};
+        aiConversationState.history = data.history || [];
+
+        const chatMessages = document.getElementById("ai-chat-messages");
+        if (chatMessages && data.html) {
+            chatMessages.innerHTML = data.html;
+            scrollChatToBottom(chatMessages, true);
+            wireStarterPrompts();
+        }
+        return true;
+    } catch (e) {
+        console.warn("Failed to load AI chat locally:", e);
+        return false;
+    }
+}
+
 function syncAiViewportHeight() {
     const height = window.visualViewport?.height || window.innerHeight;
     if (Number.isFinite(height) && height > 0) {
@@ -5486,6 +5538,11 @@ function startNewConversation() {
     aiConversationState.isProcessing = false;
     activeQuestionOptions = null;
 
+    try {
+        const key = getAiStorageKey();
+        localStorage.removeItem(key);
+    } catch (e) {}
+
     // Remove any lingering thinking indicator and restore the welcome screen.
     if (typeof hideChatThinking === "function") {
         hideChatThinking();
@@ -5524,7 +5581,7 @@ function setupUnifiedAiChat() {
     chatInput.addEventListener("input", () => {
         chatInput.style.height = "auto";
         chatInput.style.height = Math.min(chatInput.scrollHeight, 120) + "px";
-        
+
         // Enable/disable send button
         chatSend.disabled = !chatInput.value.trim() || aiConversationState.isProcessing;
     });
@@ -5564,13 +5621,26 @@ function setupUnifiedAiChat() {
     if (newConversationBtn) {
         newConversationBtn.addEventListener("click", startNewConversation);
     }
+
+    // "Past Chats" button: open conversations history modal
+    const pastChatsBtn = document.getElementById("past-chats-btn");
+    if (pastChatsBtn) {
+        pastChatsBtn.addEventListener("click", openPastChatsModal);
+    }
+    const closePastChatsBtn = document.getElementById("close-past-chats-btn");
+    if (closePastChatsBtn) {
+        closePastChatsBtn.addEventListener("click", closePastChatsModal);
+    }
+
+    // Restore active conversation if saved locally for current user
+    loadAiConversationLocally();
 }
 
-async function sendChatMessage() {
+async function sendChatMessage(overrideMessage) {
     const chatInput = document.getElementById("ai-chat-input");
     const chatMessages = document.getElementById("ai-chat-messages");
-    
-    const message = chatInput.value.trim();
+
+    const message = (typeof overrideMessage === "string" ? overrideMessage : chatInput.value).trim();
     if (!message || aiConversationState.isProcessing) return;
 
     aiConversationState.isProcessing = true;
@@ -5578,8 +5648,10 @@ async function sendChatMessage() {
 
     // Add user message to chat
     addChatMessage("user", message);
-    chatInput.value = "";
-    chatInput.style.height = "auto";
+    if (!overrideMessage && chatInput) {
+        chatInput.value = "";
+        chatInput.style.height = "auto";
+    }
 
     if (!Array.isArray(aiConversationState.history)) {
         aiConversationState.history = [];
@@ -5638,6 +5710,7 @@ async function sendChatMessage() {
 
         // Handle response based on type
         handleAiResponse(data);
+        saveAiConversationLocally();
 
     } catch (error) {
         console.error("AI chat error:", error);
@@ -5657,8 +5730,9 @@ async function sendChatMessage() {
         } else if (error.message.includes('Network')) {
             errorMessage = "Network connection issue. Please check your connection and try again.";
         }
-        
+
         addChatMessage("assistant", errorMessage, "error");
+        addRetryButton(message);
     } finally {
         hideChatThinking();
         aiConversationState.isProcessing = false;
@@ -5677,10 +5751,188 @@ function handleAiResponse(data) {
     }
 }
 
+function addRetryButton(failedMessage) {
+    const chatMessages = document.getElementById("ai-chat-messages");
+    if (!chatMessages) return;
+    const retryWrap = document.createElement("div");
+    retryWrap.className = "ai-retry-wrap";
+    retryWrap.style.cssText = "display:flex;justify-content:flex-start;margin:-8px 0 12px 12px;";
+    retryWrap.innerHTML = `
+        <button type="button" class="secondary-btn ai-retry-btn" style="font-size:0.8rem;padding:4px 10px;display:inline-flex;align-items:center;gap:4px;">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="13" height="13">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"/>
+            </svg>
+            Retry
+        </button>
+    `;
+    const btn = retryWrap.querySelector("button");
+    btn?.addEventListener("click", () => {
+        retryWrap.remove();
+        if (Array.isArray(aiConversationState.history) && aiConversationState.history.length > 0) {
+            const last = aiConversationState.history[aiConversationState.history.length - 1];
+            if (last && last.role === "user" && last.content === failedMessage) {
+                aiConversationState.history.pop();
+            }
+        }
+        sendChatMessage(failedMessage);
+    });
+    chatMessages.appendChild(retryWrap);
+    scrollChatToBottom(chatMessages);
+}
+
+function openPastChatsModal() {
+    const modal = document.getElementById("past-chats-modal");
+    if (!modal) return;
+    modal.classList.add("backdrop-visible");
+    modal.style.display = "flex";
+    loadPastConversationsList();
+}
+
+function closePastChatsModal() {
+    const modal = document.getElementById("past-chats-modal");
+    if (!modal) return;
+    modal.classList.remove("backdrop-visible");
+    modal.style.display = "none";
+}
+
+async function loadPastConversationsList() {
+    const listEl = document.getElementById("past-chats-list");
+    if (!listEl) return;
+    listEl.innerHTML = '<p style="color:var(--text-muted, #64748b);text-align:center;padding:20px 0;">Loading past conversations...</p>';
+
+    try {
+        const resp = await authFetch(`${API_BASE}/ai/conversations`, {
+            method: "GET",
+            headers: { "Content-Type": "application/json" }
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        const convs = data.conversations || [];
+        renderPastChatsList(convs);
+    } catch (err) {
+        console.warn("Failed to fetch past conversations:", err);
+        renderPastChatsList([]);
+    }
+}
+
+function renderPastChatsList(conversations) {
+    const listEl = document.getElementById("past-chats-list");
+    if (!listEl) return;
+
+    if (!Array.isArray(conversations) || conversations.length === 0) {
+        listEl.innerHTML = `
+            <div style="text-align:center;padding:32px 16px;color:var(--text-muted, #64748b);">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" width="36" height="36" style="margin-bottom:8px;opacity:0.6;">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+                <p style="margin:0;font-size:0.95rem;font-weight:500;">No past conversations found</p>
+                <p style="margin:4px 0 0;font-size:0.85rem;">Your chat history with Health Assistant will appear here.</p>
+            </div>
+        `;
+        return;
+    }
+
+    listEl.innerHTML = "";
+    conversations.forEach(conv => {
+        const item = document.createElement("div");
+        item.className = "past-chat-item";
+        item.style.cssText = "display:flex;justify-content:space-between;align-items:center;padding:12px 16px;background:var(--card-bg, #ffffff);border:1px solid var(--border-color, #e2e8f0);border-radius:8px;cursor:pointer;transition:border-color 0.2s, background-color 0.2s;";
+
+        const dateStr = conv.updated_at ? new Date(conv.updated_at).toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
+        const topicHtml = conv.active_topic
+            ? `<span style="font-size:0.75rem;padding:2px 8px;border-radius:12px;background:rgba(20,184,166,0.12);color:#0d9488;font-weight:600;margin-left:8px;">${escapeHtml(conv.active_topic)}</span>`
+            : "";
+
+        item.innerHTML = `
+            <div style="flex:1;min-width:0;margin-right:12px;">
+                <div style="display:flex;align-items:center;margin-bottom:4px;">
+                    <span style="font-weight:600;font-size:0.95rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text-color, #0f172a);">${escapeHtml(conv.title || "Conversation")}</span>
+                    ${topicHtml}
+                </div>
+                <div style="font-size:0.8rem;color:var(--text-muted, #64748b);display:flex;gap:12px;">
+                    <span>${dateStr}</span>
+                    <span>${conv.message_count ? `${conv.message_count} messages` : ""}</span>
+                </div>
+            </div>
+            <button type="button" class="delete-chat-btn" data-id="${escapeHtml(conv.id)}" title="Delete conversation" style="background:none;border:none;cursor:pointer;padding:6px;color:var(--text-muted, #94a3b8);border-radius:4px;display:flex;align-items:center;">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" width="16" height="16">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"/>
+                </svg>
+            </button>
+        `;
+
+        item.addEventListener("click", (e) => {
+            if (e.target.closest(".delete-chat-btn")) return;
+            switchConversation(conv.id);
+        });
+
+        const delBtn = item.querySelector(".delete-chat-btn");
+        delBtn?.addEventListener("click", async (e) => {
+            e.stopPropagation();
+            if (!confirm("Are you sure you want to delete this conversation?")) return;
+            try {
+                await authFetch(`${API_BASE}/ai/conversations/${encodeURIComponent(conv.id)}`, {
+                    method: "DELETE"
+                });
+                if (aiConversationState.conversationId === conv.id) {
+                    startNewConversation();
+                }
+                loadPastConversationsList();
+            } catch (delErr) {
+                console.error("Failed to delete conversation:", delErr);
+            }
+        });
+
+        listEl.appendChild(item);
+    });
+}
+
+async function switchConversation(conversationId) {
+    try {
+        closePastChatsModal();
+        showChatThinking();
+
+        const resp = await authFetch(`${API_BASE}/ai/conversations/${encodeURIComponent(conversationId)}`, {
+            method: "GET"
+        });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        const conv = data.conversation;
+        if (!conv) return;
+
+        aiConversationState.conversationId = conv.id;
+        aiConversationState.state = {
+            lastMedicineName: conv.active_topic,
+            activeTopic: conv.active_topic,
+            summary: conv.summary
+        };
+        aiConversationState.history = (conv.messages || []).map(m => ({
+            role: m.role,
+            content: m.content
+        }));
+
+        const chatMessages = document.getElementById("ai-chat-messages");
+        if (chatMessages) {
+            chatMessages.innerHTML = "";
+            (conv.messages || []).forEach(m => {
+                addChatMessage(m.role, m.content);
+            });
+            scrollChatToBottom(chatMessages, true);
+        }
+
+        saveAiConversationLocally();
+    } catch (err) {
+        console.error("Failed to load conversation details:", err);
+        showToast("Could not load selected conversation", "error");
+    } finally {
+        hideChatThinking();
+    }
+}
+
 function addChatMessage(sender, content, messageType = "normal") {
     const chatMessages = document.getElementById("ai-chat-messages");
     const shouldAutoScroll = isChatNearBottom(chatMessages);
-    
+
     const messageDiv = document.createElement("div");
     messageDiv.className = `ai-chat-message ai-chat-${sender} ${messageType !== "normal" ? `ai-message-${messageType}` : ""}`;
 
@@ -5854,7 +6106,7 @@ async function sendOptionSelection(value) {
         addChatMessage("assistant", "There was an issue with your selection. Please try choosing an option again.", "error");
         return;
     }
-    
+
     aiConversationState.isProcessing = true;
     updateSendButton();
 
@@ -5888,7 +6140,7 @@ async function sendOptionSelection(value) {
         }
 
         const data = await response.json();
-        
+
         if (!data.success) {
             throw new Error(data.error || "Unknown error");
         }
@@ -5903,21 +6155,21 @@ async function sendOptionSelection(value) {
                 aiConversationState.history = aiConversationState.history.slice(-20);
             }
         }
-        
+
         handleAiResponse(data);
         return true;
 
     } catch (error) {
         console.error("Option selection error:", error);
-        
+
         let errorMessage = "I'm having trouble processing your selection. Please try again.";
-        
+
         if (error.message.includes('HTTP 500')) {
             errorMessage = "There's a server issue processing your selection. Please try again or type your answer instead.";
         } else if (error.message.includes('Failed to fetch')) {
             errorMessage = "Connection issue. Please check your internet and try selecting the option again.";
         }
-        
+
         addChatMessage("assistant", errorMessage, "error");
         return false;
     } finally {
@@ -5971,7 +6223,7 @@ function hideChatThinking() {
 function updateSendButton() {
     const chatSend = document.getElementById("ai-chat-send");
     const chatInput = document.getElementById("ai-chat-input");
-    
+
     if (chatSend && chatInput) {
         chatSend.disabled = !chatInput.value.trim() || aiConversationState.isProcessing;
     }
@@ -6411,7 +6663,7 @@ async function loadLatestBmi() {
 
     try {
         const data = await fetchJsonCached(`${API_BASE}/bmi/latest/${currentUser.id}`, 15000);
-        
+
         if (data) {
             const h = document.getElementById("bmi-height");
             const w = document.getElementById("bmi-weight");
@@ -6503,11 +6755,11 @@ function displayHealthInsights(data) {
 
 function displayHealthInsightsView(data) {
     const contentDiv = document.getElementById("health-insights-content-view");
-    
+
     if (!contentDiv) return;
 
     let insightsHTML = '<div class="health-insights-results">';
-    
+
     if (data.healthSuggestions && data.healthSuggestions.length > 0) {
         insightsHTML += '<div class="insight-section">';
         insightsHTML += '<h4 class="insight-section-title">Health Suggestions</h4>';
@@ -6517,7 +6769,7 @@ function displayHealthInsightsView(data) {
         });
         insightsHTML += '</ul></div>';
     }
-    
+
     if (data.dietRecommendations && data.dietRecommendations.length > 0) {
         insightsHTML += '<div class="insight-section">';
         insightsHTML += '<h4 class="insight-section-title">Diet Recommendations</h4>';
@@ -6527,9 +6779,9 @@ function displayHealthInsightsView(data) {
         });
         insightsHTML += '</ul></div>';
     }
-    
+
     insightsHTML += '</div>';
-    
+
     contentDiv.innerHTML = insightsHTML;
 }
 
@@ -9034,16 +9286,16 @@ function positionTooltip(tooltip, data) {
     const r = el.getBoundingClientRect();
     const gap = 14;
     const padding = 16;
-    
+
     // Dynamically measure tooltip size instead of hardcoding
     const tw = tooltip.offsetWidth || 280;
     const th = tooltip.offsetHeight || 160;
-    
+
     const vw = window.innerWidth;
     const vh = window.innerHeight;
 
     let preferredPos = data.pos || "bottom";
-    
+
     const spaceTop = r.top;
     const spaceBottom = vh - r.bottom;
     const spaceLeft = r.left;

@@ -1227,6 +1227,18 @@ function createUrgentWarningResponse(message: string, conversationId: string, co
 
 const MEDICINE_REFERENCE_MARKER = "__UNRESOLVED_MEDICINE_REFERENCE__";
 
+function isQuestionOrPredicatePhrase(phrase: string): boolean {
+  if (!phrase || typeof phrase !== "string") return false;
+  const lower = phrase.trim().toLowerCase().replace(/[.,!?;:]+$/, "");
+  if (/^(?:what|why|how|when|where|who|is|are|can|could|should|would|does|do|did|tell|explain|show|give|so\s+what)\b/i.test(lower)) {
+    return true;
+  }
+  if (/\b(?:(?:main\s+)?purpose|uses?|benefits?|indications?|side\s+effects?|adverse\s+effects?|risks?|dangers?|dosage|dose|how\s+to\s+take|how\s+to\s+use|used\s+for|good\s+for|take\s+with|interact\s+with)\b/i.test(lower)) {
+    return true;
+  }
+  return false;
+}
+
 function isPlausibleBareMedicineName(message: string): boolean {
   if (!message || typeof message !== "string") return false;
   const trimmed = message.trim().replace(/[.,!?;:]+$/, "");
@@ -1240,6 +1252,7 @@ function isPlausibleBareMedicineName(message: string): boolean {
   ];
   if (words.length === 1 && nonMedicineWords.includes(lower)) return false;
   if (nonMedicineWords.includes(lower)) return false;
+  if (isQuestionOrPredicatePhrase(trimmed)) return false;
   return /^[a-z0-9][a-z0-9'’\-. +/]*$/i.test(trimmed);
 }
 
@@ -1250,38 +1263,68 @@ function isMedicinePronounOrReference(phrase: string): boolean {
     "that medicine",
     "this medicine",
     "the medicine",
+    "those medicines",
+    "these medicines",
     "that medication",
     "this medication",
     "the medication",
+    "those medications",
+    "these medications",
     "that supplement",
     "this supplement",
     "the supplement",
+    "those supplements",
+    "these supplements",
     "that drug",
     "this drug",
     "the drug",
+    "those drugs",
+    "these drugs",
     "that pill",
     "this pill",
     "the pill",
+    "those pills",
+    "these pills",
+    "that tablet",
+    "this tablet",
+    "the tablet",
+    "those tablets",
+    "these tablets",
     "that product",
     "this product",
     "the product",
+    "those products",
+    "these products",
     "it",
+    "its",
     "that",
-    "this"
+    "this",
+    "them",
+    "these",
+    "those"
   ];
-  return referencePhrases.includes(normalized);
+  if (referencePhrases.includes(normalized)) return true;
+
+  if (/^(?:using\s+|taking\s+)?(?:that|this|the|those|these)\s+(?:medicine|medication|supplement|drug|pill|tablet|capsule|product)s?(?:\s+especially)?$/i.test(normalized)) {
+    return true;
+  }
+
+  return false;
 }
 
 function resolveAntecedentMedicine(conversationState: any, history: Array<{ role: string; content: string }> = []): string | null {
-  if (conversationState?.lastMedicineName && typeof conversationState.lastMedicineName === "string") {
+  if (conversationState?.lastMedicineName && typeof conversationState.lastMedicineName === "string" && conversationState.lastMedicineName !== MEDICINE_REFERENCE_MARKER) {
     return conversationState.lastMedicineName;
+  }
+  if (conversationState?.activeTopic && typeof conversationState.activeTopic === "string" && conversationState.activeTopic !== MEDICINE_REFERENCE_MARKER) {
+    return conversationState.activeTopic;
   }
   if (Array.isArray(history)) {
     for (let i = history.length - 1; i >= 0; i--) {
       const turn = history[i];
       if (turn && typeof turn.content === "string") {
         const text = turn.content.trim();
-        if (isPlausibleBareMedicineName(text)) {
+        if (isPlausibleBareMedicineName(text) && !isQuestionOrPredicatePhrase(text) && !isMedicinePronounOrReference(text)) {
           return text;
         }
       }
@@ -1406,13 +1449,22 @@ function detectIntent(message: string, userMedications: any[], conversationState
   }
 
   // Follow-up query referencing a previous medicine in context
-  if (Boolean(conversationState?.lastMedicineName) && (
+  if (Boolean(conversationState?.lastMedicineName || conversationState?.activeTopic) && (
       isMedicinePronounOrReference(lowerMessage) ||
       lowerMessage.includes('what is that') ||
       lowerMessage.includes('what is it') ||
       lowerMessage.includes('used for') ||
       lowerMessage.includes('what does it do') ||
-      lowerMessage.includes('tell me more')
+      lowerMessage.includes('tell me more') ||
+      lowerMessage.includes('purpose') ||
+      lowerMessage.includes('how should i take') ||
+      lowerMessage.includes('how do i take') ||
+      lowerMessage.includes('how to take') ||
+      lowerMessage.includes('how can i take') ||
+      lowerMessage.includes('those tablets') ||
+      lowerMessage.includes('these tablets') ||
+      lowerMessage.includes('those pills') ||
+      lowerMessage.includes('these pills')
   )) {
     return "MEDICINE_INFO";
   }
@@ -1447,6 +1499,8 @@ function extractMedicineName(
 
   // Natural language query patterns
   const patterns = [
+    /\bwhat\s+(?:is|are)\s+(?:the\s+)?(?:main\s+)?(?:purpose|uses?|benefits?|indications?|side\s+effects?|action)\s+of\s+(?:using\s+|taking\s+)?([\w\s'’\-.]+?)[.?!]?$/i,
+    /\bwhy\s+(?:is|do\s+we\s+use|should\s+i\s+take)\s+([\w\s'’\-.]+?)[.?!]?$/i,
     /\bwhat\s+(?:is|are)\s+([\w\s'’\-.]+?)\s+(?:used|prescribed|indicated|good)\s+for\b/i,
     /\bwhat\s+does\s+([\w\s'’\-.]+?)\s+do\b/i,
     /\b(?:uses|benefits|indications)\s+of\s+([\w\s'’\-.]+?)[.?!]?$/i,
@@ -1464,6 +1518,7 @@ function extractMedicineName(
     if (match) {
       let candidate = match[1].trim();
       candidate = candidate.replace(/\s+(?:used|prescribed|indicated|good)\s+for$/i, "");
+      candidate = candidate.replace(/\s+especially$/i, "");
       candidate = candidate.replace(/[.,!?;:]+$/, "").trim();
 
       if (isPersonalMedicationPhrase(candidate, message)) {
@@ -1475,6 +1530,19 @@ function extractMedicineName(
         return resolved || MEDICINE_REFERENCE_MARKER;
       }
 
+      if (isQuestionOrPredicatePhrase(candidate)) {
+        const resolved = resolveAntecedentMedicine(conversationState, history);
+        if (resolved) {
+          return resolved;
+        }
+        for (const med of userMedications) {
+          if (med.name && candidate.toLowerCase().includes(med.name.toLowerCase())) {
+            return med.name;
+          }
+        }
+        return MEDICINE_REFERENCE_MARKER;
+      }
+
       if (candidate.length > 0) {
         return candidate;
       }
@@ -1483,7 +1551,7 @@ function extractMedicineName(
 
   // Check if message is a pronoun/anaphoric question
   if (isMedicinePronounOrReference(trimmed) ||
-      /\b(about\s+it|take\s+it|taking\s+it|its\s+uses|its\s+side\s+effects|does\s+it\s+have|is\s+it\s+safe)\b/i.test(lowerMessage)) {
+      /\b(about\s+it|take\s+it|taking\s+it|its\s+uses|its\s+side\s+effects|does\s+it\s+have|is\s+it\s+safe|those\s+tablets|these\s+tablets|those\s+pills|these\s+pills|those\s+medicines|these\s+medicines)\b/i.test(lowerMessage)) {
     const resolved = resolveAntecedentMedicine(conversationState, history);
     return resolved || MEDICINE_REFERENCE_MARKER;
   }
@@ -1498,13 +1566,13 @@ function extractMedicineName(
 
   // If conversation was waiting for a medicine name
   if (conversationState?.waitingForMedicineName) {
-    if (isPlausibleBareMedicineName(trimmed)) {
+    if (isPlausibleBareMedicineName(trimmed) && !isQuestionOrPredicatePhrase(trimmed)) {
       return trimmed;
     }
   }
 
   // Bare plausible medicine name
-  if (isPlausibleBareMedicineName(trimmed)) {
+  if (isPlausibleBareMedicineName(trimmed) && !isQuestionOrPredicatePhrase(trimmed)) {
     return trimmed;
   }
 
@@ -1690,7 +1758,8 @@ async function processMedicineInfoIntent(
   conversationId: string,
   conversationState: any,
   userMedications: any[],
-  history: Array<{ role: string; content: string }> = []
+  history: Array<{ role: string; content: string }> = [],
+  user?: any
 ): Promise<any> {
   const response: any = {
     intent: "MEDICINE_INFO",
@@ -1787,23 +1856,24 @@ async function processMedicineInfoIntent(
   
   // Save the identified medicine to conversationState for future follow-up turns
   conversationState.lastMedicineName = finalMedicineName;
+  conversationState.activeTopic = finalMedicineName;
   conversationState.waitingForMedicineName = false;
 
   const isSpecificQuestion = !isPlausibleBareMedicineName(message) &&
     lowerMessage !== finalMedicineName.toLowerCase();
 
-  let prompt: string;
+  let taskInstruction: string;
   if (isSpecificQuestion) {
-    prompt =
-      `The following is the NAME of a medicine or supplement the user asked about: "${finalMedicineName}".\n` +
-      `The user specifically asked: "${message}".\n` +
+    taskInstruction =
+      `The user is asking about the medicine/supplement: "${finalMedicineName}".\n` +
+      `Specific question: "${message}".\n` +
       `Provide a concise (2-4 sentences), non-diagnostic, educational answer addressing what "${finalMedicineName}" is used for or what the user asked about it. ` +
       `Do not diagnose, prescribe, provide unsupported dosing instructions, or guarantee health outcomes. ` +
       `If you do not recognize "${finalMedicineName}" as a known medicine or supplement, say clearly that you don't recognize it, ask the user to double-check the spelling or provide the brand/generic name, and do not fabricate details. ` +
       `Advise consulting a healthcare provider or pharmacist for personalized medical advice.`;
   } else {
-    prompt =
-      `The following is the NAME of a medicine or supplement the user asked about: "${finalMedicineName}".\n` +
+    taskInstruction =
+      `The user inquired about the medicine/supplement: "${finalMedicineName}".\n` +
       `Provide concise information about this medicine: what it is, common uses, common side effects, and safety guidance. ` +
       `Treat "${finalMedicineName}" strictly as a medicine/supplement name — do not split it into other words, ` +
       `do not interpret it as a symptom or emotion, and do not answer about an unrelated topic. ` +
@@ -1812,7 +1882,17 @@ async function processMedicineInfoIntent(
       `Keep it concise and non-diagnostic, do not provide unsupported dosing instructions, and remind the user to confirm with their pharmacist or healthcare provider.`;
   }
 
-  const aiResponse = await callAi(env, prompt);
+  const chatMessages = buildConversationContext({
+    user,
+    userMedications,
+    activeTopic: finalMedicineName,
+    history,
+    summary: conversationState?.summary,
+    currentMessage: message,
+    intentInstruction: taskInstruction
+  });
+
+  const aiResponse = await callAiChat(env, chatMessages);
   const medicineInfo = await aiResponse.text();
   
   response.messageType = "RESPONSE";
@@ -2081,7 +2161,8 @@ async function processSideEffectIntent(
   conversationId: string,
   conversationState: any,
   userMedications: any[],
-  history: Array<{ role: string; content: string }> = []
+  history: Array<{ role: string; content: string }> = [],
+  user?: any
 ): Promise<any> {
   const response: any = {
     intent: "SIDE_EFFECT",
@@ -2127,7 +2208,16 @@ async function processSideEffectIntent(
     `Give a concise (2-4 sentences), non-diagnostic answer about whether this is a commonly reported side effect ` +
     `and what to watch for. Do not diagnose, prescribe, or provide unsupported dosage instructions. Advise consulting their pharmacist or healthcare provider, ` +
     `and to seek urgent medical care if symptoms are severe or worsening.`;
-  const sideEffectResp = await callAi(env, sideEffectPrompt);
+  const sideEffectMessages = buildConversationContext({
+    user,
+    userMedications,
+    activeTopic: referencedMed || conversationState.lastMedicineName,
+    history,
+    summary: conversationState?.summary,
+    currentMessage: message,
+    intentInstruction: sideEffectPrompt
+  });
+  const sideEffectResp = await callAiChat(env, sideEffectMessages);
   const sideEffectAnalysis = await sideEffectResp.text();
   
   response.messageType = "RESPONSE";
@@ -2144,7 +2234,8 @@ async function processInteractionIntent(
   conversationId: string,
   conversationState: any,
   userMedications: any[],
-  history: Array<{ role: string; content: string }> = []
+  history: Array<{ role: string; content: string }> = [],
+  user?: any
 ): Promise<any> {
   const response: any = {
     intent: "INTERACTION",
@@ -2171,7 +2262,16 @@ async function processInteractionIntent(
     `Give a concise (2-4 sentences), non-diagnostic answer about general interaction considerations. ` +
     `Do not diagnose or prescribe. Recommend confirming with their pharmacist or healthcare provider, ` +
     `who can check their full medication list against reliable interaction databases.`;
-  const interactionResp = await callAi(env, interactionPrompt);
+  const interactionMessages = buildConversationContext({
+    user,
+    userMedications,
+    activeTopic: referencedMed || conversationState.lastMedicineName,
+    history,
+    summary: conversationState?.summary,
+    currentMessage: message,
+    intentInstruction: interactionPrompt
+  });
+  const interactionResp = await callAiChat(env, interactionMessages);
   const analysis = await interactionResp.text();
   
   response.message = analysis;
@@ -2245,7 +2345,15 @@ async function processScheduleIntent(
   return response;
 }
 
-async function processPrescriptionIntent(env: Env, message: string, conversationId: string, conversationState: any): Promise<any> {
+async function processPrescriptionIntent(
+  env: Env,
+  message: string,
+  conversationId: string,
+  conversationState: any,
+  userMedications: any[] = [],
+  history: Array<{ role: string; content: string }> = [],
+  user?: any
+): Promise<any> {
   const response: any = {
     intent: "PRESCRIPTION",
     conversationId,
@@ -2257,7 +2365,16 @@ async function processPrescriptionIntent(env: Env, message: string, conversation
     `Give a concise (2-4 sentences), non-diagnostic answer. Do not diagnose or prescribe. ` +
     `Advise them to follow the instructions from their prescribing healthcare provider and pharmacist, ` +
     `and to contact them for clarification on dosage or administration.`;
-  const prescriptionResp = await callAi(env, prescriptionPrompt);
+  const prescriptionMessages = buildConversationContext({
+    user,
+    userMedications,
+    activeTopic: conversationState.lastMedicineName,
+    history,
+    summary: conversationState?.summary,
+    currentMessage: message,
+    intentInstruction: prescriptionPrompt
+  });
+  const prescriptionResp = await callAiChat(env, prescriptionMessages);
   const analysis = await prescriptionResp.text();
   
   response.message = analysis;
@@ -2267,7 +2384,15 @@ async function processPrescriptionIntent(env: Env, message: string, conversation
   return response;
 }
 
-async function processGeneralHealthIntent(env: Env, message: string, conversationId: string, conversationState: any): Promise<any> {
+async function processGeneralHealthIntent(
+  env: Env,
+  message: string,
+  conversationId: string,
+  conversationState: any,
+  userMedications: any[] = [],
+  history: Array<{ role: string; content: string }> = [],
+  user?: any
+): Promise<any> {
   const response: any = {
     intent: "GENERAL",
     conversationId,
@@ -2279,7 +2404,16 @@ async function processGeneralHealthIntent(env: Env, message: string, conversatio
     `Give a concise (2-4 sentences), helpful, non-diagnostic answer. Do not diagnose or prescribe. ` +
     `If the question is outside medicine information, symptoms, or medication management, briefly guide them ` +
     `and recommend consulting a qualified healthcare professional for personal medical advice.`;
-  const generalResp = await callAi(env, generalPrompt);
+  const generalMessages = buildConversationContext({
+    user,
+    userMedications,
+    activeTopic: conversationState.lastMedicineName,
+    history,
+    summary: conversationState?.summary,
+    currentMessage: message,
+    intentInstruction: generalPrompt
+  });
+  const generalResp = await callAiChat(env, generalMessages);
   const analysis = await generalResp.text();
   
   response.message = analysis;
@@ -2349,56 +2483,187 @@ async function processUnifiedChat(
     conversationState.currentIntent = currentIntent;
   }
   
+  // Rolling summary of older conversation turns when conversation gets long
+  if (Array.isArray(history) && history.length >= 8 && !conversationState.summary) {
+    const topics: string[] = [];
+    if (conversationState.lastMedicineName) topics.push(`Medicine: ${conversationState.lastMedicineName}`);
+    if (conversationState.reportedSymptom) topics.push(`Symptom: ${conversationState.reportedSymptom}`);
+    conversationState.summary = topics.length > 0
+      ? `Prior discussion covered: ${topics.join(", ")}.`
+      : "User asked questions about health and medications.";
+  }
+
   // Process based on intent
   switch (currentIntent) {
     case "MEDICINE_INFO":
-      return await processMedicineInfoIntent(env, message, conversationId, conversationState, userMedications, history);
+      return await processMedicineInfoIntent(env, message, conversationId, conversationState, userMedications, history, user);
       
     case "SYMPTOM_CHECK":
       return await processSymptomCheckIntent(env, message, conversationId, conversationState, userMedications);
       
     case "SIDE_EFFECT":
-      return await processSideEffectIntent(env, message, conversationId, conversationState, userMedications, history);
+      return await processSideEffectIntent(env, message, conversationId, conversationState, userMedications, history, user);
       
     case "INTERACTION":
-      return await processInteractionIntent(env, message, conversationId, conversationState, userMedications, history);
+      return await processInteractionIntent(env, message, conversationId, conversationState, userMedications, history, user);
       
     case "SCHEDULE":
       return await processScheduleIntent(env, message, conversationId, conversationState, userMedications, history);
       
     case "PRESCRIPTION":
-      return await processPrescriptionIntent(env, message, conversationId, conversationState);
+      return await processPrescriptionIntent(env, message, conversationId, conversationState, userMedications, history, user);
       
     default:
-      return await processGeneralHealthIntent(env, message, conversationId, conversationState);
+      return await processGeneralHealthIntent(env, message, conversationId, conversationState, userMedications, history, user);
   }
 }
 
-async function callAi(env: Env, prompt: string): Promise<Response> {
-  // Input validation
-  if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
-    console.error('Invalid prompt provided to callAi:', prompt);
+interface ChatMessage {
+  role: "system" | "user" | "assistant";
+  content: string;
+}
+
+interface CallAiChatOptions {
+  temperature?: number;
+}
+
+function buildConversationContext(params: {
+  systemPrompt?: string;
+  user?: any;
+  userMedications?: any[];
+  activeTopic?: string | null;
+  history?: Array<{ role: string; content: string }>;
+  summary?: string | null;
+  currentMessage: string;
+  intentInstruction?: string;
+}): ChatMessage[] {
+  const {
+    systemPrompt,
+    user,
+    userMedications = [],
+    activeTopic,
+    history = [],
+    summary,
+    currentMessage,
+    intentInstruction
+  } = params;
+
+  let systemText = systemPrompt || (
+    "You are DoseBuddy's AI Health Assistant, a helpful, empathetic, and knowledgeable health companion.\n" +
+    "Guidelines:\n" +
+    "- Provide clear, concise (2-4 sentences or structured bullets), educational information.\n" +
+    "- Maintain conversational context across multi-turn dialogue. Resolve references ('it', 'those tablets', 'its side effects') using the current active topic.\n" +
+    "- Clearly distinguish between general medicine information and medications saved in the user's personal DoseBuddy schedule.\n" +
+    "- Non-diagnostic: Do not diagnose conditions, prescribe prescription dosages, or guarantee clinical outcomes.\n" +
+    "- Remind users to consult their healthcare provider or pharmacist for medical advice.\n" +
+    "- If urgent or severe emergency symptoms are reported, advise immediate emergency care."
+  );
+
+  let contextBlock = "\n\n[PATIENT CONTEXT]";
+  if (user?.name) {
+    contextBlock += `\nUser: ${user.name}`;
+  }
+  if (userMedications.length > 0) {
+    const medList = userMedications.map(m => `• ${m.name} (${m.dosage || 'dosage not specified'})`).join("\n");
+    contextBlock += `\nSaved Medications in DoseBuddy:\n${medList}`;
+  } else {
+    contextBlock += `\nSaved Medications in DoseBuddy: None on file.`;
+  }
+  if (activeTopic) {
+    contextBlock += `\nActive Focus / Medicine Topic: "${activeTopic}"`;
+  }
+  if (summary) {
+    contextBlock += `\nPrior Conversation Summary: ${summary}`;
+  }
+  systemText += contextBlock;
+
+  if (intentInstruction) {
+    systemText += `\n\n[TASK INSTRUCTION]\n${intentInstruction}`;
+  }
+
+  const messages: ChatMessage[] = [
+    { role: "system", content: systemText }
+  ];
+
+  const verbatimTurns = history.slice(-8);
+  for (const turn of verbatimTurns) {
+    if (turn && (turn.role === "user" || turn.role === "assistant") && turn.content) {
+      messages.push({
+        role: turn.role,
+        content: turn.content
+      });
+    }
+  }
+
+  messages.push({
+    role: "user",
+    content: currentMessage
+  });
+
+  return messages;
+}
+
+async function callAiChat(env: Env, messages: ChatMessage[], options?: CallAiChatOptions): Promise<Response> {
+  if (!Array.isArray(messages) || messages.length === 0) {
     return plain("Please provide a valid question or message.");
   }
 
-  const trimmedPrompt = prompt.trim();
-  
-  // Check if API keys are configured
   const hasGemini = Boolean(env.GEMINI_API_KEY);
   const hasGroq = Boolean(env.GROQ_API_KEY);
-  
+
   if (!hasGemini && !hasGroq) {
-    console.error('No AI provider API keys configured');
+    console.error("No AI provider API keys configured");
     return plain("AI health assistant is temporarily unavailable due to configuration issues. Please consult your physician or pharmacist.");
   }
 
-  // 1. Try Gemini models if GEMINI_API_KEY is configured
+  const temperature = options?.temperature ?? 0.2;
+
+  // 1. Try Gemini
   if (hasGemini) {
     const models = [
       env.GEMINI_MODEL || "gemini-2.5-flash",
       "gemini-2.5-flash-lite"
     ];
-    
+
+    const systemParts: string[] = [];
+    const contents: Array<{ role: "user" | "model"; parts: [{ text: string }] }> = [];
+
+    for (const msg of messages) {
+      if (msg.role === "system") {
+        if (msg.content.trim()) systemParts.push(msg.content.trim());
+      } else {
+        const geminiRole = msg.role === "assistant" ? "model" : "user";
+        const text = msg.content.trim();
+        if (!text) continue;
+
+        if (contents.length > 0 && contents[contents.length - 1].role === geminiRole) {
+          contents[contents.length - 1].parts[0].text += `\n\n${text}`;
+        } else {
+          contents.push({ role: geminiRole, parts: [{ text }] });
+        }
+      }
+    }
+
+    if (contents.length > 0 && contents[0].role === "model") {
+      contents.unshift({ role: "user", parts: [{ text: "Hello" }] });
+    }
+    if (contents.length === 0) {
+      contents.push({ role: "user", parts: [{ text: systemParts.join("\n\n") || "Hello" }] });
+    }
+    if (systemParts.length > 0 && contents.length > 0 && contents[0].role === "user") {
+      contents[0].parts[0].text = systemParts.join("\n\n") + "\n\n" + contents[0].parts[0].text;
+    }
+
+    const payload: any = {
+      contents,
+      generationConfig: { temperature }
+    };
+    if (systemParts.length > 0) {
+      payload.system_instruction = {
+        parts: [{ text: systemParts.join("\n\n") }]
+      };
+    }
+
     for (const model of models) {
       try {
         console.log(`Attempting Gemini request with model: ${model}`);
@@ -2407,16 +2672,7 @@ async function callAi(env: Env, prompt: string): Promise<Response> {
           {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-              contents: [{ parts: [{ text: trimmedPrompt }] }],
-              generationConfig: { temperature: 0.2 }
-            }),
-            // Bound the provider call at 20s. The per-model try/catch below
-            // catches an AbortError/timeout and falls through to the next model,
-            // so a single slow provider never hangs the whole request. The
-            // frontend /api/ai/chat timeout is 30s (>20s) so the Worker always
-            // responds first. (The prescription Gemini calls keep their own
-            // separate 20s AbortSignal.timeout sites.)
+            body: JSON.stringify(payload),
             signal: AbortSignal.timeout(20000)
           }
         );
@@ -2440,14 +2696,19 @@ async function callAi(env: Env, prompt: string): Promise<Response> {
     }
   }
 
-  // 2. Try Groq models if GROQ_API_KEY is configured
+  // 2. Try Groq
   if (hasGroq) {
     const models = [
       env.GROQ_MODEL || "llama-3.3-70b-versatile",
       "llama-3.1-8b-instant",
       "openai/gpt-oss-20b"
     ];
-    
+
+    const groqMessages = messages.map(m => ({
+      role: m.role,
+      content: m.content
+    }));
+
     for (const model of models) {
       try {
         console.log(`Attempting Groq request with model: ${model}`);
@@ -2459,8 +2720,8 @@ async function callAi(env: Env, prompt: string): Promise<Response> {
           },
           body: JSON.stringify({
             model,
-            messages: [{ role: "user", content: trimmedPrompt }],
-            temperature: 0.2
+            messages: groqMessages,
+            temperature
           }),
           signal: AbortSignal.timeout(20000)
         });
@@ -2484,18 +2745,10 @@ async function callAi(env: Env, prompt: string): Promise<Response> {
     }
   }
 
-  // 3. All AI providers failed (or were aborted by the 20s timeout). The
-  // per-model try/catch above already let each failure/abort fall through to
-  // the next provider. Preserve the deterministic JSON-array fallback for the
-  // legacy health-insights request (sent via /api/medicine/ai-info and parsed
-  // by the frontend as a JSON array of insights). For every other prompt,
-  // surface a recoverable error to the caller instead of fabricating a canned
-  // medical answer: the /api/ai/chat route's catch returns { success:false,
-  // error }, which the frontend shows as a clear, recoverable error (no
-  // fabricated answer, no silent swallow).
-  console.warn('All AI providers failed');
+  console.warn("All AI providers failed");
 
-  if (prompt.includes("health insights") || prompt.includes("Patient data") || prompt.includes("JSON array")) {
+  const lastUserMsg = [...messages].reverse().find(m => m.role === "user")?.content || "";
+  if (lastUserMsg.includes("health insights") || lastUserMsg.includes("Patient data") || lastUserMsg.includes("JSON array")) {
     const fallbackArray = [
       { title: "Medication Adherence", message: "Keep taking your scheduled doses consistently for optimal health outcomes.", type: "info", icon: "💊" },
       { title: "Stay Consistent", message: "Maintaining a daily routine helps establish strong adherence habits.", type: "success", icon: "⭐" },
@@ -2506,6 +2759,10 @@ async function callAi(env: Env, prompt: string): Promise<Response> {
   }
 
   throw new Error("AI service temporarily unavailable. Please try again later.");
+}
+
+async function callAi(env: Env, prompt: string): Promise<Response> {
+  return await callAiChat(env, [{ role: "user", content: prompt }]);
 }
 
 const worker = {
@@ -2674,10 +2931,100 @@ const worker = {
         return await callAi(env, `Give safe, non-diagnostic guidance for these symptoms: ${symptoms}`);
       }
 
+      if (path === "/api/ai/conversations" && request.method === "GET") {
+        try {
+          const [rows] = await query<any[]>(
+            env,
+            "SELECT c.id, c.title, c.active_topic, c.summary, c.created_at, c.updated_at, " +
+            "COUNT(m.id) as message_count " +
+            "FROM ai_conversations c " +
+            "LEFT JOIN ai_messages m ON m.conversation_id = c.id " +
+            "WHERE c.user_id = ? " +
+            "GROUP BY c.id " +
+            "ORDER BY c.updated_at DESC " +
+            "LIMIT 50",
+            [actor.id]
+          );
+          return json({ success: true, conversations: rows || [] });
+        } catch (error: any) {
+          if (optionalTableMissing(error, "ai_conversations") || optionalTableMissing(error, "ai_messages")) {
+            return json({ success: true, conversations: [] });
+          }
+          console.error("[AI Conversations] GET error:", error);
+          return json({ success: false, error: "Failed to load conversations" }, 500);
+        }
+      }
+
+      const convDetailMatch = path.match(/^\/api\/ai\/conversations\/([^/]+)$/);
+      if (convDetailMatch && request.method === "GET") {
+        const convId = decodeURIComponent(convDetailMatch[1]);
+        try {
+          const [convRows] = await query<any[]>(
+            env,
+            "SELECT id, user_id, title, active_topic, summary, created_at, updated_at FROM ai_conversations WHERE id = ?",
+            [convId]
+          );
+          if (!convRows || convRows.length === 0) {
+            return json({ success: false, error: "Conversation not found" }, 404);
+          }
+          const conv = convRows[0];
+          if (Number(conv.user_id) !== Number(actor.id)) {
+            return json({ success: false, error: "Conversation not found" }, 404);
+          }
+
+          const [messages] = await query<any[]>(
+            env,
+            "SELECT id, role, content, intent, active_topic, created_at FROM ai_messages WHERE conversation_id = ? ORDER BY created_at ASC, id ASC",
+            [convId]
+          );
+
+          return json({
+            success: true,
+            conversation: {
+              ...conv,
+              messages: messages || []
+            }
+          });
+        } catch (error: any) {
+          if (optionalTableMissing(error, "ai_conversations") || optionalTableMissing(error, "ai_messages")) {
+            return json({ success: false, error: "Conversation not found" }, 404);
+          }
+          console.error("[AI Conversation] Detail error:", error);
+          return json({ success: false, error: "Failed to load conversation details" }, 500);
+        }
+      }
+
+      if (convDetailMatch && request.method === "DELETE") {
+        const convId = decodeURIComponent(convDetailMatch[1]);
+        try {
+          const [convRows] = await query<any[]>(
+            env,
+            "SELECT id, user_id FROM ai_conversations WHERE id = ?",
+            [convId]
+          );
+          if (!convRows || convRows.length === 0) {
+            return json({ success: false, error: "Conversation not found" }, 404);
+          }
+          if (Number(convRows[0].user_id) !== Number(actor.id)) {
+            return json({ success: false, error: "Unauthorized" }, 403);
+          }
+
+          await query(env, "DELETE FROM ai_conversations WHERE id = ? AND user_id = ?", [convId, actor.id]);
+          return json({ success: true, message: "Conversation deleted" });
+        } catch (error: any) {
+          if (optionalTableMissing(error, "ai_conversations")) {
+            return json({ success: true, message: "Conversation deleted" });
+          }
+          console.error("[AI Conversation] DELETE error:", error);
+          return json({ success: false, error: "Failed to delete conversation" }, 500);
+        }
+      }
+
       if (path === "/api/ai/chat" && request.method === "POST") {
         const { body: b } = await requestBody(request);
         const message = String(b.message ?? "").trim();
-        const conversationId = String(b.conversationId ?? "");
+        const incomingConvId = String(b.conversationId ?? "").trim();
+        const conversationId = incomingConvId || ("chat_" + Date.now() + "_" + Math.random().toString(36).substring(2, 9));
         const conversationState = b.conversationState || {};
         const isOptionSelection = b.isOptionSelection === true;
         const history: Array<{ role: string; content: string }> = Array.isArray(b.history)
@@ -2698,6 +3045,7 @@ const worker = {
           );
 
           const chatResponse = await processUnifiedChat(env, message, conversationId, conversationState, actor, userMedications, isOptionSelection, history);
+          chatResponse.conversationId = conversationId;
           
           // Log activity based on intent
           const intent = chatResponse.intent || "GENERAL";
@@ -2710,6 +3058,41 @@ const worker = {
             ]);
           } catch {
             // Activity logging failure is non-fatal
+          }
+
+          // Persist conversation and messages to database if tables exist (with optionalTableMissing fallback)
+          try {
+            const activeTopic = chatResponse.medicineName || conversationState.lastMedicineName || conversationState.activeTopic || null;
+            const title = message.length > 40 ? message.substring(0, 37) + "..." : message;
+
+            await query(
+              env,
+              "INSERT INTO ai_conversations (id, user_id, title, active_topic, summary, created_at, updated_at) " +
+              "VALUES (?, ?, ?, ?, ?, NOW(), NOW()) " +
+              "ON DUPLICATE KEY UPDATE " +
+              "active_topic = COALESCE(?, active_topic), " +
+              "summary = COALESCE(?, summary), " +
+              "updated_at = NOW()",
+              [conversationId, actor.id, title, activeTopic, conversationState.summary || null, activeTopic, conversationState.summary || null]
+            );
+
+            await query(
+              env,
+              "INSERT INTO ai_messages (conversation_id, user_id, role, content, intent, active_topic, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())",
+              [conversationId, actor.id, "user", message, intent, activeTopic]
+            );
+
+            if (chatResponse.message) {
+              await query(
+                env,
+                "INSERT INTO ai_messages (conversation_id, user_id, role, content, intent, active_topic, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())",
+                [conversationId, actor.id, "assistant", chatResponse.message, intent, activeTopic]
+              );
+            }
+          } catch (dbErr: any) {
+            if (!optionalTableMissing(dbErr, "ai_conversations") && !optionalTableMissing(dbErr, "ai_messages")) {
+              console.warn("[AI Chat] Non-fatal DB persistence error:", dbErr);
+            }
           }
           
           return json({ success: true, ...chatResponse });

@@ -908,6 +908,24 @@
                 </div>
             </div>
 
+            <!-- Past Conversations Modal -->
+            <div id="past-chats-modal" class="modal-backdrop" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="past-chats-modal-title">
+                <div class="modal-content modal-card" style="max-width:540px;width:92%;max-height:80vh;display:flex;flex-direction:column;border-radius:12px;box-shadow:0 10px 25px rgba(0,0,0,0.2);">
+                    <div class="modal-header" style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--border-color, #e2e8f0);">
+                        <h3 id="past-chats-modal-title" style="margin:0;font-size:1.15rem;font-weight:600;display:flex;align-items:center;gap:8px;">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="18" height="18">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                            </svg>
+                            Past Conversations
+                        </h3>
+                        <button id="close-past-chats-btn" class="modal-close-btn" type="button" aria-label="Close" style="background:none;border:none;cursor:pointer;font-size:1.5rem;line-height:1;color:var(--text-muted, #64748b);">&times;</button>
+                    </div>
+                    <div id="past-chats-list" class="modal-body" style="padding:16px 20px;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:10px;">
+                        <p style="color:var(--text-muted, #64748b);text-align:center;">Loading past conversations...</p>
+                    </div>
+                </div>
+            </div>
+
         </section>
 
         <section id="add-medicine-view" class="view app-view">
@@ -2048,12 +2066,20 @@
                         <p class="page-subtitle">AI-powered health guidance and medication support</p>
                     </div>
                 </div>
-                <button class="secondary-btn" id="new-conversation-btn">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="14" height="14">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
-                    </svg>
-                    New Chat
-                </button>
+                <div class="page-header-actions" style="display:flex;gap:8px;align-items:center;">
+                    <button class="secondary-btn" id="past-chats-btn" type="button" title="View conversation history">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="14" height="14">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                        Past Chats
+                    </button>
+                    <button class="secondary-btn" id="new-conversation-btn" type="button">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="14" height="14">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
+                        </svg>
+                        New Chat
+                    </button>
+                </div>
             </div>
 
             <div class="ai-chat-container">
