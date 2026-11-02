@@ -1327,6 +1327,10 @@ function resolveAntecedentMedicine(conversationState: any, history: Array<{ role
         if (isPlausibleBareMedicineName(text) && !isQuestionOrPredicatePhrase(text) && !isMedicinePronounOrReference(text)) {
           return text;
         }
+        const extracted = extractMedicineName(text);
+        if (extracted && extracted !== MEDICINE_REFERENCE_MARKER && !isMedicinePronounOrReference(extracted) && !isPersonalMedicationPhrase(extracted, text)) {
+          return extracted;
+        }
       }
     }
   }
@@ -2940,7 +2944,7 @@ const worker = {
             "FROM ai_conversations c " +
             "LEFT JOIN ai_messages m ON m.conversation_id = c.id " +
             "WHERE c.user_id = ? " +
-            "GROUP BY c.id " +
+            "GROUP BY c.id, c.title, c.active_topic, c.summary, c.created_at, c.updated_at " +
             "ORDER BY c.updated_at DESC " +
             "LIMIT 50",
             [actor.id]
@@ -3044,7 +3048,39 @@ const worker = {
             [actor.id, today, today]
           );
 
-          const chatResponse = await processUnifiedChat(env, message, conversationId, conversationState, actor, userMedications, isOptionSelection, history);
+          let effectiveHistory = history;
+          if (incomingConvId) {
+            try {
+              const [convRows] = await query<any[]>(
+                env,
+                "SELECT id, active_topic, summary FROM ai_conversations WHERE id = ? AND user_id = ?",
+                [incomingConvId, actor.id]
+              );
+              if (convRows && convRows.length > 0) {
+                const serverTopic = convRows[0].active_topic;
+                const serverSummary = convRows[0].summary;
+                if (serverTopic && !conversationState.lastMedicineName && !conversationState.activeTopic) {
+                  conversationState.lastMedicineName = serverTopic;
+                  conversationState.activeTopic = serverTopic;
+                }
+                if (serverSummary && !conversationState.summary) {
+                  conversationState.summary = serverSummary;
+                }
+              }
+              const [msgRows] = await query<any[]>(
+                env,
+                "SELECT role, content FROM ai_messages WHERE conversation_id = ? AND user_id = ? ORDER BY created_at ASC, id ASC LIMIT 50",
+                [incomingConvId, actor.id]
+              );
+              if (msgRows && msgRows.length > 0) {
+                effectiveHistory = msgRows.map(m => ({ role: m.role, content: m.content }));
+              }
+            } catch {
+              // Fallback to client history if database query fails or tables missing
+            }
+          }
+
+          const chatResponse = await processUnifiedChat(env, message, conversationId, conversationState, actor, userMedications, isOptionSelection, effectiveHistory);
           chatResponse.conversationId = conversationId;
           
           // Log activity based on intent

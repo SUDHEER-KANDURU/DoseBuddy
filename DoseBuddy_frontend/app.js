@@ -5406,6 +5406,92 @@ function getAiStorageKey() {
         : "dosebuddy_ai_chat_guest";
 }
 
+function getAiConversationsIndexKey() {
+    return (typeof currentUser !== "undefined" && currentUser?.id)
+        ? `dosebuddy_ai_conversations_${currentUser.id}`
+        : "dosebuddy_ai_conversations_guest";
+}
+
+function getAiConversationDetailKey(convId) {
+    const uid = (typeof currentUser !== "undefined" && currentUser?.id) ? currentUser.id : "guest";
+    return `dosebuddy_ai_conv_${uid}_${convId}`;
+}
+
+function getLocalConversationIndex() {
+    try {
+        const raw = localStorage.getItem(getAiConversationsIndexKey());
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
+}
+
+function saveLocalConversationIndex(list) {
+    try {
+        if (!Array.isArray(list)) return;
+        localStorage.setItem(getAiConversationsIndexKey(), JSON.stringify(list.slice(0, 50)));
+    } catch (e) {
+        console.warn("Failed to persist local conversation index:", e);
+    }
+}
+
+function deriveConversationTitle(firstMessage, topic) {
+    if (topic && typeof topic === "string" && topic.trim().length > 1) {
+        const cleanTopic = topic.trim();
+        return cleanTopic.charAt(0).toUpperCase() + cleanTopic.slice(1);
+    }
+    if (firstMessage && typeof firstMessage === "string") {
+        const clean = firstMessage.trim().replace(/^[\r\n]+|[\r\n]+$/g, "");
+        if (clean.length <= 40) return clean;
+        return clean.slice(0, 37) + "...";
+    }
+    return "Health Consultation";
+}
+
+function updateLocalConversationIndex(convId, updateFields = {}) {
+    if (!convId) return;
+    try {
+        let list = getLocalConversationIndex();
+        let existing = list.find(c => c.id === convId);
+        const now = new Date().toISOString();
+
+        if (!existing) {
+            existing = {
+                id: convId,
+                title: updateFields.title || "Health Conversation",
+                active_topic: updateFields.active_topic || null,
+                created_at: now,
+                updated_at: now,
+                message_count: updateFields.message_count || 1
+            };
+            list.unshift(existing);
+        } else {
+            if (updateFields.title) existing.title = updateFields.title;
+            if (updateFields.active_topic) existing.active_topic = updateFields.active_topic;
+            if (typeof updateFields.message_count === "number") existing.message_count = updateFields.message_count;
+            existing.updated_at = now;
+            list = [existing, ...list.filter(c => c.id !== convId)];
+        }
+        saveLocalConversationIndex(list);
+    } catch (e) {
+        console.warn("Failed to update local conversation index:", e);
+    }
+}
+
+function removeLocalConversation(convId) {
+    if (!convId) return;
+    try {
+        let list = getLocalConversationIndex();
+        list = list.filter(c => c.id !== convId);
+        saveLocalConversationIndex(list);
+        localStorage.removeItem(getAiConversationDetailKey(convId));
+    } catch (e) {
+        console.warn("Failed to remove local conversation:", e);
+    }
+}
+
 function saveAiConversationLocally() {
     try {
         const key = getAiStorageKey();
@@ -5422,6 +5508,21 @@ function saveAiConversationLocally() {
             html: chatMessages ? chatMessages.innerHTML : ""
         };
         localStorage.setItem(key, JSON.stringify(data));
+
+        // Save conversation-specific cache and update conversation index
+        if (aiConversationState.conversationId) {
+            localStorage.setItem(getAiConversationDetailKey(aiConversationState.conversationId), JSON.stringify(data));
+            const firstUserTurn = (aiConversationState.history || []).find(h => h.role === "user");
+            const title = deriveConversationTitle(
+                firstUserTurn?.content,
+                aiConversationState.state?.activeTopic || aiConversationState.state?.lastMedicineName
+            );
+            updateLocalConversationIndex(aiConversationState.conversationId, {
+                title,
+                active_topic: aiConversationState.state?.activeTopic || aiConversationState.state?.lastMedicineName || null,
+                message_count: aiConversationState.history?.length || 1
+            });
+        }
     } catch (e) {
         console.warn("Failed to save AI chat locally:", e);
     }
@@ -5650,7 +5751,11 @@ function setupUnifiedAiChat() {
         closePastChatsBtn.addEventListener("click", closePastChatsModal);
     }
 
-    // Close past chats modal on backdrop click or Escape key
+    // Close past chats drawer on backdrop click, drawer click, or Escape key
+    const pastChatsDrawerBackdrop = document.getElementById("past-chats-drawer-backdrop");
+    if (pastChatsDrawerBackdrop) {
+        pastChatsDrawerBackdrop.addEventListener("click", closePastChatsModal);
+    }
     const pastChatsModal = document.getElementById("past-chats-modal");
     if (pastChatsModal) {
         pastChatsModal.addEventListener("click", (e) => {
@@ -5660,7 +5765,7 @@ function setupUnifiedAiChat() {
     window.addEventListener("keydown", (e) => {
         if (e.key === "Escape") {
             const modal = document.getElementById("past-chats-modal");
-            if (modal && modal.style.display === "flex") {
+            if (modal && (modal.classList.contains("open") || modal.classList.contains("backdrop-visible") || modal.style.display === "flex")) {
                 closePastChatsModal();
             }
         }
@@ -5816,35 +5921,68 @@ function addRetryButton(failedMessage) {
 
 function openPastChatsModal() {
     const modal = document.getElementById("past-chats-modal");
-    if (!modal) return;
-    modal.classList.add("backdrop-visible");
-    modal.style.display = "flex";
+    const backdrop = document.getElementById("past-chats-drawer-backdrop");
+    if (backdrop) {
+        backdrop.style.display = "block";
+        backdrop.classList.add("open", "backdrop-visible");
+    }
+    if (modal) {
+        modal.style.display = "flex";
+        void modal.offsetWidth;
+        modal.classList.add("open", "backdrop-visible");
+    }
     loadPastConversationsList();
 }
 
 function closePastChatsModal() {
     const modal = document.getElementById("past-chats-modal");
-    if (!modal) return;
-    modal.classList.remove("backdrop-visible");
-    modal.style.display = "none";
+    const backdrop = document.getElementById("past-chats-drawer-backdrop");
+    if (backdrop) {
+        backdrop.classList.remove("open", "backdrop-visible");
+        setTimeout(() => {
+            if (!backdrop.classList.contains("open")) backdrop.style.display = "none";
+        }, 250);
+    }
+    if (modal) {
+        modal.classList.remove("open", "backdrop-visible");
+        setTimeout(() => {
+            if (!modal.classList.contains("open")) modal.style.display = "none";
+        }, 250);
+    }
 }
 
 async function loadPastConversationsList() {
     const listEl = document.getElementById("past-chats-list");
     if (!listEl) return;
-    listEl.innerHTML = '<p style="color:var(--text-muted, #64748b);text-align:center;padding:20px 0;">Loading past conversations...</p>';
+
+    // Immediately render local cached conversations so the drawer is never empty or delayed
+    const cached = getLocalConversationIndex();
+    if (Array.isArray(cached) && cached.length > 0) {
+        renderPastChatsList(cached);
+    } else {
+        listEl.innerHTML = '<p style="color:var(--text-muted);text-align:center;padding:24px 0;">Loading past conversations...</p>';
+    }
 
     try {
         const resp = await authFetch(`${API_BASE}/ai/conversations`, {
             method: "GET",
             headers: { "Content-Type": "application/json" }
         });
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const data = await resp.json();
-        const convs = data.conversations || [];
-        renderPastChatsList(convs);
+        if (resp.ok) {
+            const data = await resp.json();
+            const serverConvs = Array.isArray(data.conversations) ? data.conversations : [];
+            const serverIds = new Set(serverConvs.map(c => c.id));
+            const localOnly = (cached || []).filter(c => !serverIds.has(c.id));
+            const merged = [...serverConvs, ...localOnly];
+            saveLocalConversationIndex(merged);
+            renderPastChatsList(merged);
+            return;
+        }
     } catch (err) {
-        console.warn("Failed to fetch past conversations:", err);
+        console.warn("Failed to fetch past conversations from server, retaining local cache:", err);
+    }
+
+    if (!cached || cached.length === 0) {
         renderPastChatsList([]);
     }
 }
@@ -5855,12 +5993,12 @@ function renderPastChatsList(conversations) {
 
     if (!Array.isArray(conversations) || conversations.length === 0) {
         listEl.innerHTML = `
-            <div style="text-align:center;padding:32px 16px;color:var(--text-muted, #64748b);">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" width="36" height="36" style="margin-bottom:8px;opacity:0.6;">
+            <div style="text-align:center;padding:36px 16px;color:var(--text-muted);">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" width="38" height="38" style="margin-bottom:10px;opacity:0.6;">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/>
                 </svg>
-                <p style="margin:0;font-size:0.95rem;font-weight:500;">No past conversations found</p>
-                <p style="margin:4px 0 0;font-size:0.85rem;">Your chat history with Health Assistant will appear here.</p>
+                <p style="margin:0;font-size:0.95rem;font-weight:600;color:var(--text-primary);">No past conversations found</p>
+                <p style="margin:4px 0 0;font-size:0.8125rem;">Your chat history with Health Assistant will appear here.</p>
             </div>
         `;
         return;
@@ -5869,26 +6007,28 @@ function renderPastChatsList(conversations) {
     listEl.innerHTML = "";
     conversations.forEach(conv => {
         const item = document.createElement("div");
-        item.className = "past-chat-item";
-        item.style.cssText = "display:flex;justify-content:space-between;align-items:center;padding:12px 16px;background:var(--card-bg, #ffffff);border:1px solid var(--border-color, #e2e8f0);border-radius:8px;cursor:pointer;transition:border-color 0.2s, background-color 0.2s;";
+        const isActive = (conv.id === aiConversationState.conversationId);
+        item.className = `past-chat-item ${isActive ? "active-chat" : ""}`;
 
-        const dateStr = conv.updated_at ? new Date(conv.updated_at).toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
+        const dateStr = conv.updated_at
+            ? new Date(conv.updated_at).toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
+            : "Recent";
         const topicHtml = conv.active_topic
-            ? `<span style="font-size:0.75rem;padding:2px 8px;border-radius:12px;background:rgba(20,184,166,0.12);color:#0d9488;font-weight:600;margin-left:8px;">${escapeHtml(conv.active_topic)}</span>`
+            ? `<span class="ai-conv-topic-badge">${escapeHtml(conv.active_topic)}</span>`
             : "";
 
         item.innerHTML = `
-            <div style="flex:1;min-width:0;margin-right:12px;">
+            <div style="flex:1;min-width:0;margin-right:10px;">
                 <div style="display:flex;align-items:center;margin-bottom:4px;">
-                    <span style="font-weight:600;font-size:0.95rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text-color, #0f172a);">${escapeHtml(conv.title || "Conversation")}</span>
+                    <span style="font-weight:600;font-size:0.925rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text-primary);">${escapeHtml(conv.title || "Conversation")}</span>
                     ${topicHtml}
                 </div>
-                <div style="font-size:0.8rem;color:var(--text-muted, #64748b);display:flex;gap:12px;">
+                <div style="font-size:0.775rem;color:var(--text-muted);display:flex;gap:10px;">
                     <span>${dateStr}</span>
                     <span>${conv.message_count ? `${conv.message_count} messages` : ""}</span>
                 </div>
             </div>
-            <button type="button" class="delete-chat-btn" data-id="${escapeHtml(conv.id)}" title="Delete conversation" style="background:none;border:none;cursor:pointer;padding:6px;color:var(--text-muted, #94a3b8);border-radius:4px;display:flex;align-items:center;">
+            <button type="button" class="delete-chat-btn" data-id="${escapeHtml(conv.id)}" title="Delete conversation" aria-label="Delete conversation">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" width="16" height="16">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"/>
                 </svg>
@@ -5904,17 +6044,18 @@ function renderPastChatsList(conversations) {
         delBtn?.addEventListener("click", async (e) => {
             e.stopPropagation();
             if (!confirm("Are you sure you want to delete this conversation?")) return;
+            removeLocalConversation(conv.id);
             try {
                 await authFetch(`${API_BASE}/ai/conversations/${encodeURIComponent(conv.id)}`, {
                     method: "DELETE"
                 });
-                if (aiConversationState.conversationId === conv.id) {
-                    startNewConversation();
-                }
-                loadPastConversationsList();
             } catch (delErr) {
-                console.error("Failed to delete conversation:", delErr);
+                console.warn("Server delete conversation error (cleaned up locally):", delErr);
             }
+            if (aiConversationState.conversationId === conv.id) {
+                startNewConversation();
+            }
+            loadPastConversationsList();
         });
 
         listEl.appendChild(item);
@@ -5926,13 +6067,35 @@ async function switchConversation(conversationId) {
         closePastChatsModal();
         showChatThinking();
 
-        const resp = await authFetch(`${API_BASE}/ai/conversations/${encodeURIComponent(conversationId)}`, {
-            method: "GET"
-        });
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const data = await resp.json();
-        const conv = data.conversation;
-        if (!conv) return;
+        let conv = null;
+        try {
+            const resp = await authFetch(`${API_BASE}/ai/conversations/${encodeURIComponent(conversationId)}`, {
+                method: "GET"
+            });
+            if (resp.ok) {
+                const data = await resp.json();
+                conv = data.conversation;
+            }
+        } catch (fetchErr) {
+            console.warn("Could not fetch conversation from server, checking local cache:", fetchErr);
+        }
+
+        if (!conv) {
+            const localSaved = localStorage.getItem(getAiConversationDetailKey(conversationId));
+            if (localSaved) {
+                const parsed = JSON.parse(localSaved);
+                conv = {
+                    id: parsed.conversationId || conversationId,
+                    active_topic: parsed.state?.activeTopic || parsed.state?.lastMedicineName,
+                    summary: parsed.state?.summary,
+                    messages: parsed.history || []
+                };
+            }
+        }
+
+        if (!conv) {
+            throw new Error("Conversation not found");
+        }
 
         aiConversationState.conversationId = conv.id;
         aiConversationState.state = {

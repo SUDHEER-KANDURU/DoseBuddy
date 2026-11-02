@@ -96,3 +96,67 @@ test("Past chats modal is a top-level backdrop outside hidden dashboard view", a
   const modalPos = html.indexOf('id="past-chats-modal"');
   assert.ok(modalPos > dashEnd, "past-chats-modal must be outside section#dashboard-view");
 });
+
+test("Past chats slide-out drawer is properly anchored to sidebar and topnav with opaque background", async () => {
+  const [html, css, app] = await Promise.all([
+    source("DoseBuddy_frontend/index.html"),
+    source("DoseBuddy_frontend/style.css"),
+    source("DoseBuddy_frontend/app.js")
+  ]);
+
+  // HTML structure: backdrop and drawer with proper header, close button and body
+  assert.match(html, /<div id="past-chats-drawer-backdrop" class="ai-drawer-backdrop"/);
+  assert.match(html, /<aside id="past-chats-modal" class="ai-drawer"/);
+  assert.match(html, /class="ai-drawer-header"/);
+  assert.match(html, /id="close-past-chats-btn" class="ai-drawer-close-btn"/);
+  assert.match(html, /id="past-chats-list" class="ai-drawer-body"/);
+
+  // CSS structure: desktop anchored to topnav and sidebar with opaque surface background
+  assert.match(css, /\.ai-drawer\s*\{[\s\S]*?top:\s*var\(--topnav-h\)/);
+  assert.match(css, /\.ai-drawer\s*\{[\s\S]*?left:\s*var\(--sidebar-w\)/);
+  assert.match(css, /\.ai-drawer\s*\{[\s\S]*?background:\s*var\(--surface\)/);
+  assert.match(css, /\.ai-drawer-backdrop\s*\{[\s\S]*?position:\s*fixed/);
+
+  // JS wire-up: open, close, and Escape key listeners
+  assert.match(app, /function openPastChatsModal\s*\(\)/);
+  assert.match(app, /function closePastChatsModal\s*\(\)/);
+  assert.match(app, /pastChatsDrawerBackdrop\.addEventListener\("click", closePastChatsModal\)/);
+  assert.match(app, /if\s*\(e\.key === "Escape"\)/);
+});
+
+test("Mobile chat action buttons use 50/50 grid and compact single-line placeholder", async () => {
+  const [html, css] = await Promise.all([
+    source("DoseBuddy_frontend/index.html"),
+    source("DoseBuddy_frontend/style.css")
+  ]);
+
+  // Single-line fits-all placeholder (34 chars, fits cleanly without multi-line clipping)
+  assert.match(html, /placeholder="Ask about health or medications\.\.\."/);
+
+  // Buttons are in .ai-header-actions
+  assert.match(html, /class="ai-header-actions page-header-actions"/);
+  assert.match(html, /id="past-chats-btn"/);
+  assert.match(html, /id="new-conversation-btn"/);
+
+  // CSS mobile 50/50 action row
+  assert.match(css, /\.ai-header-actions[\s\S]*?grid-template-columns:\s*1fr\s+1fr/);
+});
+
+test("Conversation history persists with local index cache fallback", async () => {
+  const app = await source("DoseBuddy_frontend/app.js");
+
+  // Local conversation indexing and fallback methods
+  assert.match(app, /function getAiConversationsIndexKey\s*\(\)/);
+  assert.match(app, /function getLocalConversationIndex\s*\(\)/);
+  assert.match(app, /function saveLocalConversationIndex\s*\(/);
+  assert.match(app, /function updateLocalConversationIndex\s*\(/);
+  assert.match(app, /function removeLocalConversation\s*\(/);
+
+  // Authoritative server fetch with graceful local cache fallback
+  assert.match(app, /const cached = getLocalConversationIndex\(\)/);
+  assert.match(app, /renderPastChatsList\(cached\)/);
+  assert.match(app, /authFetch\(`\${API_BASE}\/ai\/conversations`/);
+
+  // Detail loading with offline/unmigrated table fallback
+  assert.match(app, /getAiConversationDetailKey\(conversationId\)/);
+});
