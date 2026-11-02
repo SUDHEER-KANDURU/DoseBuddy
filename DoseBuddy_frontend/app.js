@@ -5526,6 +5526,21 @@ function wireStarterPrompts() {
     });
 }
 
+// Auto-resize and overflow helper for the Health Assistant textarea.
+// Prevents premature vertical scrollbars for single-line queries and placeholder text,
+// expands cleanly as user types (up to 140px), and enables scroll only when exceeding max-height.
+function syncChatInputHeight() {
+    const chatInput = document.getElementById("ai-chat-input");
+    if (!chatInput) return;
+    chatInput.style.height = "auto";
+    const minHeight = window.innerWidth <= 640 ? 44 : 46;
+    const maxHeight = 140;
+    const scrollHeight = chatInput.scrollHeight;
+    const newHeight = Math.max(minHeight, Math.min(scrollHeight, maxHeight));
+    chatInput.style.height = newHeight + "px";
+    chatInput.style.overflowY = scrollHeight > maxHeight ? "auto" : "hidden";
+}
+
 // Reset the chat back to a fresh conversation and restore the welcome screen.
 function startNewConversation() {
     const chatMessages = document.getElementById("ai-chat-messages");
@@ -5555,7 +5570,7 @@ function startNewConversation() {
     // Clear the input and re-enable the send button logic.
     if (chatInput) {
         chatInput.value = "";
-        chatInput.style.height = "auto";
+        syncChatInputHeight();
     }
     updateSendButton();
 }
@@ -5579,12 +5594,15 @@ function setupUnifiedAiChat() {
 
     // Auto-resize textarea
     chatInput.addEventListener("input", () => {
-        chatInput.style.height = "auto";
-        chatInput.style.height = Math.min(chatInput.scrollHeight, 120) + "px";
+        syncChatInputHeight();
 
         // Enable/disable send button
         chatSend.disabled = !chatInput.value.trim() || aiConversationState.isProcessing;
     });
+
+    // Calculate initial height and keep in sync on resize
+    syncChatInputHeight();
+    window.addEventListener("resize", syncChatInputHeight);
 
     // Hide the medical disclaimer when the keyboard opens (input focused) so the
     // composer stays visible above the keyboard on mobile.  A 300ms delay on blur
@@ -5632,6 +5650,22 @@ function setupUnifiedAiChat() {
         closePastChatsBtn.addEventListener("click", closePastChatsModal);
     }
 
+    // Close past chats modal on backdrop click or Escape key
+    const pastChatsModal = document.getElementById("past-chats-modal");
+    if (pastChatsModal) {
+        pastChatsModal.addEventListener("click", (e) => {
+            if (e.target === pastChatsModal) closePastChatsModal();
+        });
+    }
+    window.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") {
+            const modal = document.getElementById("past-chats-modal");
+            if (modal && modal.style.display === "flex") {
+                closePastChatsModal();
+            }
+        }
+    });
+
     // Restore active conversation if saved locally for current user
     loadAiConversationLocally();
 }
@@ -5650,7 +5684,7 @@ async function sendChatMessage(overrideMessage) {
     addChatMessage("user", message);
     if (!overrideMessage && chatInput) {
         chatInput.value = "";
-        chatInput.style.height = "auto";
+        syncChatInputHeight();
     }
 
     if (!Array.isArray(aiConversationState.history)) {

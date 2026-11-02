@@ -65,3 +65,34 @@ test("AI chat tracks visual viewport height for mobile keyboard resizing", async
   assert.match(app, /window\.visualViewport\?\.height \|\| window\.innerHeight/);
   assert.match(app, /visualViewport\?\.addEventListener\("resize", syncAiViewportHeight\)/);
 });
+
+test("Health Assistant chat layout is centered with comfortable SaaS desktop width", async () => {
+  const css = await source("DoseBuddy_frontend/style.css");
+  assert.match(css, /body\.view-ai \.main-content\s*\{[\s\S]*?align-items:\s*center/);
+  assert.match(css, /body\.view-ai #ai-view\s*\{[\s\S]*?max-width:\s*960px[\s\S]*?margin:\s*0\s+auto/);
+  assert.match(css, /body\.view-ai \.ai-chat-container\s*\{[\s\S]*?width:\s*100%/);
+  assert.match(css, /body\.view-ai #ai-view > \.ai-disclaimer-card\s*\{[\s\S]*?width:\s*100%/);
+});
+
+test("Health Assistant composer textarea prevents internal scrollbars and auto-sizes smoothly", async () => {
+  const [css, app] = await Promise.all([
+    source("DoseBuddy_frontend/style.css"),
+    source("DoseBuddy_frontend/app.js")
+  ]);
+  // CSS prevents premature scrollbars and gives sufficient line-height / padding
+  assert.match(css, /#ai-chat-input\s*\{[\s\S]*?overflow-y:\s*hidden/);
+  assert.match(css, /#ai-chat-input\s*\{[\s\S]*?min-height:\s*46px/);
+  assert.match(css, /#ai-chat-input\s*\{[\s\S]*?max-height:\s*140px/);
+  assert.match(css, /\.ai-send-btn\s*\{[\s\S]*?border-radius:\s*50%/);
+
+  // JS dynamically auto-sizes between 44/46px and 140px, setting overflowY only when exceeding max-height
+  assert.match(app, /function syncChatInputHeight\s*\(\)/);
+  assert.match(app, /scrollHeight > maxHeight \? ["']auto["'] : ["']hidden["']/);
+});
+
+test("Past chats modal is a top-level backdrop outside hidden dashboard view", async () => {
+  const html = await source("DoseBuddy_frontend/index.html");
+  const dashEnd = html.indexOf('</section>', html.indexOf('id="dashboard-view"'));
+  const modalPos = html.indexOf('id="past-chats-modal"');
+  assert.ok(modalPos > dashEnd, "past-chats-modal must be outside section#dashboard-view");
+});

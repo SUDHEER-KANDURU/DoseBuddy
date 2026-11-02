@@ -8454,31 +8454,37 @@ body.dark-mode .ai-other-option-send:focus-visible {
 }
 .ai-chat-input-area {
     border-top: 1px solid var(--border-color);
-    padding: var(--space-4);
+    padding: var(--space-3) var(--space-4);
     background: var(--bg-secondary);
     /* Never shrink — always pinned at the bottom of the chat container */
     flex-shrink: 0;
+    width: 100%;
+    box-sizing: border-box;
 }
 
 .ai-chat-input-container {
     display: flex;
     gap: var(--space-2);
     align-items: flex-end;
+    width: 100%;
 }
 
 #ai-chat-input {
     flex: 1;
-    min-height: 44px;
-    max-height: 120px;
-    padding: var(--space-3);
+    min-height: 46px;
+    max-height: 140px;
+    height: 46px;
+    padding: 11px 16px;
     border: 1px solid var(--border-color);
-    border-radius: var(--radius-lg);
+    border-radius: 24px;
     background: var(--bg-primary);
     color: var(--text-primary);
-    font-size: 0.875rem;
-    line-height: 1.4;
+    font-size: 0.9375rem;
+    line-height: 1.45;
     resize: none;
     font-family: inherit;
+    overflow-y: hidden; /* No premature internal scrollbar; toggled dynamically via JS when scrollHeight > max-height */
+    box-sizing: border-box;
     transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
@@ -8490,13 +8496,16 @@ body.dark-mode .ai-other-option-send:focus-visible {
 
 #ai-chat-input::placeholder {
     color: var(--text-tertiary);
+    opacity: 0.85;
 }
 
 .ai-send-btn {
-    width: 44px;
-    height: 44px;
+    width: 42px;
+    height: 42px;
+    min-width: 42px;
+    min-height: 42px;
     border: none;
-    border-radius: var(--radius-lg);
+    border-radius: 50%;
     /* Always teal — never inherits --primary which becomes near-white in dark mode */
     background: #00A19B;
     color: #ffffff;
@@ -8506,16 +8515,19 @@ body.dark-mode .ai-other-option-send:focus-visible {
     justify-content: center;
     transition: all 0.2s ease;
     flex-shrink: 0;
+    margin-bottom: 2px;
 }
 
 .ai-send-btn:hover:not(:disabled) {
     background: #008f89;
+    transform: scale(1.04);
 }
 
 .ai-send-btn:disabled {
     background: var(--bg-tertiary);
     color: var(--text-tertiary);
     cursor: not-allowed;
+    transform: none;
 }
 
 .ai-spinner {
@@ -8549,6 +8561,10 @@ body.view-ai .main-content {
     overflow: hidden;
     display: flex;
     flex-direction: column;
+    align-items: center; /* Horizontally center the chat column */
+    width: 100%;
+    box-sizing: border-box;
+    padding: var(--space-4) var(--space-6);
 }
 
 body:not(.view-ai) .main-content {
@@ -8558,6 +8574,9 @@ body:not(.view-ai) .main-content {
 body.view-ai #ai-view {
     flex: 1 1 0;          /* fills all available space in .main-content flex column */
     min-height: 0;        /* prevent flex default min-height:auto from blocking shrink */
+    width: 100%;
+    max-width: 960px;     /* comfortable readable SaaS width, perfectly centered */
+    margin: 0 auto;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -8565,6 +8584,41 @@ body.view-ai #ai-view {
 
 body.view-ai #ai-view .page-header {
     flex-shrink: 0;
+    margin-bottom: var(--space-3);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    width: 100%;
+}
+
+body.view-ai .page-header-actions {
+    display: flex;
+    gap: var(--space-2);
+    align-items: center;
+    flex-shrink: 0;
+}
+
+body.view-ai .page-header-actions .secondary-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 36px;
+    padding: 0 14px;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    border-radius: var(--radius-full);
+    white-space: nowrap;
+    border: 1px solid var(--border-color);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.15s ease;
+}
+
+body.view-ai .page-header-actions .secondary-btn:hover {
+    background: var(--bg-secondary);
+    border-color: var(--primary);
+    transform: translateY(-1px);
 }
 
 body.view-ai .ai-chat-container {
@@ -8576,22 +8630,39 @@ body.view-ai .ai-chat-container {
     margin-bottom: 0;
     display: flex;
     flex-direction: column;
+    width: 100%;
+    box-sizing: border-box;
 }
 
 body.view-ai .ai-chat-messages {
     flex: 1 1 0;
     min-height: 0;
     overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    scroll-behavior: smooth;
     -webkit-overflow-scrolling: touch;
+    padding: var(--space-4);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    body.view-ai .ai-chat-messages {
+        scroll-behavior: auto !important;
+    }
 }
 
 /* The safety notice remains outside the conversation history. The chat panel
    shrinks first, leaving messages as the only independently scrollable region. */
 body.view-ai #ai-view > .ai-disclaimer-card {
     flex: 0 0 auto;
+    width: 100%;
+    box-sizing: border-box;
     margin: var(--space-2) 0 0;
     /* Smooth hide/show when keyboard opens/closes on mobile */
-    transition: opacity 0.2s ease, max-height 0.2s ease;
+    transition: opacity 0.2s ease, max-height 0.2s ease, margin 0.2s ease;
     max-height: 200px;
     overflow: hidden;
 }
@@ -8622,6 +8693,52 @@ body.view-ai .ai-chat-input-area {
    The layout rules above already handle both desktop and mobile. This block
    keeps only mobile-specific tweaks. */
 @media (max-width: 768px) {
+    body.view-ai .main-content {
+        padding: var(--space-2) var(--space-3);
+    }
+
+    body.view-ai #ai-view {
+        max-width: 100%;
+    }
+
+    body.view-ai #ai-view .page-header {
+        margin-bottom: var(--space-2);
+        gap: var(--space-2);
+    }
+
+    body.view-ai #ai-view .page-icon-wrap {
+        width: 36px;
+        height: 36px;
+    }
+
+    body.view-ai #ai-view .page-icon {
+        width: 18px;
+        height: 18px;
+    }
+
+    body.view-ai #ai-view .page-title {
+        font-size: 1.125rem;
+    }
+
+    body.view-ai #ai-view .page-subtitle {
+        font-size: 0.72rem;
+    }
+
+    body.view-ai .page-header-actions .secondary-btn {
+        height: 32px;
+        padding: 0 10px;
+        font-size: 0.75rem;
+    }
+
+    body.view-ai .ai-chat-messages {
+        padding: var(--space-3);
+        gap: var(--space-3);
+    }
+
+    body.view-ai .ai-chat-input-area {
+        padding: var(--space-2) var(--space-3);
+    }
+
     /* Disclaimer stays below the chat panel on mobile. */
     body.view-ai #ai-view > .ai-disclaimer-card {
         padding: var(--space-2) var(--space-3);
@@ -8646,20 +8763,56 @@ body.view-ai .ai-chat-input-area {
     .ai-option-btn       { font-size: 0.875rem; }
     .ai-other-option-row { flex-wrap: nowrap; }
     .ai-other-option-input { font-size: 16px; } /* Prevent iOS zoom */
-    #ai-chat-input       { font-size: 16px; } /* Prevent iOS zoom */
+    #ai-chat-input       { font-size: 16px; padding: 10px 14px; min-height: 44px; height: 44px; border-radius: 22px; } /* Prevent iOS zoom */
+    .ai-send-btn         { width: 40px; height: 40px; min-width: 40px; min-height: 40px; }
 }
 
 @media (max-width: 480px) {
+    body.view-ai .main-content {
+        padding: var(--space-2);
+    }
+
     body.view-ai #ai-view > .ai-disclaimer-card {
         padding: var(--space-2);
     }
 
     body.view-ai .ai-chat-input-area {
-        padding: var(--space-3);
+        padding: var(--space-2);
     }
 }
 
 /* Dark mode specific adjustments */
+body.dark-mode .page-header-actions .secondary-btn {
+    background: #1a1a1a;
+    border-color: #333333;
+    color: #f5f5f5;
+}
+
+body.dark-mode .page-header-actions .secondary-btn:hover {
+    background: #252525;
+    border-color: #00A19B;
+}
+
+body.dark-mode #past-chats-modal .modal-content {
+    background: #1a1a1a;
+    border: 1px solid #333333;
+    color: #f5f5f5;
+}
+
+body.dark-mode #past-chats-modal .modal-header {
+    border-bottom: 1px solid #333333;
+}
+
+body.dark-mode .past-chat-item {
+    background: #222222 !important;
+    border-color: #333333 !important;
+}
+
+body.dark-mode .past-chat-item:hover {
+    background: #2a2a2a !important;
+    border-color: #00A19B !important;
+}
+
 body.dark-mode .ai-chat-container {
     border-color: var(--border-color-dark);
 }
