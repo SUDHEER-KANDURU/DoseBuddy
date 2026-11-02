@@ -97,30 +97,30 @@ test("Past chats modal is a top-level backdrop outside hidden dashboard view", a
   assert.ok(modalPos > dashEnd, "past-chats-modal must be outside section#dashboard-view");
 });
 
-test("Past chats slide-out drawer is properly anchored to sidebar and topnav with opaque background", async () => {
+test("Past chats modal renders as a centered cream modal popup with dark backdrop", async () => {
   const [html, css, app] = await Promise.all([
     source("DoseBuddy_frontend/index.html"),
     source("DoseBuddy_frontend/style.css"),
     source("DoseBuddy_frontend/app.js")
   ]);
 
-  // HTML structure: backdrop and drawer with proper header, close button and body
-  assert.match(html, /<div id="past-chats-drawer-backdrop" class="ai-drawer-backdrop"/);
-  assert.match(html, /<aside id="past-chats-modal" class="ai-drawer"/);
-  assert.match(html, /class="ai-drawer-header"/);
-  assert.match(html, /id="close-past-chats-btn" class="ai-drawer-close-btn"/);
-  assert.match(html, /id="past-chats-list" class="ai-drawer-body"/);
+  // HTML structure: DoseBuddy standard modal with cream modal-box, teal header icon, close button, body, and footer
+  assert.match(html, /<div id="past-chats-modal" class="modal"/);
+  assert.match(html, /class="modal-box modal-box-sm ai-past-chats-box"/);
+  assert.match(html, /class="modal-header"/);
+  assert.match(html, /class="modal-header-icon teal-bg"/);
+  assert.match(html, /id="close-past-chats-btn"/);
+  assert.match(html, /id="past-chats-list" class="modal-body ai-past-chats-body"/);
+  assert.match(html, /id="close-past-chats-footer-btn"/);
 
-  // CSS structure: desktop anchored to topnav and sidebar with opaque surface background
-  assert.match(css, /\.ai-drawer\s*\{[\s\S]*?top:\s*var\(--topnav-h\)/);
-  assert.match(css, /\.ai-drawer\s*\{[\s\S]*?left:\s*var\(--sidebar-w\)/);
-  assert.match(css, /\.ai-drawer\s*\{[\s\S]*?background:\s*var\(--surface\)/);
-  assert.match(css, /\.ai-drawer-backdrop\s*\{[\s\S]*?position:\s*fixed/);
+  // CSS structure: cream modal styling centered on screen
+  assert.match(css, /\.ai-past-chats-box\s*\{[\s\S]*?max-width:\s*min\(540px/);
+  assert.match(css, /\.ai-past-chats-body\s*\{[\s\S]*?overflow-y:\s*auto/);
+  assert.match(css, /\.teal-bg\s*\{[\s\S]*?color:\s*var\(--primary\)/);
 
-  // JS wire-up: open, close, and Escape key listeners
-  assert.match(app, /function openPastChatsModal\s*\(\)/);
-  assert.match(app, /function closePastChatsModal\s*\(\)/);
-  assert.match(app, /pastChatsDrawerBackdrop\.addEventListener\("click", closePastChatsModal\)/);
+  // JS wire-up: openModal, closeModal, and Escape key listeners
+  assert.match(app, /openModal\("past-chats-modal"\)/);
+  assert.match(app, /closeModal\("past-chats-modal"\)/);
   assert.match(app, /if\s*\(e\.key === "Escape"\)/);
 });
 

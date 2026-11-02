@@ -2167,27 +2167,29 @@
 
 <div id="modal-backdrop" class="modal-backdrop" aria-hidden="true"></div>
 
-<!-- Past Conversations Drawer & Backdrop -->
-<div id="past-chats-drawer-backdrop" class="ai-drawer-backdrop" style="display:none;" aria-hidden="true"></div>
-<aside id="past-chats-modal" class="ai-drawer" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="past-chats-modal-title">
-    <div class="ai-drawer-header">
-        <div class="ai-drawer-title-group">
-            <div class="ai-drawer-icon-wrap">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="18" height="18">
+<!-- Past Conversations Modal (DoseBuddy Signature Cream Style) -->
+<div id="past-chats-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="past-chats-modal-title">
+    <div class="modal-box modal-box-sm ai-past-chats-box">
+        <div class="modal-header">
+            <div class="modal-header-icon teal-bg">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"/>
                 </svg>
             </div>
             <div>
-                <h3 id="past-chats-modal-title" class="ai-drawer-title">Past Conversations</h3>
-                <p class="ai-drawer-subtitle">Your Health Assistant chat history</p>
+                <h3 class="modal-title" id="past-chats-modal-title">Past Conversations</h3>
+                <p class="modal-subtitle">Your Health Assistant chat history</p>
             </div>
+            <button class="modal-close" id="close-past-chats-btn" data-modal="past-chats-modal" type="button" aria-label="Close past conversations">&times;</button>
         </div>
-        <button id="close-past-chats-btn" class="ai-drawer-close-btn" type="button" aria-label="Close past conversations">&times;</button>
+        <div id="past-chats-list" class="modal-body ai-past-chats-body">
+            <p style="color:var(--text-muted);text-align:center;padding:24px 0;">Loading past conversations...</p>
+        </div>
+        <div class="modal-footer modal-footer-single">
+            <button class="modal-btn-secondary" id="close-past-chats-footer-btn" data-modal="past-chats-modal" type="button">Close</button>
+        </div>
     </div>
-    <div id="past-chats-list" class="ai-drawer-body">
-        <p style="color:var(--text-muted);text-align:center;padding:24px 0;">Loading past conversations...</p>
-    </div>
-</aside>
+</div>
 
 <div id="modal-profile" class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-profile-title">
     <div class="modal-box">

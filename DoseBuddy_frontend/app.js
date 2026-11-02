@@ -5400,21 +5400,30 @@ const aiConversationState = {
 let aiViewportObserverBound = false;
 let activeQuestionOptions = null;
 
+function getCurrentUserId() {
+    if (typeof currentUser !== "undefined" && currentUser?.id) {
+        return currentUser.id;
+    }
+    try {
+        const raw = localStorage.getItem("dosebuddy_current_user");
+        if (raw) {
+            const parsed = JSON.parse(raw);
+            if (parsed?.id) return parsed.id;
+        }
+    } catch {}
+    return "guest";
+}
+
 function getAiStorageKey() {
-    return (typeof currentUser !== "undefined" && currentUser?.id)
-        ? `dosebuddy_ai_chat_${currentUser.id}`
-        : "dosebuddy_ai_chat_guest";
+    return `dosebuddy_ai_chat_${getCurrentUserId()}`;
 }
 
 function getAiConversationsIndexKey() {
-    return (typeof currentUser !== "undefined" && currentUser?.id)
-        ? `dosebuddy_ai_conversations_${currentUser.id}`
-        : "dosebuddy_ai_conversations_guest";
+    return `dosebuddy_ai_conversations_${getCurrentUserId()}`;
 }
 
 function getAiConversationDetailKey(convId) {
-    const uid = (typeof currentUser !== "undefined" && currentUser?.id) ? currentUser.id : "guest";
-    return `dosebuddy_ai_conv_${uid}_${convId}`;
+    return `dosebuddy_ai_conv_${getCurrentUserId()}_${convId}`;
 }
 
 function getLocalConversationIndex() {
@@ -5750,12 +5759,12 @@ function setupUnifiedAiChat() {
     if (closePastChatsBtn) {
         closePastChatsBtn.addEventListener("click", closePastChatsModal);
     }
-
-    // Close past chats drawer on backdrop click, drawer click, or Escape key
-    const pastChatsDrawerBackdrop = document.getElementById("past-chats-drawer-backdrop");
-    if (pastChatsDrawerBackdrop) {
-        pastChatsDrawerBackdrop.addEventListener("click", closePastChatsModal);
+    const closePastChatsFooterBtn = document.getElementById("close-past-chats-footer-btn");
+    if (closePastChatsFooterBtn) {
+        closePastChatsFooterBtn.addEventListener("click", closePastChatsModal);
     }
+
+    // Modal click or backdrop click: close past chats
     const pastChatsModal = document.getElementById("past-chats-modal");
     if (pastChatsModal) {
         pastChatsModal.addEventListener("click", (e) => {
@@ -5765,7 +5774,7 @@ function setupUnifiedAiChat() {
     window.addEventListener("keydown", (e) => {
         if (e.key === "Escape") {
             const modal = document.getElementById("past-chats-modal");
-            if (modal && (modal.classList.contains("open") || modal.classList.contains("backdrop-visible") || modal.style.display === "flex")) {
+            if (modal && modal.classList.contains("modal-open")) {
                 closePastChatsModal();
             }
         }
@@ -5776,21 +5785,30 @@ function setupUnifiedAiChat() {
 }
 
 async function sendChatMessage(overrideMessage) {
+    const isOverride = typeof overrideMessage === "string";
     const chatInput = document.getElementById("ai-chat-input");
     const chatMessages = document.getElementById("ai-chat-messages");
 
-    const message = (typeof overrideMessage === "string" ? overrideMessage : chatInput.value).trim();
+    const message = (isOverride ? overrideMessage : (chatInput ? chatInput.value : "")).trim();
     if (!message || aiConversationState.isProcessing) return;
 
     aiConversationState.isProcessing = true;
     updateSendButton();
 
-    // Add user message to chat
-    addChatMessage("user", message);
-    if (!overrideMessage && chatInput) {
+    // Clear input immediately so text is NEVER stuck in chatbox
+    if (chatInput && (!isOverride || chatInput.value.trim() === message)) {
         chatInput.value = "";
         syncChatInputHeight();
     }
+
+    // Remove starter welcome banner on first user message so chat area is clean
+    const welcomeCard = chatMessages?.querySelector(".ai-welcome-message");
+    if (welcomeCard) {
+        welcomeCard.remove();
+    }
+
+    // Add user message to chat
+    addChatMessage("user", message);
 
     if (!Array.isArray(aiConversationState.history)) {
         aiConversationState.history = [];
@@ -5800,15 +5818,16 @@ async function sendChatMessage(overrideMessage) {
         aiConversationState.history = aiConversationState.history.slice(-20);
     }
 
+    // Ensure conversation has an ID and is persisted immediately into local history
+    if (!aiConversationState.conversationId) {
+        aiConversationState.conversationId = "chat_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9);
+    }
+    saveAiConversationLocally();
+
     // Show a thinking indicator while we wait for the assistant's reply
     showChatThinking();
 
     try {
-        // Generate conversation ID if new conversation
-        if (!aiConversationState.conversationId) {
-            aiConversationState.conversationId = "chat_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9);
-        }
-
         // 30s > the backend's 20s callAi cap, so the Worker always responds first
         // (a real answer or a recoverable error) instead of the browser aborting
         // at the 15s authFetch default and masking the real failure.
@@ -5920,42 +5939,40 @@ function addRetryButton(failedMessage) {
 }
 
 function openPastChatsModal() {
-    const modal = document.getElementById("past-chats-modal");
-    const backdrop = document.getElementById("past-chats-drawer-backdrop");
-    if (backdrop) {
-        backdrop.style.display = "block";
-        backdrop.classList.add("open", "backdrop-visible");
-    }
-    if (modal) {
-        modal.style.display = "flex";
-        void modal.offsetWidth;
-        modal.classList.add("open", "backdrop-visible");
-    }
+    openModal("past-chats-modal");
     loadPastConversationsList();
 }
 
 function closePastChatsModal() {
-    const modal = document.getElementById("past-chats-modal");
-    const backdrop = document.getElementById("past-chats-drawer-backdrop");
-    if (backdrop) {
-        backdrop.classList.remove("open", "backdrop-visible");
-        setTimeout(() => {
-            if (!backdrop.classList.contains("open")) backdrop.style.display = "none";
-        }, 250);
-    }
-    if (modal) {
-        modal.classList.remove("open", "backdrop-visible");
-        setTimeout(() => {
-            if (!modal.classList.contains("open")) modal.style.display = "none";
-        }, 250);
-    }
+    closeModal("past-chats-modal");
 }
 
 async function loadPastConversationsList() {
     const listEl = document.getElementById("past-chats-list");
     if (!listEl) return;
 
-    // Immediately render local cached conversations so the drawer is never empty or delayed
+    // Ensure currently active conversation is registered in local index
+    if (aiConversationState.conversationId) {
+        saveAiConversationLocally();
+    } else {
+        try {
+            const savedRaw = localStorage.getItem(getAiStorageKey());
+            if (savedRaw) {
+                const parsed = JSON.parse(savedRaw);
+                if (parsed?.conversationId && Array.isArray(parsed.history) && parsed.history.length > 0) {
+                    const firstUser = parsed.history.find(h => h.role === "user");
+                    const title = deriveConversationTitle(firstUser?.content, parsed.state?.activeTopic || parsed.state?.lastMedicineName);
+                    updateLocalConversationIndex(parsed.conversationId, {
+                        title,
+                        active_topic: parsed.state?.activeTopic || parsed.state?.lastMedicineName || null,
+                        message_count: parsed.history.length
+                    });
+                }
+            }
+        } catch {}
+    }
+
+    // Immediately render local cached conversations so the cream modal shows chats instantly
     const cached = getLocalConversationIndex();
     if (Array.isArray(cached) && cached.length > 0) {
         renderPastChatsList(cached);
@@ -6080,6 +6097,7 @@ async function switchConversation(conversationId) {
             console.warn("Could not fetch conversation from server, checking local cache:", fetchErr);
         }
 
+        let localHtml = "";
         if (!conv) {
             const localSaved = localStorage.getItem(getAiConversationDetailKey(conversationId));
             if (localSaved) {
@@ -6090,6 +6108,7 @@ async function switchConversation(conversationId) {
                     summary: parsed.state?.summary,
                     messages: parsed.history || []
                 };
+                localHtml = parsed.html || "";
             }
         }
 
@@ -6111,13 +6130,20 @@ async function switchConversation(conversationId) {
         const chatMessages = document.getElementById("ai-chat-messages");
         if (chatMessages) {
             chatMessages.innerHTML = "";
-            (conv.messages || []).forEach(m => {
-                addChatMessage(m.role, m.content);
-            });
+            if (localHtml) {
+                chatMessages.innerHTML = localHtml;
+                const lingering = chatMessages.querySelector(".ai-chat-thinking");
+                if (lingering) lingering.remove();
+            } else if (Array.isArray(conv.messages)) {
+                conv.messages.forEach(m => {
+                    addChatMessage(m.role, m.content);
+                });
+            }
             scrollChatToBottom(chatMessages, true);
         }
 
         saveAiConversationLocally();
+        showToast("Conversation opened", "info", 2000);
     } catch (err) {
         console.error("Failed to load conversation details:", err);
         showToast("Could not load selected conversation", "error");

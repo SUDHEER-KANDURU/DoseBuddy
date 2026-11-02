@@ -8805,146 +8805,24 @@ body.view-ai .ai-chat-input-area {
 }
 
 
-/* ── Past Conversations Drawer & Backdrop ──────────────────────── */
-.ai-drawer-backdrop {
-    position: fixed;
-    inset: 0;
-    background: rgba(15, 23, 42, 0.45);
-    backdrop-filter: blur(2px);
-    -webkit-backdrop-filter: blur(2px);
-    z-index: 550;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.25s ease;
+/* ── Past Conversations Modal: DoseBuddy Cream Pop-up in Centre ── */
+.teal-bg {
+    background: var(--primary-light);
+    color: var(--primary);
 }
 
-.ai-drawer-backdrop.open,
-.ai-drawer-backdrop.backdrop-visible {
-    opacity: 1;
-    pointer-events: auto;
-    display: block !important;
+.ai-past-chats-box {
+    max-width: min(540px, 94vw);
+    width: 100%;
 }
 
-.ai-drawer {
-    position: fixed;
-    top: var(--topnav-h);
-    left: var(--sidebar-w);
-    height: calc(100vh - var(--topnav-h));
-    height: calc(100dvh - var(--topnav-h));
-    width: 380px;
-    max-width: calc(100vw - var(--sidebar-w));
-    z-index: 560;
-    background: var(--surface);
-    border-right: 1px solid var(--border);
-    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.12);
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    transform: translateX(-100%);
-    transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-    box-sizing: border-box;
-}
-
-.ai-drawer.open,
-.ai-drawer.backdrop-visible {
-    transform: translateX(0);
-    display: flex !important;
-}
-
-@media (max-width: 1024px) {
-    .ai-drawer {
-        top: var(--topnav-h);
-        left: 0;
-        width: min(380px, 85vw);
-        max-width: 85vw;
-        box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2);
-    }
-}
-
-@media (max-width: 640px) {
-    .ai-drawer {
-        top: 0;
-        left: 0;
-        height: 100vh;
-        height: 100dvh;
-        width: min(340px, 92vw);
-        max-width: 92vw;
-        z-index: 950;
-    }
-    .ai-drawer-backdrop {
-        z-index: 940;
-    }
-}
-
-.ai-drawer-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 16px 20px;
-    border-bottom: 1px solid var(--border);
-    background: var(--surface);
-    flex-shrink: 0;
-}
-
-.ai-drawer-title-group {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
-
-.ai-drawer-icon-wrap {
-    width: 36px;
-    height: 36px;
-    border-radius: var(--radius-md);
-    background: rgba(0, 161, 155, 0.12);
-    color: #00A19B;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-}
-
-.ai-drawer-title {
-    margin: 0;
-    font-size: 1.05rem;
-    font-weight: 600;
-    color: var(--text-primary);
-    line-height: 1.25;
-}
-
-.ai-drawer-subtitle {
-    margin: 2px 0 0;
-    font-size: 0.75rem;
-    color: var(--text-muted);
-}
-
-.ai-drawer-close-btn {
-    background: none;
-    border: none;
-    cursor: pointer;
-    font-size: 1.6rem;
-    line-height: 1;
-    color: var(--text-muted);
-    padding: 4px 8px;
-    border-radius: var(--radius-sm);
-    transition: color 0.15s, background-color 0.15s;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.ai-drawer-close-btn:hover {
-    color: var(--text-primary);
-    background: var(--bg-secondary);
-}
-
-.ai-drawer-body {
-    flex: 1 1 0;
+.ai-past-chats-body {
+    max-height: min(60vh, 480px);
     overflow-y: auto;
-    padding: 16px;
     display: flex;
     flex-direction: column;
     gap: 10px;
+    padding: var(--space-4);
     -webkit-overflow-scrolling: touch;
 }
 
@@ -9018,25 +8896,9 @@ body.dark-mode .page-header-actions .secondary-btn:hover {
     border-color: #00A19B;
 }
 
-body.dark-mode .ai-drawer {
-    background: #141414;
-    border-right-color: #262626;
-    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.5);
-}
-
-body.dark-mode .ai-drawer-header {
-    background: #141414;
-    border-bottom-color: #262626;
-}
-
-body.dark-mode .ai-drawer-icon-wrap {
+body.dark-mode .teal-bg {
     background: rgba(0, 161, 155, 0.2);
     color: #5eead4;
-}
-
-body.dark-mode .ai-drawer-close-btn:hover {
-    background: #222222;
-    color: #f5f5f5;
 }
 
 body.dark-mode .past-chat-item {
