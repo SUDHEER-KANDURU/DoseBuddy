@@ -536,23 +536,47 @@ function getViewForEntityType(entityType) {
 function logActivity(type, message, meta) {
 }
 
+let _isLogMissedDoseInFlight = false;
+
 async function logMissedDoseActivities(meds, todayStr) {
-    if (!currentUser || !Array.isArray(meds)) return;
+    if (!currentUser || !Array.isArray(meds) || _isLogMissedDoseInFlight) return;
     const now = new Date();
-    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    const nowMs = now.getTime();
 
     const missedEntries = [];
 
     meds.forEach(med => {
-        if (!Array.isArray(med.times)) return;
-        med.times.forEach(timeObj => {
-            const timeStr = (timeObj.timeOfDay || "").substring(0, 5);
+        let medTimes = med.times;
+        if (typeof medTimes === "string") {
+            try { medTimes = JSON.parse(medTimes); } catch { medTimes = []; }
+        }
+        if (!Array.isArray(medTimes)) return;
+        medTimes.forEach(timeObj => {
+            const rawTime = typeof timeObj === "string" ? timeObj : (timeObj.timeOfDay || timeObj.time || "");
+            const timeStr = rawTime.substring(0, 5);
             if (!timeStr) return;
             const [h, m] = timeStr.split(":").map(Number);
-            const doseMinutes = h * 60 + m;
-            if (nowMinutes - doseMinutes > 5) {
+            if (isNaN(h) || isNaN(m)) return;
+
+            const scheduledDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m, 0, 0);
+            const diffMinutes = (nowMs - scheduledDate.getTime()) / 60000;
+
+            if (diffMinutes > 5) {
                 const status = getDoseStatus(currentUser.id, med.id, todayStr, timeStr);
                 if (status !== "TAKEN" && status !== "MISSED" && status !== "SKIPPED") {
+                    // Check if dose is currently snoozed
+                    const doseLog = Array.isArray(logs) ? logs.find(l =>
+                        (l.medicationId === med.id || l.medId === med.id) &&
+                        l.date === todayStr &&
+                        (l.time || "").substring(0, 5) === timeStr
+                    ) : null;
+                    if (doseLog?.snooze_until) {
+                        const snoozeDate = new Date(doseLog.snooze_until);
+                        if (!isNaN(snoozeDate.getTime()) && snoozeDate.getTime() > nowMs) {
+                            return; // Currently snoozed — do not mark missed!
+                        }
+                    }
+
                     missedEntries.push({
                         userId: currentUser.id,
                         medicationId: med.id,
@@ -566,14 +590,21 @@ async function logMissedDoseActivities(meds, todayStr) {
 
     if (missedEntries.length === 0) return;
 
+    _isLogMissedDoseInFlight = true;
     try {
-        await authFetch(`${API_BASE}/logs/mark-missed-batch`, {
+        const res = await authFetch(`${API_BASE}/logs/mark-missed-batch`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(missedEntries),
         });
+        if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            console.warn("[DoseBuddy] logMissedDoseActivities server response:", res.status, data.message || "");
+        }
     } catch (err) {
         console.error("logMissedDoseActivities error:", err);
+    } finally {
+        _isLogMissedDoseInFlight = false;
     }
 }
 
@@ -581,6 +612,17 @@ async function logMissedDoseActivities(meds, todayStr) {
 let activeMissTimeouts = [];   // legacy - to be removed
 let activeReminderAudio = null;
 let audioUnlocked = false; // tracks whether browser autoplay has been unblocked
+const _audioGestureEvents = ["click", "pointerdown", "touchstart", "keydown"];
+let _audioUnlockHandler = null;
+
+function _cleanupAudioGestureListeners() {
+    if (_audioUnlockHandler) {
+        _audioGestureEvents.forEach(evt => {
+            document.removeEventListener(evt, _audioUnlockHandler);
+        });
+        _audioUnlockHandler = null;
+    }
+}
 // Cached background-push subscription state. True once an active push_subscriptions
 // row is known to exist for this browser. When true the OS notification (and its
 // OS sound) is the authoritative alert, so the foreground page MP3 is suppressed to
@@ -639,15 +681,15 @@ document.addEventListener("DOMContentLoaded", () => {
     // ── Audio unlock ────────────────────────────────────────────────────────
     // Browsers block audio until the user has interacted with the page.
     // We listen on genuine user-activation events ONLY (NOT scroll) and prime
-    // the audio element via a muted play() on the first interaction.  After
+    // the audio element via a muted play() on the first interaction. After
     // that, reminder/missed-dose sounds work from setTimeout without being
-    // blocked.  See primeAudioElement() for the priming logic.
-    function unlockAudio() {
+    // blocked. Unbind listeners once primed to prevent repetitive AudioContext warnings.
+    _audioUnlockHandler = function unlockAudio() {
         primeAudioElement();
-    }
+    };
 
-    ["click", "pointerdown", "touchstart", "keydown"].forEach(evt =>
-        document.addEventListener(evt, unlockAudio, { once: false, passive: true })
+    _audioGestureEvents.forEach(evt =>
+        document.addEventListener(evt, _audioUnlockHandler, { once: false, passive: true })
     );
     setupAuthView();
     setupNav();
@@ -2190,7 +2232,9 @@ function setupMedicineForm() {
 
             // The POST response confirms the save. Invalidate even older
             // in-flight GETs so they cannot repopulate the cache with stale data.
-            invalidateDataCache("/medications/", "/logs/summary/", "/logs/adherence/", "/streaks/");
+            invalidateDataCache("/medications/", "/logs/", "/streaks/");
+            medsCache = [];
+            medsCacheDate = null;
             medForm.reset();
             startInput.value = todayStr;
             endInput.value = todayStr;
@@ -2282,7 +2326,14 @@ function updateGreeting() {
 // return a date-only MySQL value as midnight UTC; converting that instant to a
 // browser Date would shift the calendar day west of UTC. Keep the date portion.
 function medicationCalendarDate(value) {
-    if (typeof value !== "string") return "";
+    if (!value) return "";
+    if (typeof value !== "string") {
+        try {
+            value = new Date(value).toISOString();
+        } catch {
+            return "";
+        }
+    }
     const match = value.match(/^(\d{4}-\d{2}-\d{2})/);
     return match ? match[1] : "";
 }
@@ -2430,14 +2481,28 @@ async function renderDashboard() {
         let skippedDoses = 0;
 
         meds.forEach((med) => {
-            if (!Array.isArray(med.times)) return;
-            med.times.forEach((timeObj) => {
+            let medTimes = med.times;
+            if (typeof medTimes === "string") {
+                try { medTimes = JSON.parse(medTimes); } catch { medTimes = []; }
+            } else if (medTimes && typeof medTimes === "object" && !Array.isArray(medTimes)) {
+                if (Array.isArray(medTimes.data)) {
+                    try {
+                        medTimes = JSON.parse(new TextDecoder().decode(new Uint8Array(medTimes.data)));
+                    } catch {
+                        medTimes = [];
+                    }
+                }
+            }
+            if (!Array.isArray(medTimes)) return;
+
+            medTimes.forEach((timeObj) => {
                 totalDoses++;
                 const tr = document.createElement("tr");
                 tr.dataset.medId = med.id;
                 tr.className = `schedule-row med-row-${med.id}`;
-                const rawTime = timeObj.timeOfDay || "";
+                const rawTime = typeof timeObj === "string" ? timeObj : (timeObj.timeOfDay || timeObj.time || "");
                 const displayTime = rawTime.substring(0, 5);
+                if (!displayTime) return;
                 const doseStatus = getDoseStatus(
                     currentUser.id,
                     med.id,
@@ -2591,7 +2656,7 @@ async function renderDashboard() {
 
                 let deleteBtn = null;
 
-                if (timeObj === med.times[0]) {
+                if (timeObj === medTimes[0]) {
                     deleteBtn = document.createElement("button");
                     deleteBtn.textContent = "Delete";
                     deleteBtn.className = "action-btn action-btn-delete";
@@ -3087,17 +3152,43 @@ async function snoozeDose(occurrenceId, minutes) {
     }
 }
 
+const _inFlightMissedKeys = new Set();
+
 async function markDoseMissed(userId, medId, dateStr, timeStr) {
     if (!userId || !medId || !dateStr || !timeStr) return;
+    const cleanTime = String(timeStr).substring(0, 5);
+    const reqKey = `${userId}_${medId}_${dateStr}_${cleanTime}`;
+    if (_inFlightMissedKeys.has(reqKey)) return;
+
+    const currentStatus = getDoseStatus(userId, medId, dateStr, cleanTime);
+    if (currentStatus === "TAKEN" || currentStatus === "SKIPPED" || currentStatus === "MISSED") {
+        return;
+    }
+
+    _inFlightMissedKeys.add(reqKey);
     try {
-        await authFetch(`${API_BASE}/logs/mark-missed-batch`, {
+        const res = await authFetch(`${API_BASE}/logs/mark-missed-batch`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify([{ userId, medicationId: medId, date: dateStr, time: timeStr }]),
         });
-        invalidateDataCache("/logs/today/", "/logs/summary/", "/logs/adherence/", "/streaks/");
+        if (res.ok) {
+            const doseLog = Array.isArray(logs) ? logs.find(l =>
+                (l.medicationId === medId || l.medId === medId) &&
+                l.date === dateStr &&
+                (l.time || "").substring(0, 5) === cleanTime
+            ) : null;
+            if (doseLog) {
+                doseLog.status = "MISSED";
+            }
+            invalidateDataCache("/logs/today/", "/logs/summary/", "/logs/adherence/", "/streaks/");
+        } else {
+            console.warn("[DoseBuddy] markDoseMissed response:", res.status);
+        }
     } catch (err) {
         console.error("markDoseMissed error:", err);
+    } finally {
+        _inFlightMissedKeys.delete(reqKey);
     }
 }
 
@@ -4500,18 +4591,25 @@ function primeAudioElement() {
             // is the sole sound source.
             _audioCtx.resume().then(() => {
                 _audioReady = (_audioCtx.state === "running");
-                if (_audioReady) console.log("[DoseBuddy Audio] UNLOCKED — AudioContext running");
+                if (_audioReady) {
+                    console.log("[DoseBuddy Audio] UNLOCKED — AudioContext running");
+                    _cleanupAudioGestureListeners();
+                }
             }).catch(err => {
                 console.warn("[DoseBuddy Audio] resume() failed:", err.message);
             });
         } else if (_audioCtx.state === "running") {
             _audioReady = true;
+            _cleanupAudioGestureListeners();
             console.log("[DoseBuddy Audio] UNLOCKED — AudioContext already running");
         }
     }
 
     // ── Step 2: HTMLAudioElement muted-prime (mp3 fallback) ───────────────
-    if (audioUnlocked) return Promise.resolve(true);
+    if (audioUnlocked) {
+        _cleanupAudioGestureListeners();
+        return Promise.resolve(true);
+    }
     const audio = document.getElementById("notify-sound");
     if (!audio) return Promise.resolve(false);
 
@@ -4523,6 +4621,7 @@ function primeAudioElement() {
             audio.currentTime = 0;
             audio.muted = false;
             audioUnlocked = true;
+            _cleanupAudioGestureListeners();
             console.log("[DoseBuddy] Audio unlocked (mp3 element primed)");
             return true;
         }).catch(err => {
@@ -4533,6 +4632,7 @@ function primeAudioElement() {
     }
     audio.muted  = false;
     audioUnlocked = true;
+    _cleanupAudioGestureListeners();
     return Promise.resolve(true);
 }
 
@@ -4941,17 +5041,21 @@ function scheduleMedicineReminders() {
             continue;
         }
 
-        if (!Array.isArray(med.times)) {
+        let medTimes = med.times;
+        if (typeof medTimes === "string") {
+            try { medTimes = JSON.parse(medTimes); } catch { medTimes = []; }
+        }
+        if (!Array.isArray(medTimes)) {
             skipped++;
             console.log(`[FEAT-001 Scheduler] SKIP med="${med.name}" reason="times not array" times:`, med.times);
             continue;
         }
 
-        console.log(`[FEAT-001 Scheduler] med="${med.name}" has ${med.times.length} dose times:`, med.times);
+        console.log(`[FEAT-001 Scheduler] med="${med.name}" has ${medTimes.length} dose times:`, medTimes);
 
-        for (let timeIndex = 0; timeIndex < med.times.length; timeIndex++) {
-            const timeObj = med.times[timeIndex];
-            const rawTime    = timeObj.timeOfDay || "";
+        for (let timeIndex = 0; timeIndex < medTimes.length; timeIndex++) {
+            const timeObj = medTimes[timeIndex];
+            const rawTime = typeof timeObj === "string" ? timeObj : (timeObj.timeOfDay || timeObj.time || "");
             const timeStr    = rawTime.substring(0, 5);
 
             console.log(`[FEAT-001 Scheduler] Processing time ${timeIndex + 1}/${med.times.length} for ${med.name}`);
@@ -5180,20 +5284,24 @@ function checkReminders() {
 
     for (const med of medsCache) {
         if (!isMedicationActiveToday(med, todayStr)) continue;
-        if (!Array.isArray(med.times)) continue;
+        let medTimes = med.times;
+        if (typeof medTimes === "string") {
+            try { medTimes = JSON.parse(medTimes); } catch { medTimes = []; }
+        }
+        if (!Array.isArray(medTimes)) continue;
 
-        for (const timeObj of med.times) {
-            const rawTime = timeObj.timeOfDay || "";
+        for (const timeObj of medTimes) {
+            const rawTime = typeof timeObj === "string" ? timeObj : (timeObj.timeOfDay || timeObj.time || "");
             const displayTime = rawTime.substring(0, 5);
             if (!displayTime || displayTime.length < 5) continue;
 
             const [hh, mm] = displayTime.split(":").map(Number);
             if (isNaN(hh) || isNaN(mm)) continue;
 
-            const doseMinutes = hh * 60 + mm;
-            const diff = nowMinutes - doseMinutes; // >0 = past, <0 = future
+            const scheduledDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hh, mm, 0, 0);
+            const diff = (nowMs - scheduledDate.getTime()) / 60000; // >0 = past, <0 = future
 
-            console.log(`[DoseBuddy CheckReminders] ${med.name} at ${displayTime}: ${diff} minutes late`);
+            console.log(`[DoseBuddy CheckReminders] ${med.name} at ${displayTime}: ${diff.toFixed(1)} minutes late`);
 
             // NEW: Check if this is dose time (within 1 minute) and primary scheduler might have missed it
             if (diff >= 0 && diff < 1) {
@@ -5209,17 +5317,30 @@ function checkReminders() {
                 }
             }
 
-            // Check if dose should be marked as missed (>=1 minute late)
+            // Check if dose should be marked as missed (>= MISSED_GRACE_MIN late)
             if (diff >= MISSED_GRACE_MIN) {
                 const status = getDoseStatus(currentUser.id, med.id, todayStr, displayTime);
                 console.log(`[DoseBuddy CheckReminders] ${med.name} status: ${status}`);
 
                 if (status === "PENDING") {
+                    // Check if dose is currently snoozed
+                    const doseLog = Array.isArray(logs) ? logs.find(l =>
+                        (l.medicationId === med.id || l.medId === med.id) &&
+                        l.date === todayStr &&
+                        (l.time || "").substring(0, 5) === displayTime
+                    ) : null;
+                    if (doseLog?.snooze_until) {
+                        const snoozeDate = new Date(doseLog.snooze_until);
+                        if (!isNaN(snoozeDate.getTime()) && snoozeDate.getTime() > nowMs) {
+                            continue; // Currently snoozed — do not mark missed!
+                        }
+                    }
+
                     const missedKey = doseEventId("MISSED", currentUser.id, med.id, Number(med.scheduleVersion ?? 0), todayStr, displayTime.slice(0, 5));
                     if (!firedMissedAlertKeys.has(missedKey)) {
                         firedMissedAlertKeys.add(missedKey);
 
-                        console.log(`[DoseBuddy CheckReminders] PROCESSING MISSED: ${med.name} (${diff} min late)`);
+                        console.log(`[DoseBuddy CheckReminders] PROCESSING MISSED: ${med.name} (${diff.toFixed(1)} min late)`);
 
                         // Play the single reminder asset whenever a tab is open; the
                         // shared player honors the sound-alerts preference and no-ops
@@ -5509,6 +5630,9 @@ function saveAiConversationLocally() {
         if (hasWelcome && (!aiConversationState.history || aiConversationState.history.length === 0)) {
             localStorage.removeItem(key);
             return;
+        }
+        if (!aiConversationState.conversationId && Array.isArray(aiConversationState.history) && aiConversationState.history.length > 0) {
+            aiConversationState.conversationId = "chat_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9);
         }
         const data = {
             conversationId: aiConversationState.conversationId,
@@ -7731,7 +7855,120 @@ function setupPrescriptionUpload() {
         if (_prxModalAddBtn) _prxModalAddBtn.disabled = accepted.length === 0;
     }
 
+    function getNormalizedFoodInstruction(instruction) {
+        if (!instruction) return "Before meal";
+        const lower = String(instruction).toLowerCase();
+        if (lower.includes("after")) return "After meal";
+        if (lower.includes("with") || lower.includes("during")) return "With meal";
+        if (lower.includes("empty")) return "Empty stomach";
+        if (lower.includes("before")) return "Before meal";
+        if (lower.includes("as directed")) return "As directed";
+        return instruction;
+    }
+
     function renderModalCard(item, index) {
+        if (item._isEditing) {
+            const foodVal = getNormalizedFoodInstruction(item.foodInstruction);
+            return `
+            <div class="prx-med-card prx-med-card--editing" id="prxmc_${item.id}">
+                <div class="prx-edit-header">
+                    <div class="prx-edit-header-left">
+                        <div class="prx-med-card-num">${index + 1}</div>
+                        <div class="prx-edit-header-text">
+                            <span class="prx-edit-title">Edit Medicine #${index + 1}</span>
+                            <span class="prx-edit-subtitle">Review & adjust detected details</span>
+                        </div>
+                    </div>
+                    <button type="button" class="prx-edit-cancel-icon-btn" data-id="${item.id}" title="Discard changes and cancel" aria-label="Discard changes">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.2" stroke="currentColor" width="16" height="16">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+                        </svg>
+                    </button>
+                </div>
+
+                <form class="prx-edit-form" id="prx-form-${item.id}" onsubmit="return false;">
+                    <div class="prx-edit-grid">
+                        <div class="prx-edit-field prx-edit-field--full">
+                            <label for="prx-name-${item.id}" class="prx-edit-label">
+                                Medicine Name <span class="prx-required">*</span>
+                            </label>
+                            <input type="text" id="prx-name-${item.id}" class="prx-input" value="${escapeHtml(item.brandName || item.name || "")}" placeholder="e.g. Paracetamol, Amoxicillin" required>
+                        </div>
+
+                        <div class="prx-edit-field">
+                            <label for="prx-generic-${item.id}" class="prx-edit-label">
+                                Generic / Active Ingredient
+                            </label>
+                            <input type="text" id="prx-generic-${item.id}" class="prx-input" value="${escapeHtml(item.genericName || "")}" placeholder="e.g. Acetaminophen">
+                        </div>
+
+                        <div class="prx-edit-field">
+                            <label for="prx-dosage-${item.id}" class="prx-edit-label">
+                                Dosage / Strength <span class="prx-required">*</span>
+                            </label>
+                            <input type="text" id="prx-dosage-${item.id}" class="prx-input" value="${escapeHtml(item.strength || item.dosage || "")}" placeholder="e.g. 500mg, 1 tablet" required>
+                        </div>
+
+                        <div class="prx-edit-field">
+                            <label for="prx-food-${item.id}" class="prx-edit-label">
+                                Meal Instructions
+                            </label>
+                            <select id="prx-food-${item.id}" class="prx-select">
+                                <option value="Before meal" ${foodVal === "Before meal" ? "selected" : ""}>Before meal</option>
+                                <option value="After meal" ${foodVal === "After meal" ? "selected" : ""}>After meal</option>
+                                <option value="With meal" ${foodVal === "With meal" ? "selected" : ""}>With meal</option>
+                                <option value="Empty stomach" ${foodVal === "Empty stomach" ? "selected" : ""}>Empty stomach</option>
+                                <option value="As directed" ${foodVal === "As directed" ? "selected" : ""}>As directed</option>
+                            </select>
+                        </div>
+
+                        <div class="prx-edit-field">
+                            <label for="prx-duration-${item.id}" class="prx-edit-label">
+                                Duration (Days) <span class="prx-required">*</span>
+                            </label>
+                            <input type="number" id="prx-duration-${item.id}" class="prx-input" min="1" max="365" value="${item.durationDays || 30}" placeholder="30" required>
+                        </div>
+                    </div>
+
+                    <div class="prx-edit-times-section">
+                        <div class="prx-edit-label-row">
+                            <span class="prx-edit-label">Intake Times <span class="prx-required">*</span></span>
+                            <span class="prx-edit-hint">(select at least one)</span>
+                        </div>
+                        <div class="prx-time-chips">
+                            <label class="prx-time-toggle ${item.morning ? "active" : ""}">
+                                <input type="checkbox" id="prx-time-morning-${item.id}" ${item.morning ? "checked" : ""}>
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="13" height="13"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z"/></svg>
+                                <span>Morning (08:00)</span>
+                            </label>
+                            <label class="prx-time-toggle ${item.afternoon ? "active" : ""}">
+                                <input type="checkbox" id="prx-time-afternoon-${item.id}" ${item.afternoon ? "checked" : ""}>
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="13" height="13"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
+                                <span>Afternoon (13:00)</span>
+                            </label>
+                            <label class="prx-time-toggle ${item.evening ? "active" : ""}">
+                                <input type="checkbox" id="prx-time-evening-${item.id}" ${item.evening ? "checked" : ""}>
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="13" height="13"><path stroke-linecap="round" stroke-linejoin="round" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z"/></svg>
+                                <span>Evening (18:00)</span>
+                            </label>
+                            <label class="prx-time-toggle ${item.night ? "active" : ""}">
+                                <input type="checkbox" id="prx-time-night-${item.id}" ${item.night ? "checked" : ""}>
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="13" height="13"><path stroke-linecap="round" stroke-linejoin="round" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z"/></svg>
+                                <span>Night (21:00)</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="prx-edit-error" id="prx-error-${item.id}" style="display:none;" role="alert"></div>
+
+                    <div class="prx-edit-actions">
+                        <button type="button" class="prx-btn-secondary prx-edit-cancel-btn" data-id="${item.id}">Cancel</button>
+                        <button type="button" class="prx-btn-primary prx-edit-save-btn" data-id="${item.id}">Save Changes</button>
+                    </div>
+                </form>
+            </div>`;
+        }
+
         const schedSlots = [
             { key: "morning",   label: "Morning",   time: "08:00" },
             { key: "afternoon", label: "Afternoon", time: "13:00" },
@@ -7751,16 +7988,28 @@ function setupPrescriptionUpload() {
             <div class="prx-med-card-top">
                 <div class="prx-med-card-num">${index + 1}</div>
                 <div class="prx-med-card-info">
-                    <div class="prx-med-card-name">${escapeHtml(item.brandName || item.name || "Unknown")}</div>
+                    <div class="prx-med-card-name-row">
+                        <div class="prx-med-card-name">${escapeHtml(item.brandName || item.name || "Unknown")}</div>
+                        ${item._edited ? `<span class="prx-chip prx-chip-edited" title="Edited by user">Edited</span>` : ""}
+                    </div>
                     ${item.genericName ? `<div class="prx-med-card-generic">${escapeHtml(item.genericName)}</div>` : ""}
                 </div>
                 <div class="prx-med-card-strength">${escapeHtml(item.strength || item.dosage || "")}</div>
-                <button type="button" class="prx-med-card-reject-btn" data-id="${item.id}" title="${item._rejected ? "Undo remove" : "Remove this medicine"}">
-                    ${item._rejected
-                        ? `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" width="15" height="15"><path stroke-linecap="round" stroke-linejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3"/></svg>`
-                        : `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" width="15" height="15"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>`
-                    }
-                </button>
+                <div class="prx-med-card-actions">
+                    ${!item._rejected ? `
+                    <button type="button" class="prx-med-card-edit-btn" data-id="${item.id}" title="Edit this medicine" aria-label="Edit this medicine">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="14" height="14">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487zm0 0L19.5 7.125"/>
+                        </svg>
+                    </button>
+                    ` : ""}
+                    <button type="button" class="prx-med-card-reject-btn" data-id="${item.id}" title="${item._rejected ? "Undo remove" : "Remove this medicine"}" aria-label="${item._rejected ? "Undo remove" : "Remove this medicine"}">
+                        ${item._rejected
+                            ? `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" width="15" height="15"><path stroke-linecap="round" stroke-linejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3"/></svg>`
+                            : `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" width="15" height="15"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>`
+                        }
+                    </button>
+                </div>
             </div>
             ${item._rejected ? `<div class="prx-med-card-rejected-label">Removed — click undo to restore</div>` : `
             <div class="prx-med-card-details">
@@ -7779,8 +8028,11 @@ function setupPrescriptionUpload() {
     function openPrescriptionModal(data) {
         if (!_prxModal || !_prxModalBody) return;
 
-        // Reset rejection state
-        currentExtractedMeds.forEach(m => { m._rejected = false; });
+        // Reset rejection and edit states
+        currentExtractedMeds.forEach(m => {
+            m._rejected = false;
+            m._isEditing = false;
+        });
 
         // Populate meta bar
         if (_prxModalMeta) {
@@ -7802,26 +8054,6 @@ function setupPrescriptionUpload() {
         // Render cards
         _prxModalBody.innerHTML = currentExtractedMeds.map((m, i) => renderModalCard(m, i)).join("");
 
-        // Attach reject/undo button listeners
-        _prxModalBody.querySelectorAll(".prx-med-card-reject-btn").forEach(btn => {
-            btn.addEventListener("click", () => {
-                const item = currentExtractedMeds.find(m => m.id === btn.dataset.id);
-                if (!item) return;
-                item._rejected = !item._rejected;
-                const cardEl = document.getElementById(`prxmc_${item.id}`);
-                if (cardEl) {
-                    const idx = currentExtractedMeds.indexOf(item);
-                    cardEl.outerHTML = renderModalCard(item, idx);
-                    // Re-attach listener on replaced element
-                    const newCard = document.getElementById(`prxmc_${item.id}`);
-                    if (newCard) {
-                        newCard.querySelector(".prx-med-card-reject-btn")?.addEventListener("click", arguments.callee.bind(null));
-                    }
-                }
-                updateModalAddBtn();
-            });
-        });
-
         // Count & add button
         if (_prxModalCount) _prxModalCount.textContent = currentExtractedMeds.length;
         updateModalAddBtn();
@@ -7834,18 +8066,148 @@ function setupPrescriptionUpload() {
         showToast(`${currentExtractedMeds.length} medicines detected from prescription`, "info");
     }
 
-    // Re-attach reject buttons using event delegation (fixes the callee issue)
+    // Modal card actions: Edit, Save, Cancel, Time Toggles, and Reject (via event delegation)
     if (_prxModalBody) {
+        _prxModalBody.addEventListener("change", (e) => {
+            const checkbox = e.target.closest(".prx-time-toggle input[type='checkbox']");
+            if (checkbox) {
+                const label = checkbox.closest(".prx-time-toggle");
+                if (label) label.classList.toggle("active", checkbox.checked);
+            }
+        });
+
         _prxModalBody.addEventListener("click", (e) => {
-            const btn = e.target.closest(".prx-med-card-reject-btn");
-            if (!btn) return;
-            const item = currentExtractedMeds.find(m => m.id === btn.dataset.id);
-            if (!item) return;
-            item._rejected = !item._rejected;
-            const idx = currentExtractedMeds.indexOf(item);
-            const cardEl = document.getElementById(`prxmc_${item.id}`);
-            if (cardEl) cardEl.outerHTML = renderModalCard(item, idx);
-            updateModalAddBtn();
+            // 1. Edit button
+            const editBtn = e.target.closest(".prx-med-card-edit-btn");
+            if (editBtn) {
+                const item = currentExtractedMeds.find(m => m.id === editBtn.dataset.id);
+                if (!item) return;
+                item._isEditing = true;
+                const idx = currentExtractedMeds.indexOf(item);
+                const cardEl = document.getElementById(`prxmc_${item.id}`);
+                if (cardEl) {
+                    cardEl.outerHTML = renderModalCard(item, idx);
+                    const nameInput = document.getElementById(`prx-name-${item.id}`);
+                    if (nameInput) nameInput.focus();
+                }
+                return;
+            }
+
+            // 2. Cancel edit
+            const cancelBtn = e.target.closest(".prx-edit-cancel-btn, .prx-edit-cancel-icon-btn");
+            if (cancelBtn) {
+                const item = currentExtractedMeds.find(m => m.id === cancelBtn.dataset.id);
+                if (!item) return;
+                item._isEditing = false;
+                const idx = currentExtractedMeds.indexOf(item);
+                const cardEl = document.getElementById(`prxmc_${item.id}`);
+                if (cardEl) cardEl.outerHTML = renderModalCard(item, idx);
+                return;
+            }
+
+            // 3. Save edit
+            const saveBtn = e.target.closest(".prx-edit-save-btn");
+            if (saveBtn) {
+                const item = currentExtractedMeds.find(m => m.id === saveBtn.dataset.id);
+                if (!item) return;
+
+                const nameInput = document.getElementById(`prx-name-${item.id}`);
+                const genericInput = document.getElementById(`prx-generic-${item.id}`);
+                const dosageInput = document.getElementById(`prx-dosage-${item.id}`);
+                const foodSelect = document.getElementById(`prx-food-${item.id}`);
+                const durationInput = document.getElementById(`prx-duration-${item.id}`);
+                const morningCheck = document.getElementById(`prx-time-morning-${item.id}`);
+                const afternoonCheck = document.getElementById(`prx-time-afternoon-${item.id}`);
+                const eveningCheck = document.getElementById(`prx-time-evening-${item.id}`);
+                const nightCheck = document.getElementById(`prx-time-night-${item.id}`);
+                const errorEl = document.getElementById(`prx-error-${item.id}`);
+
+                const newName = nameInput ? nameInput.value.trim() : "";
+                const newGeneric = genericInput ? genericInput.value.trim() : "";
+                const newDosage = dosageInput ? dosageInput.value.trim() : "";
+                const newFood = foodSelect ? foodSelect.value : "Before meal";
+                const newDuration = durationInput ? parseInt(durationInput.value, 10) : 30;
+
+                const newMorning = Boolean(morningCheck?.checked);
+                const newAfternoon = Boolean(afternoonCheck?.checked);
+                const newEvening = Boolean(eveningCheck?.checked);
+                const newNight = Boolean(nightCheck?.checked);
+
+                // Validation
+                if (!newName) {
+                    if (errorEl) {
+                        errorEl.textContent = "Medicine name is required.";
+                        errorEl.style.display = "block";
+                    }
+                    nameInput?.focus();
+                    return;
+                }
+
+                if (!newDosage) {
+                    if (errorEl) {
+                        errorEl.textContent = "Dosage / strength is required.";
+                        errorEl.style.display = "block";
+                    }
+                    dosageInput?.focus();
+                    return;
+                }
+
+                if (isNaN(newDuration) || newDuration < 1 || newDuration > 365) {
+                    if (errorEl) {
+                        errorEl.textContent = "Duration must be between 1 and 365 days.";
+                        errorEl.style.display = "block";
+                    }
+                    durationInput?.focus();
+                    return;
+                }
+
+                if (!newMorning && !newAfternoon && !newEvening && !newNight) {
+                    if (errorEl) {
+                        errorEl.textContent = "Please select at least one intake time (Morning, Afternoon, Evening, or Night).";
+                        errorEl.style.display = "block";
+                    }
+                    return;
+                }
+
+                // Apply validated updates
+                item.name = newName;
+                item.brandName = newName;
+                item.genericName = newGeneric;
+                item.strength = newDosage;
+                item.dosage = newDosage;
+                item.foodInstruction = newFood;
+                item.durationDays = newDuration;
+                item.duration = `${newDuration} Days`;
+                item.morning = newMorning;
+                item.afternoon = newAfternoon;
+                item.evening = newEvening;
+                item.night = newNight;
+                item.times = getTimesFromSchedule(item);
+                item._edited = true;
+                item._isEditing = false;
+
+                const idx = currentExtractedMeds.indexOf(item);
+                const cardEl = document.getElementById(`prxmc_${item.id}`);
+                if (cardEl) cardEl.outerHTML = renderModalCard(item, idx);
+
+                updateModalAddBtn();
+                showToast(`✓ Updated ${item.name}`, "success");
+                return;
+            }
+
+            // 4. Reject / Undo Reject button
+            const rejectBtn = e.target.closest(".prx-med-card-reject-btn");
+            if (rejectBtn) {
+                const item = currentExtractedMeds.find(m => m.id === rejectBtn.dataset.id);
+                if (!item) return;
+                if (item._isEditing) item._isEditing = false;
+                item._rejected = !item._rejected;
+                const idx = currentExtractedMeds.indexOf(item);
+                const cardEl = document.getElementById(`prxmc_${item.id}`);
+                if (cardEl) cardEl.outerHTML = renderModalCard(item, idx);
+                updateModalAddBtn();
+                return;
+            }
         });
     }
 

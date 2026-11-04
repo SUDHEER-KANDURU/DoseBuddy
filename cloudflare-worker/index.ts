@@ -200,15 +200,17 @@ function medicationCreatePayload(body: Json): { value?: { name: string; dosage: 
 }
 
 function medicationSchemaNotReady(error: unknown) {
-  const e = error as { code?: unknown; message?: unknown; sqlMessage?: unknown };
+  const e = error as { code?: unknown; errno?: unknown; message?: unknown; sqlMessage?: unknown };
   const message = [e.message, e.sqlMessage].filter(value => typeof value === "string").join(" ");
-  return e.code === "ER_BAD_FIELD_ERROR" && /\b(active|schedule_version)\b/i.test(message);
+  const isBadField = e.code === "ER_BAD_FIELD_ERROR" || e.errno === 1054 || /unknown column/i.test(message);
+  return isBadField && /\b(active|schedule_version)\b/i.test(message);
 }
 
 function timeZoneSchemaNotReady(error: unknown) {
-  const e = error as { code?: unknown; message?: unknown; sqlMessage?: unknown };
+  const e = error as { code?: unknown; errno?: unknown; message?: unknown; sqlMessage?: unknown };
   const message = [e.message, e.sqlMessage].filter(value => typeof value === "string").join(" ");
-  return e.code === "ER_BAD_FIELD_ERROR" && /\btime_zone\b/i.test(message);
+  const isBadField = e.code === "ER_BAD_FIELD_ERROR" || e.errno === 1054 || /unknown column/i.test(message);
+  return isBadField && /\btime_zone\b/i.test(message);
 }
 
 function columnMissing(error: unknown, column: string) {
@@ -284,11 +286,11 @@ async function upsertIntakeLog(db: any, row: {
         : [row.status, row.status, row.status, row.status, row.date, row.time, existingId];
       // TAKEN is always terminal and cannot be downgraded.
       // SKIPPED is accepted only if the current status is not TAKEN.
-      // MISSED is accepted only if the current status is not TAKEN.
+      // MISSED is accepted only if the current status is not TAKEN or SKIPPED.
       await query(db,
-        `UPDATE intake_logs SET ${setOccurrence}status=IF(?='TAKEN','TAKEN',IF(status='TAKEN','TAKEN',?)),
+        `UPDATE intake_logs SET ${setOccurrence}status=IF(?='TAKEN','TAKEN',IF(status IN ('TAKEN','SKIPPED'),status,?)),
            taken_time=IF(?='TAKEN',NOW(),taken_time),
-           missed_time=IF(?='MISSED',IF(status='TAKEN',NULL,NOW()),NULL),
+           missed_time=IF(?='MISSED',IF(status IN ('TAKEN','SKIPPED'),NULL,NOW()),NULL),
            scheduled_time=CONCAT(?,' ',?),updated_at=NOW() WHERE id=?`, values);
     };
     if (row.occurrenceId == null) {
@@ -3313,13 +3315,35 @@ const worker = {
           );
         }
         return json(
-          rows.map(x => ({
-            ...x,
-            startDate: x.start_date,
-            endDate: x.end_date,
-            scheduleVersion: Number(x.schedule_version ?? 0),
-            times: typeof x.times === "string" ? JSON.parse(x.times) : x.times
-          }))
+          rows.map(x => {
+            let times = x.times;
+            if (typeof times === "string") {
+              try { times = JSON.parse(times); } catch { times = []; }
+            } else if (times && typeof times === "object") {
+              if (Array.isArray(times)) {
+                // array
+              } else if ((times as any).data && Array.isArray((times as any).data)) {
+                try {
+                  times = JSON.parse(new TextDecoder().decode(new Uint8Array((times as any).data)));
+                } catch {
+                  times = [];
+                }
+              }
+            }
+            if (!Array.isArray(times)) times = [];
+            times = times.filter((t: any) => t && (t.timeOfDay != null || t.time != null));
+
+            const sDate = x.start_date ? (typeof x.start_date === "string" ? x.start_date.slice(0, 10) : new Date(x.start_date).toISOString().slice(0, 10)) : null;
+            const eDate = x.end_date ? (typeof x.end_date === "string" ? x.end_date.slice(0, 10) : new Date(x.end_date).toISOString().slice(0, 10)) : null;
+
+            return {
+              ...x,
+              startDate: sDate,
+              endDate: eDate,
+              scheduleVersion: Number(x.schedule_version ?? 0),
+              times
+            };
+          })
         );
       }
 
@@ -3594,53 +3618,139 @@ const worker = {
 
       if (path === "/api/logs/mark-missed-batch" && request.method === "POST") {
         const { body: b } = await requestBody(request);
-        const list = Array.isArray(b) ? b : [];
+        const list = Array.isArray(b)
+          ? b
+          : Array.isArray((b as any)?.doses)
+          ? (b as any).doses
+          : Array.isArray((b as any)?.list)
+          ? (b as any).list
+          : (b as any)?.medicationId
+          ? [b]
+          : [];
         let created = 0;
         let dispatchPending = 0;
         let db: any = null;
         try {
           db = await getDbConnection(env);
           for (const req of list) {
-            if (!req.medicationId || typeof req.date !== "string" || typeof req.time !== "string") continue;
+            const medId = Number(req?.medicationId ?? req?.medId);
+            if (!medId || isNaN(medId) || typeof req.date !== "string" || typeof req.time !== "string") continue;
+            const localTime = String(req.time).substring(0, 5);
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(req.date) || !/^\d{2}:\d{2}$/.test(localTime)) continue;
+
             const transition = await transact(db, async () => {
-              const localTime = String(req.time).substring(0, 5);
-              if (!/^\d{4}-\d{2}-\d{2}$/.test(req.date) || !/^\d{2}:\d{2}$/.test(localTime)) return null;
-              const [meds] = await query<Json[]>(db,
-                "SELECT m.* FROM medications m JOIN medication_times mt ON mt.medication_id=m.id WHERE m.id=? AND m.active=1 AND ? BETWEEN m.start_date AND m.end_date AND TIME_FORMAT(mt.time_of_day,'%H:%i')=? LIMIT 1 FOR UPDATE",
-                [req.medicationId, req.date, localTime]);
-              const med = meds[0];
+              const med = await findActiveScheduledMedication(db, medId, req.date, localTime);
               if (!med) return null;
               const owner = await getUser(db, Number(med.user_id));
               if (!owner || !accessible(actor, owner)) throw new Error("Access denied");
-              const zone = canonicalTimeZone(owner.time_zone);
-              if (!zone) return null;
+              const zone = canonicalTimeZone(owner.time_zone) ?? "UTC";
               const scheduledInstant = resolveLocalOccurrence(req.date, localTime, zone);
               if (Date.now() < scheduledInstant.getTime() + 60_000) return null;
-              const occurrenceId = await upsertOccurrence(db, {
-                medicationId: Number(med.id), userId: Number(med.user_id), scheduleVersion: Number(med.schedule_version),
-                localDate: req.date, localTime, scheduledAtUtc: mysqlDateTime(scheduledInstant)
+
+              // Check existing intake_logs: never overwrite TAKEN or SKIPPED, and skip if already MISSED
+              const [existingLogs] = await query<any[]>(db,
+                "SELECT id, status FROM intake_logs WHERE marker_user_id=? AND medication_id=? AND date=? AND TIME_FORMAT(time,'%H:%i')=? ORDER BY id DESC LIMIT 1 FOR UPDATE",
+                [med.user_id, med.id, req.date, localTime]);
+              const existingLogStatus = (existingLogs?.[0]?.status || "").toUpperCase();
+              if (existingLogStatus === "TAKEN" || existingLogStatus === "SKIPPED") {
+                return null;
+              }
+
+              const scheduleVersion = Number(med.schedule_version ?? 1);
+              let occurrenceId: number | null = null;
+              let changed = true;
+
+              try {
+                occurrenceId = await upsertOccurrence(db, {
+                  medicationId: Number(med.id),
+                  userId: Number(med.user_id),
+                  scheduleVersion,
+                  localDate: req.date,
+                  localTime,
+                  scheduledAtUtc: mysqlDateTime(scheduledInstant)
+                });
+
+                // Do not mark missed if currently snoozed
+                try {
+                  const [occRows] = await db.query(
+                    "SELECT state, snooze_until FROM dose_occurrences WHERE id=? FOR UPDATE",
+                    [occurrenceId]
+                  );
+                  const occRow = occRows?.[0];
+                  if (occRow) {
+                    if (occRow.state && occRow.state !== "PENDING") {
+                      return null;
+                    }
+                    if (occRow.snooze_until) {
+                      const snoozeTime = new Date(occRow.snooze_until).getTime();
+                      if (!isNaN(snoozeTime) && snoozeTime > Date.now()) {
+                        return null;
+                      }
+                    }
+                  }
+                } catch (snoozeErr) {
+                  if (!columnMissing(snoozeErr, "snooze_until") && !optionalTableMissing(snoozeErr, "dose_occurrences")) {
+                    throw snoozeErr;
+                  }
+                }
+
+                changed = await markOccurrenceMissed(db, occurrenceId);
+              } catch (occErr) {
+                if (!optionalTableMissing(occErr, "dose_occurrences")) throw occErr;
+                occurrenceId = null;
+              }
+
+              // Idempotency: if dose_occurrences was present and unchanged, or intake_logs was already MISSED, do not duplicate
+              if (!changed || existingLogStatus === "MISSED") {
+                return null;
+              }
+
+              const log = await upsertIntakeLog(db, {
+                occurrenceId,
+                userId: Number(med.user_id),
+                medicationId: Number(med.id),
+                date: req.date,
+                time: localTime,
+                scheduledAt: mysqlDateTime(scheduledInstant),
+                status: "MISSED"
               });
+
+              await query(db,
+                "INSERT INTO activities (user_id,type,message,related_entity_type,related_entity_id,created_at) VALUES (?,'DOSE_MISSED',?,'INTAKE_LOG',?,NOW())",
+                [med.user_id, `Missed ${med.name} (${med.dosage}) scheduled for ${localTime}`, log.insertId]
+              );
+
               const dose = {
-                occurrence_id: occurrenceId, medication_id: Number(med.id), user_id: Number(med.user_id),
-                schedule_version: Number(med.schedule_version), local_date: req.date, time_str: localTime,
-                scheduled_at_utc: mysqlDateTime(scheduledInstant), medication_name: String(med.name), dosage: String(med.dosage), event_type: "MISSED"
+                occurrence_id: occurrenceId,
+                medication_id: Number(med.id),
+                user_id: Number(med.user_id),
+                schedule_version: scheduleVersion,
+                local_date: req.date,
+                time_str: localTime,
+                scheduled_at_utc: mysqlDateTime(scheduledInstant),
+                medication_name: String(med.name),
+                dosage: String(med.dosage),
+                event_type: "MISSED"
               };
-              return await recordMissedOccurrence(db, dose) ? dose : null;
+              return dose;
             });
-            if (transition) {
+
+            if (transition && transition.occurrence_id) {
               created++;
-              // The state and adherence changes are committed. Delivery uses
-              // the same stable event and per-subscription ledger as the Cron.
-              try { await this.sendDoseNotification(env, db, transition); }
-              catch (error) {
+              try {
+                await worker.sendDoseNotification(env, db, transition);
+              } catch (error) {
                 dispatchPending++;
                 console.error(`[DoseBuddy API] Missed notification queued for scheduler recovery (${transition.occurrence_id}):`, error instanceof Error ? error.message : "unknown");
               }
+            } else if (transition) {
+              created++;
             }
           }
           return json(dispatchPending ? { created, dispatchPending } : { created });
         } catch (error) {
           const message = error instanceof Error ? error.message : "Unable to mark dose missed";
+          console.error("[DoseBuddy API] mark-missed-batch error:", message);
           return json({ message }, message === "Access denied" ? 403 : 400);
         } finally {
           if (db) await db.end();
@@ -3981,14 +4091,14 @@ const worker = {
         if (!target) return json({ message: "User not found" }, 400);
         if (!accessible(actor, target)) return json({ message: "Access denied" }, 403);
 
-        const page = Math.max(0, parseInt(url.searchParams.get("page") || "0", 10));
-        const size = Math.min(500, Math.max(1, parseInt(url.searchParams.get("size") || "100", 10)));
+        const page = Math.max(0, parseInt(url.searchParams.get("page") || "0", 10) || 0);
+        const size = Math.min(500, Math.max(1, parseInt(url.searchParams.get("size") || "100", 10) || 100));
         const offset = page * size;
 
         const [rows] = await query<Json[]>(
           env,
-          "SELECT l.id, DATE_FORMAT(l.date,'%Y-%m-%d') AS date, TIME_FORMAT(l.time,'%H:%i') AS time, l.medication_id AS medicationId, m.name AS medicineName, m.dosage, l.status FROM intake_logs l JOIN medications m ON m.id=l.medication_id WHERE l.marker_user_id=? ORDER BY l.date DESC, l.time DESC LIMIT ? OFFSET ?",
-          [target.id, size, offset]
+          `SELECT l.id, DATE_FORMAT(l.date,'%Y-%m-%d') AS date, TIME_FORMAT(l.time,'%H:%i') AS time, l.medication_id AS medicationId, m.name AS medicineName, m.dosage, l.status FROM intake_logs l JOIN medications m ON m.id=l.medication_id WHERE l.marker_user_id=? ORDER BY l.date DESC, l.time DESC LIMIT ${size} OFFSET ${offset}`,
+          [target.id]
         );
         return json(rows);
       }
@@ -4001,8 +4111,7 @@ const worker = {
 
         const isWeek = path.includes("/summary/week/");
         const days = isWeek ? 7 : Math.min(3650, Math.max(1, parseInt(url.searchParams.get("days") || "7", 10)));
-        const zone = canonicalTimeZone(target.time_zone);
-        if (!zone) return json([]);
+        const zone = canonicalTimeZone(target.time_zone) || "UTC";
         const today = zonedParts(Date.now(), zone).date;
         const firstDay = addLocalDays(today, -(days - 1));
 
@@ -4034,8 +4143,7 @@ const worker = {
         if (!accessible(actor, target)) return json({ message: "Access denied" }, 403);
 
         const days = Math.min(3650, Math.max(0, parseInt(url.searchParams.get("days") || "0", 10)));
-        const zone = canonicalTimeZone(target.time_zone);
-        if (!zone) return json({ total: 0, taken: 0, missed: 0, skipped: 0, pending: 0, adherencePercentage: 0, missedToday: 0, missedThisWeek: 0, missedThisMonth: 0, mostMissedMedicine: "-", mostMissedCount: 0 });
+        const zone = canonicalTimeZone(target.time_zone) || "UTC";
         const today = zonedParts(Date.now(), zone).date;
         const filter = days > 0 ? "AND date>=?" : "";
 
@@ -4153,8 +4261,8 @@ const worker = {
         if (!target) return json({ message: "User not found" }, 404);
         if (!accessible(actor, target)) return json({ message: "Access denied" }, 403);
 
-        const limit = Math.min(100, Math.max(1, parseInt(url.searchParams.get("limit") || "10", 10)));
-        const [rows] = await query<Json[]>(env, "SELECT * FROM bmi_records WHERE user_id=? ORDER BY created_at DESC LIMIT ?", [target.id, limit]);
+        const limit = Math.min(100, Math.max(1, parseInt(url.searchParams.get("limit") || "10", 10) || 10));
+        const [rows] = await query<Json[]>(env, `SELECT * FROM bmi_records WHERE user_id=? ORDER BY created_at DESC LIMIT ${limit}`, [target.id]);
         return json(rows.map(buildBmiResponse));
       }
 
@@ -4220,8 +4328,8 @@ const worker = {
         if (!target) return json({ message: "User not found" }, 404);
         if (!accessible(actor, target)) return json({ message: "Access denied" }, 403);
 
-        const limit = Math.min(100, Math.max(1, parseInt(url.searchParams.get("limit") || "10", 10)));
-        const [rows] = await query<Json[]>(env, "SELECT * FROM vital_records WHERE user_id=? ORDER BY recorded_at DESC LIMIT ?", [target.id, limit]);
+        const limit = Math.min(100, Math.max(1, parseInt(url.searchParams.get("limit") || "10", 10) || 10));
+        const [rows] = await query<Json[]>(env, `SELECT * FROM vital_records WHERE user_id=? ORDER BY recorded_at DESC LIMIT ${limit}`, [target.id]);
         return json(rows.map(buildVitalResponse));
       }
 
@@ -4292,12 +4400,19 @@ const worker = {
         if (!target) return json({ message: "User not found" }, 400);
         if (!accessible(actor, target)) return json({ message: "Access denied" }, 403);
 
-        const limit = Math.min(100, Math.max(1, parseInt(url.searchParams.get("limit") || "10", 10)));
-        const [rows] = await query<Json[]>(
-          env,
-          "SELECT id, user_id AS userId, type, message, related_entity_type AS relatedEntityType, related_entity_id AS relatedEntityId, metadata, created_at AS createdAt FROM activities WHERE user_id=? ORDER BY created_at DESC LIMIT ?",
-          [target.id, limit]
-        );
+        const limit = Math.min(100, Math.max(1, parseInt(url.searchParams.get("limit") || "10", 10) || 10));
+        let rows: Json[] = [];
+        try {
+          const [r] = await query<Json[]>(
+            env,
+            `SELECT id, user_id AS userId, type, message, related_entity_type AS relatedEntityType, related_entity_id AS relatedEntityId, created_at AS createdAt FROM activities WHERE user_id=? ORDER BY created_at DESC LIMIT ${limit}`,
+            [target.id]
+          );
+          rows = r;
+        } catch (err) {
+          console.error("Error querying recent activities:", err);
+          rows = [];
+        }
         return json(rows);
       }
 
@@ -4307,11 +4422,18 @@ const worker = {
         if (!target) return json({ message: "User not found" }, 400);
         if (!accessible(actor, target)) return json({ message: "Access denied" }, 403);
 
-        const [rows] = await query<Json[]>(
-          env,
-          "SELECT id, user_id AS userId, type, message, related_entity_type AS relatedEntityType, related_entity_id AS relatedEntityId, metadata, created_at AS createdAt FROM activities WHERE user_id=? ORDER BY created_at DESC",
-          [target.id]
-        );
+        let rows: Json[] = [];
+        try {
+          const [r] = await query<Json[]>(
+            env,
+            "SELECT id, user_id AS userId, type, message, related_entity_type AS relatedEntityType, related_entity_id AS relatedEntityId, created_at AS createdAt FROM activities WHERE user_id=? ORDER BY created_at DESC",
+            [target.id]
+          );
+          rows = r;
+        } catch (err) {
+          console.error("Error querying all activities:", err);
+          rows = [];
+        }
         return json(rows);
       }
 
@@ -4439,14 +4561,29 @@ const worker = {
     // Product grace period is one minute. Cron runs every minute, so the
     // observed transition can be up to roughly one scheduler interval late.
     const cutoff = mysqlDateTime(new Date(now.getTime() - 60_000));
-    const [rows] = await query<any[]>(env,
-      `SELECT o.id AS occurrence_id,o.medication_id,o.user_id,o.schedule_version,
-              DATE_FORMAT(o.local_date,'%Y-%m-%d') AS local_date,TIME_FORMAT(o.local_time,'%H:%i') AS time_str,
-              o.scheduled_at_utc,m.name AS medication_name,m.dosage
-       FROM dose_occurrences o JOIN medications m ON m.id=o.medication_id
-       WHERE o.state='PENDING' AND o.scheduled_at_utc<=? AND m.active=1
-         AND o.schedule_version=m.schedule_version AND o.local_date BETWEEN m.start_date AND m.end_date
-         AND EXISTS (SELECT 1 FROM medication_times mt WHERE mt.medication_id=m.id AND TIME_FORMAT(mt.time_of_day,'%H:%i')=TIME_FORMAT(o.local_time,'%H:%i'))`, [cutoff]);
+    let rows: any[] = [];
+    try {
+      const [r] = await query<any[]>(env,
+        `SELECT o.id AS occurrence_id,o.medication_id,o.user_id,o.schedule_version,
+                DATE_FORMAT(o.local_date,'%Y-%m-%d') AS local_date,TIME_FORMAT(o.local_time,'%H:%i') AS time_str,
+                o.scheduled_at_utc,m.name AS medication_name,m.dosage
+         FROM dose_occurrences o JOIN medications m ON m.id=o.medication_id
+         WHERE o.state='PENDING' AND o.scheduled_at_utc<=? AND (o.snooze_until IS NULL OR o.snooze_until<=NOW(3)) AND m.active=1
+           AND o.schedule_version=m.schedule_version AND o.local_date BETWEEN m.start_date AND m.end_date
+           AND EXISTS (SELECT 1 FROM medication_times mt WHERE mt.medication_id=m.id AND TIME_FORMAT(mt.time_of_day,'%H:%i')=TIME_FORMAT(o.local_time,'%H:%i'))`, [cutoff]);
+      rows = r;
+    } catch (err) {
+      if (!columnMissing(err, "snooze_until")) throw err;
+      const [r] = await query<any[]>(env,
+        `SELECT o.id AS occurrence_id,o.medication_id,o.user_id,o.schedule_version,
+                DATE_FORMAT(o.local_date,'%Y-%m-%d') AS local_date,TIME_FORMAT(o.local_time,'%H:%i') AS time_str,
+                o.scheduled_at_utc,m.name AS medication_name,m.dosage
+         FROM dose_occurrences o JOIN medications m ON m.id=o.medication_id
+         WHERE o.state='PENDING' AND o.scheduled_at_utc<=? AND m.active=1
+           AND o.schedule_version=m.schedule_version AND o.local_date BETWEEN m.start_date AND m.end_date
+           AND EXISTS (SELECT 1 FROM medication_times mt WHERE mt.medication_id=m.id AND TIME_FORMAT(mt.time_of_day,'%H:%i')=TIME_FORMAT(o.local_time,'%H:%i'))`, [cutoff]);
+      rows = r;
+    }
     for (const dose of rows) {
       const db = await getDbConnection(env);
       let transitioned = false;
