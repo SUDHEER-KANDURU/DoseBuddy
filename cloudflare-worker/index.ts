@@ -3008,17 +3008,27 @@ const worker = {
             "SELECT id, user_id FROM ai_conversations WHERE id = ?",
             [convId]
           );
-          if (!convRows || convRows.length === 0) {
-            return json({ success: false, error: "Conversation not found" }, 404);
+          if (convRows && convRows.length > 0) {
+            if (Number(convRows[0].user_id) !== Number(actor.id)) {
+              return json({ success: false, error: "Unauthorized" }, 403);
+            }
+            try {
+              await query(env, "DELETE FROM ai_messages WHERE conversation_id = ? AND user_id = ?", [convId, actor.id]);
+            } catch (msgErr) {
+              if (!optionalTableMissing(msgErr, "ai_messages")) {
+                console.warn("[AI Conversation] DELETE messages warning:", msgErr);
+              }
+            }
+            await query(env, "DELETE FROM ai_conversations WHERE id = ? AND user_id = ?", [convId, actor.id]);
+          } else {
+            // Idempotent: safe to report deleted if already absent
+            try {
+              await query(env, "DELETE FROM ai_messages WHERE conversation_id = ? AND user_id = ?", [convId, actor.id]);
+            } catch {}
           }
-          if (Number(convRows[0].user_id) !== Number(actor.id)) {
-            return json({ success: false, error: "Unauthorized" }, 403);
-          }
-
-          await query(env, "DELETE FROM ai_conversations WHERE id = ? AND user_id = ?", [convId, actor.id]);
           return json({ success: true, message: "Conversation deleted" });
         } catch (error: any) {
-          if (optionalTableMissing(error, "ai_conversations")) {
+          if (optionalTableMissing(error, "ai_conversations") || optionalTableMissing(error, "ai_messages")) {
             return json({ success: true, message: "Conversation deleted" });
           }
           console.error("[AI Conversation] DELETE error:", error);

@@ -5547,12 +5547,41 @@ function getAiConversationDetailKey(convId) {
     return `dosebuddy_ai_conv_${getCurrentUserId()}_${convId}`;
 }
 
+function getDeletedConversationIdsKey() {
+    return `dosebuddy_ai_deleted_${getCurrentUserId()}`;
+}
+
+function getDeletedConversationIds() {
+    try {
+        const raw = localStorage.getItem(getDeletedConversationIdsKey());
+        if (!raw) return new Set();
+        const arr = JSON.parse(raw);
+        return new Set(Array.isArray(arr) ? arr : []);
+    } catch {
+        return new Set();
+    }
+}
+
+function markConversationDeletedLocally(convId) {
+    if (!convId) return;
+    try {
+        const set = getDeletedConversationIds();
+        set.add(convId);
+        const arr = Array.from(set).slice(-100);
+        localStorage.setItem(getDeletedConversationIdsKey(), JSON.stringify(arr));
+    } catch (e) {
+        console.warn("Failed to record deleted conversation tombstone:", e);
+    }
+}
+
 function getLocalConversationIndex() {
     try {
         const raw = localStorage.getItem(getAiConversationsIndexKey());
         if (!raw) return [];
         const parsed = JSON.parse(raw);
-        return Array.isArray(parsed) ? parsed : [];
+        const list = Array.isArray(parsed) ? parsed : [];
+        const deletedIds = getDeletedConversationIds();
+        return list.filter(c => c && c.id && !deletedIds.has(c.id));
     } catch {
         return [];
     }
@@ -5582,6 +5611,8 @@ function deriveConversationTitle(firstMessage, topic) {
 
 function updateLocalConversationIndex(convId, updateFields = {}) {
     if (!convId) return;
+    const deletedIds = getDeletedConversationIds();
+    if (deletedIds.has(convId)) return;
     try {
         let list = getLocalConversationIndex();
         let existing = list.find(c => c.id === convId);
@@ -5613,10 +5644,28 @@ function updateLocalConversationIndex(convId, updateFields = {}) {
 function removeLocalConversation(convId) {
     if (!convId) return;
     try {
+        markConversationDeletedLocally(convId);
         let list = getLocalConversationIndex();
         list = list.filter(c => c.id !== convId);
         saveLocalConversationIndex(list);
         localStorage.removeItem(getAiConversationDetailKey(convId));
+
+        // If the active chat storage key has this conversation, remove it immediately
+        // so it cannot be revived by loadPastConversationsList()
+        const savedRaw = localStorage.getItem(getAiStorageKey());
+        if (savedRaw) {
+            try {
+                const parsed = JSON.parse(savedRaw);
+                if (parsed?.conversationId === convId) {
+                    localStorage.removeItem(getAiStorageKey());
+                }
+            } catch (_) {}
+        }
+
+        // If the active conversation in memory is the deleted one, reset the view
+        if (aiConversationState.conversationId === convId) {
+            startNewConversation();
+        }
     } catch (e) {
         console.warn("Failed to remove local conversation:", e);
     }
@@ -5899,7 +5948,43 @@ function setupUnifiedAiChat() {
             if (e.target === pastChatsModal) closePastChatsModal();
         });
     }
+
+    // Delete conversation modal listeners
+    const confirmDeleteBtn = document.getElementById("confirm-delete-conv-btn");
+    if (confirmDeleteBtn) {
+        confirmDeleteBtn.addEventListener("click", confirmDeleteConversation);
+    }
+    const cancelDeleteBtn = document.getElementById("cancel-delete-conv-btn");
+    if (cancelDeleteBtn) {
+        cancelDeleteBtn.addEventListener("click", closeDeleteConversationDialog);
+    }
+    const closeDeleteBtn = document.getElementById("close-delete-conv-btn");
+    if (closeDeleteBtn) {
+        closeDeleteBtn.addEventListener("click", closeDeleteConversationDialog);
+    }
+    const deleteConvModal = document.getElementById("modal-delete-conversation");
+    if (deleteConvModal) {
+        deleteConvModal.addEventListener("click", (e) => {
+            if (e.target === deleteConvModal && !_isDeletingConversation) {
+                closeDeleteConversationDialog();
+            }
+        });
+    }
+
     window.addEventListener("keydown", (e) => {
+        const deleteModal = document.getElementById("modal-delete-conversation");
+        if (deleteModal && deleteModal.classList.contains("modal-open")) {
+            if (e.key === "Escape" && !_isDeletingConversation) {
+                e.preventDefault();
+                e.stopPropagation();
+                closeDeleteConversationDialog();
+                return;
+            } else if (e.key === "Enter" && !_isDeletingConversation) {
+                e.preventDefault();
+                confirmDeleteConversation();
+                return;
+            }
+        }
         if (e.key === "Escape") {
             const modal = document.getElementById("past-chats-modal");
             if (modal && modal.classList.contains("modal-open")) {
@@ -6093,19 +6178,126 @@ function closePastChatsModal() {
     closeModal("past-chats-modal");
 }
 
+let _conversationPendingDelete = null;
+let _isDeletingConversation = false;
+
+function openDeleteConversationDialog(conv) {
+    if (!conv || !conv.id) return;
+    _conversationPendingDelete = conv;
+    _isDeletingConversation = false;
+
+    const promptEl = document.getElementById("delete-conv-prompt-text");
+    if (promptEl) {
+        const titleSafe = conv.title ? `"${conv.title}"` : "this conversation";
+        promptEl.textContent = `Are you sure you want to delete ${titleSafe}? All messages in this conversation will be permanently removed.`;
+    }
+
+    const confirmBtn = document.getElementById("confirm-delete-conv-btn");
+    const cancelBtn = document.getElementById("cancel-delete-conv-btn");
+    const closeBtn = document.getElementById("close-delete-conv-btn");
+
+    if (confirmBtn) {
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = "Delete";
+    }
+    if (cancelBtn) cancelBtn.disabled = false;
+    if (closeBtn) closeBtn.disabled = false;
+
+    openModal("modal-delete-conversation");
+}
+
+function closeDeleteConversationDialog() {
+    if (_isDeletingConversation) return;
+    _conversationPendingDelete = null;
+    closeModal("modal-delete-conversation");
+}
+
+async function confirmDeleteConversation() {
+    if (!_conversationPendingDelete || _isDeletingConversation) return;
+
+    const convToDelete = _conversationPendingDelete;
+    const convId = convToDelete.id;
+    _isDeletingConversation = true;
+
+    const confirmBtn = document.getElementById("confirm-delete-conv-btn");
+    const cancelBtn = document.getElementById("cancel-delete-conv-btn");
+    const closeBtn = document.getElementById("close-delete-conv-btn");
+
+    if (confirmBtn) {
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = "Deleting...";
+    }
+    if (cancelBtn) cancelBtn.disabled = true;
+    if (closeBtn) closeBtn.disabled = true;
+
+    // 1. Immediately remove from local storage & tombstone
+    removeLocalConversation(convId);
+
+    // 2. Snappy DOM update: immediately remove card from modal list
+    const selector = (window.CSS && typeof CSS.escape === "function")
+        ? `.past-chat-item[data-id="${CSS.escape(convId)}"]`
+        : null;
+    const itemEl = selector
+        ? document.querySelector(selector)
+        : Array.from(document.querySelectorAll("#past-chats-list .past-chat-item")).find(el => el.getAttribute("data-id") === convId);
+
+    if (itemEl) {
+        itemEl.remove();
+    }
+
+    const remainingItems = document.querySelectorAll("#past-chats-list .past-chat-item");
+    if (remainingItems.length === 0) {
+        renderPastChatsList([]);
+    }
+
+    // 3. Persistent backend deletion
+    let deleteSucceeded = true;
+    try {
+        const resp = await authFetch(`${API_BASE}/ai/conversations/${encodeURIComponent(convId)}`, {
+            method: "DELETE"
+        });
+        if (!resp.ok && resp.status !== 404) {
+            deleteSucceeded = false;
+            console.warn(`[AI Chat] Server returned ${resp.status} on delete conversation`);
+        }
+    } catch (err) {
+        console.warn("[AI Chat] Network error on delete conversation:", err);
+    } finally {
+        _isDeletingConversation = false;
+        _conversationPendingDelete = null;
+        if (cancelBtn) cancelBtn.disabled = false;
+        if (closeBtn) closeBtn.disabled = false;
+        if (confirmBtn) {
+            confirmBtn.disabled = false;
+            confirmBtn.textContent = "Delete";
+        }
+        closeModal("modal-delete-conversation");
+    }
+
+    if (deleteSucceeded) {
+        showToast("Conversation deleted", "info", 2500);
+    } else {
+        showToast("Conversation deleted locally", "warning", 3000);
+    }
+}
+
 async function loadPastConversationsList() {
     const listEl = document.getElementById("past-chats-list");
     if (!listEl) return;
 
-    // Ensure currently active conversation is registered in local index
+    const deletedIds = getDeletedConversationIds();
+
+    // Ensure currently active conversation is registered in local index if not deleted
     if (aiConversationState.conversationId || (Array.isArray(aiConversationState.history) && aiConversationState.history.length > 0)) {
-        saveAiConversationLocally();
+        if (!deletedIds.has(aiConversationState.conversationId)) {
+            saveAiConversationLocally();
+        }
     } else {
         try {
             const savedRaw = localStorage.getItem(getAiStorageKey());
             if (savedRaw) {
                 const parsed = JSON.parse(savedRaw);
-                if (parsed?.conversationId && Array.isArray(parsed.history) && parsed.history.length > 0) {
+                if (parsed?.conversationId && !deletedIds.has(parsed.conversationId) && Array.isArray(parsed.history) && parsed.history.length > 0) {
                     const firstUser = parsed.history.find(h => h.role === "user");
                     const title = deriveConversationTitle(firstUser?.content, parsed.state?.activeTopic || parsed.state?.lastMedicineName);
                     updateLocalConversationIndex(parsed.conversationId, {
@@ -6113,6 +6305,8 @@ async function loadPastConversationsList() {
                         active_topic: parsed.state?.activeTopic || parsed.state?.lastMedicineName || null,
                         message_count: parsed.history.length
                     });
+                } else if (parsed?.conversationId && deletedIds.has(parsed.conversationId)) {
+                    localStorage.removeItem(getAiStorageKey());
                 }
             }
         } catch {}
@@ -6133,9 +6327,11 @@ async function loadPastConversationsList() {
         });
         if (resp.ok) {
             const data = await resp.json();
-            const serverConvs = Array.isArray(data.conversations) ? data.conversations : [];
+            const rawServerConvs = Array.isArray(data.conversations) ? data.conversations : [];
+            const freshDeletedIds = getDeletedConversationIds();
+            const serverConvs = rawServerConvs.filter(c => c && c.id && !freshDeletedIds.has(c.id));
             const serverIds = new Set(serverConvs.map(c => c.id));
-            const localOnly = (cached || []).filter(c => !serverIds.has(c.id));
+            const localOnly = (cached || []).filter(c => c && c.id && !serverIds.has(c.id) && !freshDeletedIds.has(c.id));
             const merged = [...serverConvs, ...localOnly];
             saveLocalConversationIndex(merged);
             renderPastChatsList(merged);
@@ -6172,6 +6368,7 @@ function renderPastChatsList(conversations) {
         const item = document.createElement("div");
         const isActive = (conv.id === aiConversationState.conversationId);
         item.className = `past-chat-item ${isActive ? "active-chat" : ""}`;
+        item.setAttribute("data-id", conv.id);
 
         const dateStr = conv.updated_at
             ? new Date(conv.updated_at).toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
@@ -6204,21 +6401,10 @@ function renderPastChatsList(conversations) {
         });
 
         const delBtn = item.querySelector(".delete-chat-btn");
-        delBtn?.addEventListener("click", async (e) => {
+        delBtn?.addEventListener("click", (e) => {
             e.stopPropagation();
-            if (!confirm("Are you sure you want to delete this conversation?")) return;
-            removeLocalConversation(conv.id);
-            try {
-                await authFetch(`${API_BASE}/ai/conversations/${encodeURIComponent(conv.id)}`, {
-                    method: "DELETE"
-                });
-            } catch (delErr) {
-                console.warn("Server delete conversation error (cleaned up locally):", delErr);
-            }
-            if (aiConversationState.conversationId === conv.id) {
-                startNewConversation();
-            }
-            loadPastConversationsList();
+            e.preventDefault();
+            openDeleteConversationDialog(conv);
         });
 
         listEl.appendChild(item);
