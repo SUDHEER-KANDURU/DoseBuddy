@@ -2089,3 +2089,79 @@ body.dark-mode #auth-view select:focus {
     width: 100%;
   }
 }
+
+/* ── Split Screen Auth Layout Responsive Rules ───────────────── */
+@media (max-width: 960px) {
+  .auth-page {
+    grid-template-columns: 1fr !important;
+    max-width: 480px !important;
+    border-radius: 20px !important;
+    min-height: auto !important;
+    margin: 16px auto !important;
+  }
+  .auth-brand-panel {
+    padding: 24px 22px 20px 22px !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.15) !important;
+  }
+  .auth-brand-badge {
+    margin-bottom: 12px !important;
+  }
+  .auth-brand-headline {
+    font-size: 1.35rem !important;
+    margin-bottom: 6px !important;
+  }
+  .auth-brand-desc {
+    font-size: 0.85rem !important;
+    margin-bottom: 0 !important;
+  }
+  .auth-brand-illustration-wrap {
+    display: none !important; /* Hide illustration on mobile for focused form access */
+  }
+  .auth-brand-footer {
+    display: none !important;
+  }
+  .auth-card {
+    padding: 24px 22px !important;
+  }
+  #auth-view #auth-title {
+    font-size: 1.4rem !important;
+  }
+}
+
+@media (max-width: 480px) {
+  #auth-view.active {
+    padding: 12px 10px !important;
+    align-items: flex-start !important;
+  }
+  .auth-page {
+    margin: 8px auto 20px !important;
+    border-radius: 16px !important;
+  }
+  .auth-brand-panel {
+    padding: 20px 16px 16px 16px !important;
+  }
+  .auth-card {
+    padding: 20px 16px !important;
+  }
+  #auth-view .input-icon-wrap input,
+  #auth-view .intl-phone-input {
+    height: 44px !important;
+    font-size: 0.88rem !important;
+  }
+}
+
+@media (max-width: 360px) {
+  .auth-brand-headline {
+    font-size: 1.2rem !important;
+  }
+  .auth-brand-title {
+    font-size: 1.15rem !important;
+  }
+  .auth-card {
+    padding: 16px 12px !important;
+  }
+  #auth-view .tabs .tab-btn {
+    font-size: 0.82rem !important;
+    padding: 8px 0 !important;
+  }
+}
