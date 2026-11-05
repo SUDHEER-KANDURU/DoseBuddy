@@ -7014,6 +7014,20 @@ body.dark-mode .notif-health-badge-bad      { background: rgba(248,113,113,0.18)
 body.dark-mode .notif-health-badge-neutral  { background: rgba(255,255,255,0.10); color: #d1d5db; }
 body.dark-mode .notif-health-badge-checking { background: rgba(255,255,255,0.10); color: #d1d5db; }
 
+.notif-test-result-msg {
+    font-size: 0.8125rem;
+    line-height: 1.45;
+    padding: 7px 10px;
+    border-radius: var(--radius-sm, 6px);
+    background: var(--bg, #f8fafc);
+    border: 1px solid var(--border-light, #e8e3dc);
+    margin: 4px 2px 2px;
+}
+body.dark-mode .notif-test-result-msg {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(255, 255, 255, 0.08);
+}
+
 /* ── BMI Calculator View ──────────────────────────────────────────────────── */
 .bmi-layout {
     display: grid;

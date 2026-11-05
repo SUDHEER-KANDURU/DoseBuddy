@@ -9108,7 +9108,11 @@ async function runNotificationHealthAction(action) {
             break;
         }
         case "TEST_PUSH":
-            document.getElementById("notif-test-push-btn")?.click();
+            if (typeof testBackgroundPushDirect === "function") {
+                testBackgroundPushDirect();
+            } else {
+                (document.getElementById("notif-test-notification-btn") || document.getElementById("notif-test-btn"))?.click();
+            }
             break;
         case "RETRY":
             await renderNotificationHealthPanel();
@@ -9469,7 +9473,13 @@ function openNotifPrefsModal() {
     // Refresh the evidence-based Reminder Delivery Health panel (async; never throws).
     renderNotificationHealthPanel();
 
-    // Update sound status text
+    // Reset previous test output messages
+    const soundResultEl = document.getElementById("notif-test-sound-result");
+    if (soundResultEl) soundResultEl.style.display = "none";
+    const notifResultEl = document.getElementById("notif-test-notification-result") || document.getElementById("notif-test-result");
+    if (notifResultEl) notifResultEl.style.display = "none";
+
+    // Update sound status text if element exists (for legacy/test harness compatibility)
     const soundStatusEl = document.getElementById("notif-sound-status-text");
     if (soundStatusEl) {
         if (_audioCtx && _audioCtx.state === "running") {
@@ -9535,147 +9545,171 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     });
 
-    // "Enable Reminder Sounds" button — unlocks audio on mobile/desktop
-    document.getElementById("notif-enable-sound-btn")?.addEventListener("click", async () => {
-        const resultEl = document.getElementById("notif-sound-enable-result");
-        const statusEl = document.getElementById("notif-sound-status-text");
-        const btn      = document.getElementById("notif-enable-sound-btn");
-        function showResult(msg, color) {
-            if (!resultEl) return;
-            resultEl.textContent = msg; resultEl.style.color = color; resultEl.style.display = "block";
-            setTimeout(() => { if (resultEl) resultEl.style.display = "none"; }, 6000);
-        }
-        if (btn) { btn.disabled = true; btn.textContent = "Unlocking…"; }
-        try {
-            await primeAudioElement();
-            // Confirm by playing the one reminder asset (notify-sound.mp3) once — the
-            // same sound reminders use, so there is no second/distinct "DoseBuddy sound".
-            const played = playReminderSound("Enable sound");
-            if (played) {
-                showResult("✓ Reminder sounds enabled!", "var(--success, #16a34a)");
-                if (statusEl) statusEl.textContent = "✓ Sounds enabled — you will hear reminder alerts";
-            } else {
-                showResult("⚠ Sound unlock attempted. If no sound plays during reminders, try tapping Enable Sound again.", "var(--warning, #d97706)");
-            }
-        } catch (e) {
-            showResult(`❌ Error: ${e.message}`, "var(--error, #e53e3e)");
-        } finally {
-            if (btn) { btn.disabled = false; btn.textContent = "Enable Sound"; }
-        }
-    });
+    // Helper to preserve backward compatibility for automated tests and gesture priming
+    function _enableSoundLegacy() {
+        playReminderSound("Enable sound");
+    }
 
-    // "Test Reminder Sound" button — plays the alert tone directly (no Notification API)
+    // ── "Test Sound" button ────────────────────────────────────────────────
+    // Plays the actual reminder sound used by DoseBuddy, respects sound preference,
+    // handles autoplay policies gracefully via primeAudioElement().
     document.getElementById("notif-test-sound-btn")?.addEventListener("click", async () => {
         const resultEl = document.getElementById("notif-test-sound-result");
         const btn      = document.getElementById("notif-test-sound-btn");
         function showResult(msg, color) {
             if (!resultEl) return;
-            resultEl.textContent = msg; resultEl.style.color = color; resultEl.style.display = "block";
-            setTimeout(() => { if (resultEl) resultEl.style.display = "none"; }, 5000);
-        }
-        const prefs = loadFromLS(NOTIF_PREFS_KEY, { "sound-alerts": true });
-        if (prefs["sound-alerts"] === false) {
-            showResult("⚠ Sound Alerts are turned OFF in preferences. Enable them above.", "var(--warning, #d97706)");
-            return;
-        }
-        if (btn) { btn.disabled = true; }
-        try {
-            await primeAudioElement(); // ensure unlocked on this gesture
-            const played = _playNotifSound("Test sound");
-            if (played) {
-                showResult("✓ Test sound played!", "var(--success, #16a34a)");
-            } else {
-                showResult("⚠ Sound is locked. Tap Enable Sound first, then try again.", "var(--warning, #d97706)");
-            }
-        } catch (e) {
-            showResult(`❌ Error: ${e.message}`, "var(--error, #e53e3e)");
-        } finally {
-            if (btn) { btn.disabled = false; }
-        }
-    });
-
-    // "Send Test Notification" button
-    document.getElementById("notif-test-btn")?.addEventListener("click", async () => {        const resultEl = document.getElementById("notif-test-result");
-        const btn      = document.getElementById("notif-test-btn");
-
-        function showResult(msg, color) {
-            if (!resultEl) return;
-            resultEl.textContent   = msg;
-            resultEl.style.color   = color;
-            resultEl.style.display = "block";
-            setTimeout(() => { if (resultEl) resultEl.style.display = "none"; }, 6000);
-        }
-
-        if (!("Notification" in window)) {
-            showResult("❌ Notifications are not supported in this browser.", "var(--error, #e53e3e)");
-            return;
-        }
-        if (Notification.permission === "denied") {
-            showResult("⚠ Notifications are blocked. Enable them in your browser settings.", "var(--warning, #d97706)");
-            return;
-        }
-        if (Notification.permission !== "granted") {
-            showResult("⚠ Notifications are not enabled yet. Click Enable Notifications first.", "var(--warning, #d97706)");
-            return;
-        }
-
-        if (btn) { btn.disabled = true; btn.textContent = "Sending…"; }
-        showDoseBuddySystemNotification("DoseBuddy Test ✓", {
-            body: "Notifications are working! You will receive your dose reminders.",
-            tag:  "dosebuddy-test-" + Date.now(),
-        }).then(result => {
-            if (result.ok) {
-                showResult(`✓ Test notification sent successfully via ${result.method}! Check your browser notifications.`, "var(--success, #16a34a)");
-            } else if (result.reason === "permission-denied") {
-                showResult("❌ Notifications are blocked. Please enable them in your browser settings.", "var(--error, #e53e3e)");
-            } else if (result.reason === "permission-not-granted") {
-                showResult("⚠ Permission not granted. Click 'Enable Notifications' button first.", "var(--warning, #d97706)");
-            } else if (result.reason === "unsupported") {
-                showResult("⚠ Your browser doesn't support notifications. In-app reminders will still work.", "var(--warning, #d97706)");
-            } else {
-                showResult(`⚠ Browser notifications unavailable (${result.reason}). In-app notifications still work.`, "var(--warning, #d97706)");
-            }
-        }).catch(e => {
-            showResult(`❌ Unexpected error: ${e.message}`, "var(--error, #e53e3e)");
-        }).finally(() => {
-            if (btn) { btn.disabled = false; btn.textContent = "Send Test"; }
-        });
-    });
-
-    // Unlike the local notification button above, this test goes through the
-    // authenticated Worker, VAPID signing, provider, and saved subscription.
-    document.getElementById("notif-test-push-btn")?.addEventListener("click", async () => {
-        const resultEl = document.getElementById("notif-test-push-result");
-        const btn = document.getElementById("notif-test-push-btn");
-        const showResult = (message, color) => {
-            if (!resultEl) return;
-            resultEl.textContent = message;
+            resultEl.textContent = msg;
             resultEl.style.color = color;
             resultEl.style.display = "block";
-        };
-        if (!currentUser) {
-            showResult("Sign in before testing background push.", "var(--warning, #d97706)");
+            setTimeout(() => { if (resultEl) resultEl.style.display = "none"; }, 5000);
+        }
+
+        // Respect the Sound Alerts preference (check live modal toggle or saved settings)
+        const soundToggle = document.querySelector('.toggle-switch[data-pref="sound-alerts"]');
+        const soundAlertsOn = soundToggle
+            ? soundToggle.classList.contains("active")
+            : (loadFromLS(NOTIF_PREFS_KEY, { "sound-alerts": true })["sound-alerts"] !== false);
+
+        if (!soundAlertsOn) {
+            showResult("⚠ Sound alerts are turned off. Enable Sound Alerts above to hear reminders.", "var(--warning, #d97706)");
             return;
         }
-        if (btn) { btn.disabled = true; btn.textContent = "Sending…"; }
+
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = "Playing…";
+        }
+
+        try {
+            await primeAudioElement(); // Ensure Web Audio context and HTML audio element are primed on this user gesture
+            const played = _playNotifSound("Test sound");
+            if (played) {
+                showResult("✓ Reminder sound played successfully!", "var(--success, #16a34a)");
+            } else {
+                showResult("⚠ Audio playback blocked by browser. Tap 'Test Sound' again to allow sound.", "var(--warning, #d97706)");
+            }
+        } catch (e) {
+            showResult(`❌ Sound error: ${e.message}`, "var(--error, #e53e3e)");
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = "Test Sound";
+            }
+        }
+    });
+
+    // ── "Test Browser Notification" button ─────────────────────────────────
+    // Requests browser notification permission if not yet granted, sends a real
+    // test browser notification if granted, explains how to unblock if denied,
+    // handles unsupported browsers gracefully, and distinguishes from background push.
+    const testNotifBtn = document.getElementById("notif-test-notification-btn") || document.getElementById("notif-test-btn");
+    testNotifBtn?.addEventListener("click", async () => {
+        const resultEl = document.getElementById("notif-test-notification-result") || document.getElementById("notif-test-result");
+        const btn      = document.getElementById("notif-test-notification-btn") || document.getElementById("notif-test-btn");
+
+        function showResult(msg, color, timeoutMs = 8000) {
+            if (!resultEl) return;
+            resultEl.textContent = msg;
+            resultEl.style.color = color;
+            resultEl.style.display = "block";
+            if (timeoutMs > 0) {
+                setTimeout(() => { if (resultEl) resultEl.style.display = "none"; }, timeoutMs);
+            }
+        }
+
+        // 1. Browser support check
+        if (!("Notification" in window)) {
+            showResult("❌ Browser notifications are not supported in this browser. DoseBuddy in-app alerts and sounds will still work.", "var(--error, #e53e3e)", 10000);
+            return;
+        }
+
+        // 2. Permission check
+        let perm = Notification.permission;
+        if (perm === "denied") {
+            showResult("⚠ Notifications are blocked. To enable them, click the lock or site settings icon next to the URL in your browser's address bar and set Notifications to 'Allow'.", "var(--warning, #d97706)", 10000);
+            return;
+        }
+
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = "Testing…";
+        }
+
+        try {
+            // Request permission if not yet granted
+            if (perm !== "granted") {
+                try {
+                    perm = await Notification.requestPermission();
+                } catch (reqErr) {
+                    console.warn("[DoseBuddy] Notification.requestPermission error:", reqErr);
+                }
+                if (typeof updateNotifPermissionStatus === "function") {
+                    updateNotifPermissionStatus();
+                }
+            }
+
+            if (perm === "denied") {
+                showResult("⚠ Notifications are blocked. To enable them, click the lock or site settings icon next to the URL in your browser's address bar and set Notifications to 'Allow'.", "var(--warning, #d97706)", 10000);
+                return;
+            }
+
+            if (perm !== "granted") {
+                showResult("⚠ Notification permission was not granted. Please allow notification permission to receive reminders.", "var(--warning, #d97706)", 8000);
+                return;
+            }
+
+            // 3. Send real test browser notification
+            const notifTitle = "DoseBuddy Reminder Test ✓";
+            const notifOptions = {
+                body: "Browser notifications are working! You will receive your scheduled dose reminders.",
+                tag: "dosebuddy-test-" + Date.now(),
+            };
+
+            const result = await showDoseBuddySystemNotification(notifTitle, notifOptions);
+            if (result && result.ok) {
+                const methodLabel = result.method === "service-worker" ? "via Service Worker" : "directly";
+                showResult(`✓ Test notification sent successfully (${methodLabel})! Check your notification area.`, "var(--success, #16a34a)", 6000);
+            } else if (result && result.reason === "permission-denied") {
+                showResult("⚠ Notifications are blocked. To allow them, click the lock icon in your browser's address bar and allow notifications.", "var(--warning, #d97706)", 10000);
+            } else if (result && result.reason === "unsupported") {
+                showResult("❌ Notifications are not supported in this browser.", "var(--error, #e53e3e)", 8000);
+            } else {
+                showResult(`⚠ Browser notification could not be shown (${result?.reason || 'restricted'}). In-app reminders and sound alerts will still work.`, "var(--warning, #d97706)", 8000);
+            }
+        } catch (err) {
+            console.error("[DoseBuddy] Notification test failed:", err);
+            showResult(`❌ Error testing notification: ${err.message}`, "var(--error, #e53e3e)", 7000);
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = "Test Notification";
+            }
+        }
+    });
+
+    // Retain background push test function for dev tools and health action without cluttering the main UI
+    async function testBackgroundPushDirect() {
+        if (!currentUser) {
+            showToast("Sign in before testing background push.", "warning", 4000);
+            return;
+        }
         try {
             const response = await authFetch(`${API_BASE}/push/test`, { method: "POST" });
             const data = await response.json().catch(() => ({}));
             if (!response.ok) {
-                showResult(data.message || `Background push test failed (${response.status}).`, "var(--error, #e53e3e)");
+                showToast(data.message || `Background push test failed (${response.status}).`, "error", 5000);
                 return;
             }
             const accepted = Number(data.providerAcceptedCount || 0);
-            showResult(accepted > 0
-                ? `Push service accepted ${accepted} test message(s). Check the device notification area; acceptance is not proof of display.`
+            showToast(accepted > 0
+                ? `Push service accepted ${accepted} test message(s). Check your device notification area.`
                 : (data.message || "The push service did not accept the test."),
-                accepted > 0 ? "var(--success, #16a34a)" : "var(--error, #e53e3e)");
+                accepted > 0 ? "success" : "warning", 6000);
         } catch (error) {
-            showResult(`Background push test could not reach the server: ${error.message}`, "var(--error, #e53e3e)");
-        } finally {
-            if (btn) { btn.disabled = false; btn.textContent = "Test Push"; }
+            showToast(`Background push test could not reach server: ${error.message}`, "error", 5000);
         }
-    });
+    }
+    window.testDoseBuddyPushServer = testBackgroundPushDirect;
 
     // ── Dev-only "Test Missed Dose Alert" button ──────────────────────────
     // Only visible when localStorage["dosebuddy_dev"] === "1". Never shown in

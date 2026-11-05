@@ -2279,43 +2279,27 @@
             <div class="pref-list">
                 <div class="pref-row"><div class="pref-info"><p class="pref-title">Sound Alerts</p><p class="pref-desc">Play a sound when reminders trigger</p></div><button class="toggle-switch active" data-pref="sound-alerts" role="switch" aria-checked="true"><span class="toggle-knob"></span></button></div>
             </div>
-            <div class="modal-section-label">Test</div>
+            <div class="modal-section-label">Test Notifications</div>
             <div class="pref-list">
-                <!-- Enable Sound — important on mobile where audio needs explicit unlock -->
+                <!-- Test Sound -->
                 <div class="pref-row">
                     <div class="pref-info">
-                        <p class="pref-title">Enable Reminder Sounds</p>
-                        <p class="pref-desc" id="notif-sound-status-text">Tap to unlock reminder alert sounds in this browser</p>
-                    </div>
-                    <button class="modal-btn-secondary" id="notif-enable-sound-btn" type="button" style="flex-shrink:0;">Enable Sound</button>
-                </div>
-                <p id="notif-sound-enable-result" style="font-size:0.8rem;margin:4px 2px 0;display:none;"></p>
-                <!-- Test Reminder Sound — separate from system notification test -->
-                <div class="pref-row" style="margin-top:4px;">
-                    <div class="pref-info">
-                        <p class="pref-title">Test Reminder Sound</p>
+                        <p class="pref-title">Test Sound</p>
                         <p class="pref-desc">Play the reminder alert tone to confirm sound is working</p>
                     </div>
                     <button class="modal-btn-secondary" id="notif-test-sound-btn" type="button" style="flex-shrink:0;">Test Sound</button>
                 </div>
-                <p id="notif-test-sound-result" style="font-size:0.8rem;margin:4px 2px 0;display:none;"></p>
-                <!-- Test System Notification -->
+                <p id="notif-test-sound-result" class="notif-test-result-msg" style="display:none;"></p>
+
+                <!-- Test Browser Notification -->
                 <div class="pref-row" style="margin-top:4px;">
                     <div class="pref-info">
-                        <p class="pref-title">Test Notification</p>
-                        <p class="pref-desc">Show a local test notification. This does not verify server or closed-browser dose delivery.</p>
+                        <p class="pref-title">Test Browser Notification</p>
+                        <p class="pref-desc">Send a test notification to check browser permissions and alerts</p>
                     </div>
-                    <button class="modal-btn-secondary" id="notif-test-btn" type="button" style="flex-shrink:0;">Test Local</button>
+                    <button class="modal-btn-secondary" id="notif-test-notification-btn" type="button" style="flex-shrink:0;">Test Notification</button>
                 </div>
-                <p id="notif-test-result" style="font-size:0.8rem;margin:4px 2px 0;display:none;"></p>
-                <div class="pref-row" style="margin-top:4px;">
-                    <div class="pref-info">
-                        <p class="pref-title">Test Background Push</p>
-                        <p class="pref-desc">Send a test through the Worker and saved browser subscription.</p>
-                    </div>
-                    <button class="modal-btn-secondary" id="notif-test-push-btn" type="button" style="flex-shrink:0;">Test Push</button>
-                </div>
-                <p id="notif-test-push-result" style="font-size:0.8rem;margin:4px 2px 0;display:none;"></p>
+                <p id="notif-test-notification-result" class="notif-test-result-msg" style="display:none;"></p>
             </div>
             <!-- Dev-only: simulate a missed-dose alert. Hidden in production unless
                  localStorage flag "dosebuddy_dev" is set to "1". -->
