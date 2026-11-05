@@ -22,34 +22,43 @@ img, canvas, svg, video { max-width: 100%; }
   .page-title { font-size: 1rem; }
 }
 
-/* ── App shell & Sidebar ─────────────────────────────────── */
-@media (max-width: 1024px) {
-  :root { --sidebar-w: 240px; }
+/* ── Full-Width App Shell & Responsive Navigation ──────────── */
+@media (min-width: 1024px) {
+  .hamburger-fab { display: none !important; }
+  .desktop-nav-bar { display: flex !important; }
+  .sidebar { display: none !important; }
+  .menu-overlay { display: none !important; }
+}
 
-  .app-shell {
-    grid-template-areas: "topnav" "main";
-    grid-template-columns: 1fr;
-    grid-template-rows: var(--topnav-h) 1fr;
-  }
+@media (max-width: 1180px) and (min-width: 1024px) {
+  .desktop-nav-collapsible { display: none !important; }
+  .desktop-nav-more { display: block !important; }
+}
 
+@media (max-width: 1023px) {
+  .desktop-nav-bar { display: none !important; }
+  .hamburger-fab { display: flex !important; }
   .sidebar {
     position: fixed;
     top: 0; left: 0;
-    width: var(--sidebar-w);
+    width: min(300px, 85vw);
     height: 100dvh;
     transform: translateX(-100%);
-    z-index: 200;
+    z-index: 300;
     box-shadow: var(--shadow-lg);
     transition: transform 0.28s cubic-bezier(0.4,0,0.2,1);
   }
   .sidebar.open { transform: translateX(0); }
-  .hamburger-fab { display: flex !important; }
+  .topnav-main { padding: 0 var(--space-4); }
   .main-content { padding: var(--space-5); }
 }
 
 @media (max-width: 768px) {
+  .topnav-main { padding: 0 var(--space-3); gap: var(--space-2); }
   .main-content { padding: var(--space-4); }
+  .brand-title { font-size: 0.95rem; }
 }
+
 @media (max-width: 480px) {
   .main-content {
     padding: var(--space-3);
@@ -58,21 +67,13 @@ img, canvas, svg, video { max-width: 100%; }
     overflow-x: hidden;
   }
 }
-@media (max-width: 375px) {
-  .main-content { padding: var(--space-2); }
+
+@media (max-width: 400px) {
+  .brand-title { display: inline-block; font-size: 0.9rem; }
 }
 
-/* ── Top navigation ──────────────────────────────────────── */
-@media (max-width: 1024px) {
-  .topnav { padding: 0 var(--space-4); }
-}
-@media (max-width: 768px) {
-  .topnav { padding: 0 var(--space-3); gap: var(--space-2); }
-  .topnav-center { display: none; }
-  .brand-title { font-size: 0.88rem; }
-}
-@media (max-width: 400px) {
-  .brand-title { display: none; }
+@media (max-width: 375px) {
+  .main-content { padding: var(--space-2); }
 }
 
 /* ── Page header ─────────────────────────────────────────── */

@@ -808,6 +808,20 @@ function switchView(viewId) {
     const target = document.getElementById(viewId);
     if (target) target.classList.add("active");
 
+    // Synchronize active navigation buttons across desktop and mobile
+    document.querySelectorAll(".nav-btn[data-view]").forEach(link => {
+        const isActive = link.dataset.view === viewId;
+        link.classList.toggle("active", isActive);
+    });
+
+    // Highlight More button if active view is housed inside desktop More dropdown
+    const moreMenu = document.getElementById("desktop-nav-more-menu");
+    const moreBtn = document.getElementById("desktop-nav-more-btn");
+    if (moreMenu && moreBtn) {
+        const activeInMore = !!moreMenu.querySelector(`.nav-btn[data-view="${viewId}"]`);
+        moreBtn.classList.toggle("active", activeInMore);
+    }
+
     if (!currentUser) return;
 
     if (viewId === "dashboard-view") {
@@ -830,11 +844,13 @@ function showAuthView() {
 
     // Auth view is strictly isolated to light theme
     document.body.classList.remove("dark-mode");
+    document.body.classList.remove("drawer-open");
 
     const notif = document.querySelector(".notification-wrapper");
     if (notif) notif.style.display = "none";
 
     closeUserMenu();
+    closeDesktopMoreMenu();
     setHamburgerVisible(false);
     setThemeToggleVisible(false);
 
@@ -2025,22 +2041,33 @@ async function fetchFullProfile(userId) {
 
 
 function setupNav() {
-
     document.querySelectorAll(".nav-btn[data-view]").forEach(btn => {
         btn.addEventListener("click", () => {
-
             const viewId = btn.dataset.view;
-
             switchView(viewId);
-            closeUserMenu();  // always close sidebar on nav
-
-            document.querySelectorAll(".nav-btn").forEach(link => {
-                link.classList.remove("active");
-            });
-
-            btn.classList.add("active");
+            closeUserMenu();  // always close sidebar/drawer on nav
+            closeDesktopMoreMenu(); // always close desktop More menu on nav
         });
     });
+
+    const brandBtn = document.getElementById("nav-brand-btn");
+    if (brandBtn) {
+        brandBtn.addEventListener("click", () => {
+            switchView("dashboard-view");
+            closeUserMenu();
+            closeDesktopMoreMenu();
+        });
+        brandBtn.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                switchView("dashboard-view");
+                closeUserMenu();
+                closeDesktopMoreMenu();
+            }
+        });
+    }
+
+    setupDesktopMoreNav();
 
     const menuLogoutBtn = document.getElementById("menu-logout-btn");
 
@@ -2083,19 +2110,40 @@ let userMenuOpen = false;
 function setupHamburgerMenu() {
     const hamburgerBtn = document.getElementById("hamburger-btn");
     const overlay = document.getElementById("menu-overlay");
+    const drawerCloseBtn = document.getElementById("drawer-close-btn");
 
-    if (!hamburgerBtn || !overlay) return;
+    if (hamburgerBtn) {
+        hamburgerBtn.addEventListener("click", () => {
+            if (userMenuOpen) {
+                closeUserMenu();
+            } else {
+                openUserMenu();
+            }
+        });
+    }
 
-    hamburgerBtn.addEventListener("click", () => {
-        if (userMenuOpen) {
+    if (overlay) {
+        overlay.addEventListener("click", () => {
             closeUserMenu();
-        } else {
-            openUserMenu();
+        });
+    }
+
+    if (drawerCloseBtn) {
+        drawerCloseBtn.addEventListener("click", () => {
+            closeUserMenu();
+        });
+    }
+
+    document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && userMenuOpen) {
+            closeUserMenu();
         }
     });
 
-    overlay.addEventListener("click", () => {
-        closeUserMenu();
+    window.addEventListener("resize", () => {
+        if (window.innerWidth >= 1024 && userMenuOpen) {
+            closeUserMenu();
+        }
     });
 }
 
@@ -2115,6 +2163,7 @@ function openUserMenu() {
     const menu = document.getElementById("user-menu");
     if (overlay) overlay.classList.add("open");
     if (menu) menu.classList.add("open");
+    document.body.classList.add("drawer-open");
     userMenuOpen = true;
     updateUserMenuInfo();
 }
@@ -2124,11 +2173,53 @@ function closeUserMenu() {
     const menu = document.getElementById("user-menu");
     if (overlay) overlay.classList.remove("open");
     if (menu) menu.classList.remove("open");
+    document.body.classList.remove("drawer-open");
     userMenuOpen = false;
 }
 
-function updateUserMenuInfo() {
+function setupDesktopMoreNav() {
+    const moreBtn = document.getElementById("desktop-nav-more-btn");
+    const moreMenu = document.getElementById("desktop-nav-more-menu");
+    if (!moreBtn || !moreMenu) return;
 
+    moreBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const isOpen = moreMenu.classList.contains("open");
+        if (isOpen) {
+            closeDesktopMoreMenu();
+        } else {
+            openDesktopMoreMenu();
+        }
+    });
+
+    document.addEventListener("click", (e) => {
+        if (!moreMenu.contains(e.target) && e.target !== moreBtn) {
+            closeDesktopMoreMenu();
+        }
+    });
+
+    document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") {
+            closeDesktopMoreMenu();
+        }
+    });
+}
+
+function openDesktopMoreMenu() {
+    const moreBtn = document.getElementById("desktop-nav-more-btn");
+    const moreMenu = document.getElementById("desktop-nav-more-menu");
+    if (moreMenu) moreMenu.classList.add("open");
+    if (moreBtn) moreBtn.setAttribute("aria-expanded", "true");
+}
+
+function closeDesktopMoreMenu() {
+    const moreBtn = document.getElementById("desktop-nav-more-btn");
+    const moreMenu = document.getElementById("desktop-nav-more-menu");
+    if (moreMenu) moreMenu.classList.remove("open");
+    if (moreBtn) moreBtn.setAttribute("aria-expanded", "false");
+}
+
+function updateUserMenuInfo() {
     const avatarEl = document.getElementById("nav-user-avatar");
 
     if (avatarEl && currentUser) {
@@ -7495,6 +7586,11 @@ function updateThemeButtons() {
     if (checkbox) checkbox.checked = isDark;
     if (text)     text.textContent = isDark ? "Light mode" : "Dark mode";
 
+    const pdThemeLabel = document.getElementById("pd-theme-label");
+    if (pdThemeLabel) {
+        pdThemeLabel.textContent = isDark ? "Light Mode" : "Dark Mode";
+    }
+
     if (btnMenu) {
         const label = btnMenu.querySelector(".sidebar-theme-label");
         const pill  = btnMenu.querySelector(".sidebar-theme-pill");
@@ -9172,6 +9268,16 @@ function setupProfileDropdown() {
         avatarBtn.setAttribute("aria-expanded", String(!isOpen));
     });
 
+    const pdThemeBtn = document.getElementById("pd-theme-toggle");
+    if (pdThemeBtn) {
+        pdThemeBtn.addEventListener("click", () => {
+            const next = document.body.classList.contains("dark-mode") ? "light" : "dark";
+            applyTheme(next);
+            dropdown.classList.remove("pd-open");
+            avatarBtn.setAttribute("aria-expanded", "false");
+        });
+    }
+
     document.addEventListener("click", (e) => {
         if (!dropdown.contains(e.target) && e.target !== avatarBtn) {
             dropdown.classList.remove("pd-open");
@@ -10022,16 +10128,16 @@ const ONBOARDING_STEPS = [
         pos:    "center",
     },
     {
-        title:  "Sidebar Navigation",
-        desc:   "Use the sidebar to switch between Dashboard, Add Medicine, Reports, History, and AI tools.",
-        target: "#user-menu",
-        pos:    "right",
+        title:  "Easy Navigation",
+        desc:   "Use the navigation bar to switch between Dashboard, Add Medicine, Reports, History, and AI tools.",
+        target: "#desktop-nav, #user-menu",
+        pos:    "bottom",
     },
     {
         title:  "Add Your Medicines",
         desc:   "Click Add Medicine to set up your medication schedule. You can also upload a prescription to auto-fill.",
-        target: "[data-view='add-medicine-view']",
-        pos:    "right",
+        target: ".desktop-nav-bar [data-view='add-medicine-view'], .sidebar [data-view='add-medicine-view']",
+        pos:    "bottom",
     },
     {
         title:  "Notification Bell",
@@ -10047,9 +10153,9 @@ const ONBOARDING_STEPS = [
     },
     {
         title:  "Dark Mode",
-        desc:   "Toggle dark mode anytime using the button at the bottom of the sidebar. Your preference is saved.",
-        target: "#menu-theme-toggle",
-        pos:    "right",
+        desc:   "Toggle dark mode anytime using the option in your Profile menu or mobile drawer. Your preference is saved.",
+        target: "#pd-theme-toggle, #menu-theme-toggle",
+        pos:    "bottom",
     },
 ];
 

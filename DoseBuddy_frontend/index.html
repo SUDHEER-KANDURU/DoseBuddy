@@ -548,54 +548,147 @@
 
 <div id="app-shell" class="app-shell" style="display:none;">
 
-    <header class="topnav">
-        <div class="topnav-left">
-            <button id="hamburger-btn" class="hamburger-fab" aria-label="Toggle menu">
-                <span></span><span></span><span></span>
-            </button>
-            <div class="nav-brand">
+    <header class="topnav" id="app-header">
+        <div class="topnav-main">
+            <div class="topnav-left">
+                <button id="hamburger-btn" class="hamburger-fab" aria-label="Toggle navigation menu">
+                    <span></span><span></span><span></span>
+                </button>
+                <div class="nav-brand" id="nav-brand-btn" role="button" tabindex="0" title="Go to Dashboard">
+                    <div class="brand-logo-circle">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/></svg>
+                    </div>
+                    <span class="brand-title">DoseBuddy</span>
+                </div>
+            </div>
+
+            <div class="topnav-right">
+                <div class="notification-wrapper">
+                    <button id="notification-bell" class="icon-btn" aria-label="Notifications">
+                        <svg class="bell-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 10-12 0v3.2c0 .5-.2 1-.6 1.4L4 17h5m6 0a3 3 0 11-6 0m6 0H9"/>
+                        </svg>
+                        <span id="notification-count" class="notif-badge" style="display:none;">0</span>
+                    </button>
+                    <div id="notification-panel" class="notif-panel">
+                        <div class="notif-panel-header">
+                            <div class="notif-panel-title-row">
+                                <span class="notif-panel-title">Notifications</span>
+                                <span class="notif-unread-badge" id="notif-unread-badge" style="display:none;">0</span>
+                            </div>
+                            <div class="notif-panel-actions">
+                                <button class="notif-action-btn" id="notif-mark-all-btn">Mark all read</button>
+                                <button class="notif-action-btn notif-clear-btn" id="notif-clear-btn">Clear</button>
+                            </div>
+                        </div>
+                        <div class="notif-items-list" id="notification-list">
+                        </div>
+                        <div class="notif-empty" id="notif-empty-state" style="display:flex;">
+                            <div class="notif-empty-icon">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.75" stroke="currentColor" width="32" height="32"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"/></svg>
+                            </div>
+                            <p class="notif-empty-text">You're all caught up!</p>
+                            <p class="notif-empty-sub">No new notifications</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="user-avatar-btn" id="nav-user-avatar" role="button" tabindex="0" aria-label="User Profile">U</div>
+            </div>
+        </div>
+
+        <!-- Horizontal Desktop Navigation Row -->
+        <nav class="desktop-nav-bar" id="desktop-nav" aria-label="Main Navigation">
+            <div class="desktop-nav-inner">
+                <button class="nav-btn desktop-nav-link active" data-view="dashboard-view">
+                    <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
+                    </svg>
+                    <span>Dashboard</span>
+                </button>
+
+                <button class="nav-btn desktop-nav-link" data-view="add-medicine-view">
+                    <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/>
+                    </svg>
+                    <span>Add Medicine</span>
+                </button>
+
+                <button class="nav-btn desktop-nav-link" data-view="reports-view">
+                    <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+                    </svg>
+                    <span>Analytics &amp; Reports</span>
+                </button>
+
+                <button class="nav-btn desktop-nav-link" data-view="history-view">
+                    <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                    </svg>
+                    <span>History</span>
+                </button>
+
+                <button class="nav-btn desktop-nav-link desktop-nav-collapsible" data-view="bmi-view">
+                    <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/>
+                    </svg>
+                    <span>BMI Calculator</span>
+                </button>
+
+                <button class="nav-btn desktop-nav-link desktop-nav-collapsible" data-view="vitals-view">
+                    <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M3 12h2l2-7 3 14 3-10 2 3h6"/>
+                    </svg>
+                    <span>Vitals Log</span>
+                </button>
+
+                <button class="nav-btn desktop-nav-link" data-view="ai-view">
+                    <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/>
+                    </svg>
+                    <span>AI Assistant</span>
+                </button>
+
+                <!-- More dropdown for compact/tablet-landscape desktop views -->
+                <div class="desktop-nav-more" id="desktop-nav-more">
+                    <button class="nav-btn desktop-nav-link desktop-nav-more-btn" id="desktop-nav-more-btn" aria-haspopup="true" aria-expanded="false">
+                        <span>More</span>
+                        <svg class="nav-more-chevron" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" width="12" height="12">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+                        </svg>
+                    </button>
+                    <div class="desktop-nav-more-menu" id="desktop-nav-more-menu" role="menu">
+                        <button class="desktop-nav-more-item nav-btn" data-view="bmi-view">
+                            <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/>
+                            </svg>
+                            <span>BMI Calculator</span>
+                        </button>
+                        <button class="desktop-nav-more-item nav-btn" data-view="vitals-view">
+                            <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M3 12h2l2-7 3 14 3-10 2 3h6"/>
+                            </svg>
+                            <span>Vitals Log</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </nav>
+    </header>
+
+    <aside id="user-menu" class="sidebar drawer-menu" aria-label="Navigation drawer">
+        <div class="drawer-header">
+            <div class="drawer-brand">
                 <div class="brand-logo-circle">
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16"><path stroke-linecap="round" stroke-linejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/></svg>
                 </div>
                 <span class="brand-title">DoseBuddy</span>
             </div>
+            <button id="drawer-close-btn" class="drawer-close-btn" aria-label="Close navigation menu">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" width="20" height="20">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+            </button>
         </div>
-
-        <div class="topnav-right">
-            <div class="notification-wrapper">
-                <button id="notification-bell" class="icon-btn" aria-label="Notifications">
-                    <svg class="bell-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 10-12 0v3.2c0 .5-.2 1-.6 1.4L4 17h5m6 0a3 3 0 11-6 0m6 0H9"/>
-                    </svg>
-                    <span id="notification-count" class="notif-badge" style="display:none;">0</span>
-                </button>
-                <div id="notification-panel" class="notif-panel">
-                    <div class="notif-panel-header">
-                        <div class="notif-panel-title-row">
-                            <span class="notif-panel-title">Notifications</span>
-                            <span class="notif-unread-badge" id="notif-unread-badge" style="display:none;">0</span>
-                        </div>
-                        <div class="notif-panel-actions">
-                            <button class="notif-action-btn" id="notif-mark-all-btn">Mark all read</button>
-                            <button class="notif-action-btn notif-clear-btn" id="notif-clear-btn">Clear</button>
-                        </div>
-                    </div>
-                    <div class="notif-items-list" id="notification-list">
-                    </div>
-                    <div class="notif-empty" id="notif-empty-state" style="display:flex;">
-                        <div class="notif-empty-icon">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.75" stroke="currentColor" width="32" height="32"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"/></svg>
-                        </div>
-                        <p class="notif-empty-text">You're all caught up!</p>
-                        <p class="notif-empty-sub">No new notifications</p>
-                    </div>
-                </div>
-            </div>
-            <div class="user-avatar-btn" id="nav-user-avatar">U</div>
-        </div>
-    </header>
-
-    <aside id="user-menu" class="sidebar">
 
         <nav class="sidebar-nav">
             <button class="nav-btn menu-link sidebar-link active" data-view="dashboard-view">
@@ -2161,6 +2254,7 @@
     <button class="pd-item" id="pd-notif-btn" role="menuitem"><svg class="pd-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"/></svg>Notification Preferences</button>
     <button class="pd-item" id="pd-help-btn" role="menuitem"><svg class="pd-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z"/></svg>Help &amp; Support</button>
     <button class="pd-item" id="pd-privacy-btn" role="menuitem"><svg class="pd-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/></svg>Privacy &amp; Security</button>
+    <button class="pd-item" id="pd-theme-toggle" role="menuitem"><svg class="pd-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/></svg><span id="pd-theme-label">Dark Mode</span></button>
     <div class="pd-divider"></div>
     <button class="pd-item pd-logout-item" id="pd-logout-btn" role="menuitem"><svg class="pd-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75"/></svg>Sign Out</button>
 </div>
