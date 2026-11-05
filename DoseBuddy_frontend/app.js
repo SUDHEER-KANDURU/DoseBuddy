@@ -5804,6 +5804,10 @@ function startNewConversation() {
     // Clear the input and re-enable the send button logic.
     if (chatInput) {
         chatInput.value = "";
+        try {
+            chatInput.dispatchEvent(new Event("input", { bubbles: true }));
+            chatInput.dispatchEvent(new Event("change", { bubbles: true }));
+        } catch (_) {}
         syncChatInputHeight();
     }
     updateSendButton();
@@ -5920,9 +5924,24 @@ async function sendChatMessage(overrideMessage) {
     updateSendButton();
 
     // Clear input immediately so text is NEVER stuck in chatbox
-    if (chatInput && (!isOverride || chatInput.value.trim() === message)) {
+    if (chatInput) {
         chatInput.value = "";
+        try {
+            chatInput.dispatchEvent(new Event("input", { bubbles: true }));
+            chatInput.dispatchEvent(new Event("change", { bubbles: true }));
+        } catch (_) {}
         syncChatInputHeight();
+        // Defensive double-clear to prevent QuillBot/Grammarly/extensions or browser IME from restoring sent text
+        setTimeout(() => {
+            if (chatInput && (chatInput.value === message || chatInput.value.trim() === message)) {
+                chatInput.value = "";
+                try {
+                    chatInput.dispatchEvent(new Event("input", { bubbles: true }));
+                    chatInput.dispatchEvent(new Event("change", { bubbles: true }));
+                } catch (_) {}
+                syncChatInputHeight();
+            }
+        }, 10);
     }
 
     // Remove starter welcome banner on first user message so chat area is clean
@@ -5981,6 +6000,9 @@ async function sendChatMessage(overrideMessage) {
             return;
         }
 
+        if (data.conversationId) {
+            aiConversationState.conversationId = data.conversationId;
+        }
         // Update conversation state
         aiConversationState.state = data.conversationState || {};
         if (data.message) {
@@ -6076,7 +6098,7 @@ async function loadPastConversationsList() {
     if (!listEl) return;
 
     // Ensure currently active conversation is registered in local index
-    if (aiConversationState.conversationId) {
+    if (aiConversationState.conversationId || (Array.isArray(aiConversationState.history) && aiConversationState.history.length > 0)) {
         saveAiConversationLocally();
     } else {
         try {
@@ -6204,6 +6226,13 @@ function renderPastChatsList(conversations) {
 }
 
 async function switchConversation(conversationId) {
+    if (!conversationId) return;
+    if (conversationId === aiConversationState.conversationId) {
+        closePastChatsModal();
+        const chatInput = document.getElementById("ai-chat-input");
+        if (chatInput) chatInput.focus();
+        return;
+    }
     try {
         closePastChatsModal();
         showChatThinking();
@@ -6465,6 +6494,11 @@ async function sendOptionSelection(value) {
         aiConversationState.history = aiConversationState.history.slice(-20);
     }
 
+    if (!aiConversationState.conversationId) {
+        aiConversationState.conversationId = "chat_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9);
+    }
+    saveAiConversationLocally();
+
     // Show a thinking indicator while we wait for the assistant's reply
     showChatThinking();
 
@@ -6492,6 +6526,9 @@ async function sendOptionSelection(value) {
             throw new Error(data.error || "Unknown error");
         }
 
+        if (data.conversationId) {
+            aiConversationState.conversationId = data.conversationId;
+        }
         // Validate response data before using
         if (data.conversationState) {
             aiConversationState.state = data.conversationState;
@@ -6504,6 +6541,7 @@ async function sendOptionSelection(value) {
         }
 
         handleAiResponse(data);
+        saveAiConversationLocally();
         return true;
 
     } catch (error) {
