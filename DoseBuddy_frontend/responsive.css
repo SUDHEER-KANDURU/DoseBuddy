@@ -1985,31 +1985,49 @@ body.dark-mode #auth-view {
   color: var(--text-primary, #1a1714) !important;
 }
 
-#auth-view .auth-page,
-body.dark-mode #auth-view .auth-page {
-  background: transparent !important;
-  color: var(--text-primary, #1a1714) !important;
+#auth-view .auth-brand-panel,
+body.dark-mode #auth-view .auth-brand-panel {
+  background: #087f78 !important;
+  color: #fff !important;
+}
+
+#auth-view .auth-brand-headline,
+body.dark-mode #auth-view .auth-brand-headline,
+#auth-view .auth-brand-title,
+body.dark-mode #auth-view .auth-brand-title {
+  color: #fff !important;
+}
+
+#auth-view .auth-brand-desc,
+body.dark-mode #auth-view .auth-brand-desc {
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+
+#auth-view .auth-brand-footer,
+body.dark-mode #auth-view .auth-brand-footer,
+#auth-view .auth-brand-footer span,
+body.dark-mode #auth-view .auth-brand-footer span {
+  color: rgba(255, 255, 255, 0.85) !important;
 }
 
 #auth-view .auth-card,
 body.dark-mode #auth-view .auth-card {
-  background: linear-gradient(160deg, #f5f1ec 80%, rgba(0,161,155,0.04) 100%) !important;
+  background: var(--bg, #E4DDD3) !important;
   color: var(--text-primary, #1a1714) !important;
-  border: 1px solid var(--border, #cfc8be) !important;
 }
 
-#auth-view .form-label,
-#auth-view label,
-#auth-view p,
-#auth-view h1,
-#auth-view h2,
-#auth-view h3,
-body.dark-mode #auth-view .form-label,
-body.dark-mode #auth-view label,
-body.dark-mode #auth-view p,
-body.dark-mode #auth-view h1,
-body.dark-mode #auth-view h2,
-body.dark-mode #auth-view h3 {
+#auth-view .auth-card .form-label,
+#auth-view .auth-card label,
+#auth-view .auth-card p,
+#auth-view .auth-card h1,
+#auth-view .auth-card h2,
+#auth-view .auth-card h3,
+body.dark-mode #auth-view .auth-card .form-label,
+body.dark-mode #auth-view .auth-card label,
+body.dark-mode #auth-view .auth-card p,
+body.dark-mode #auth-view .auth-card h1,
+body.dark-mode #auth-view .auth-card h2,
+body.dark-mode #auth-view .auth-card h3 {
   color: var(--text-primary, #1a1714) !important;
 }
 

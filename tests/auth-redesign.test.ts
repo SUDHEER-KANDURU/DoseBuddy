@@ -13,10 +13,13 @@ describe('Auth Redesign - Split-Screen Experience & Design Tokens', () => {
     const css = fs.readFileSync(cssPath, 'utf8');
     const resp = fs.readFileSync(respPath, 'utf8');
 
-    it('illustration asset exists in DoseBuddy_frontend', () => {
-        assert.ok(fs.existsSync(imgPath), 'auth-illustration.png must exist');
-        const stats = fs.statSync(imgPath);
-        assert.ok(stats.size > 10000, 'auth-illustration.png must be a valid non-empty image file');
+    it('illustration is purely code-based SVG without raster images or screenshots', () => {
+        assert.ok(!fs.existsSync(imgPath), 'auth-illustration.png must NOT exist - illustration must be code-generated');
+        assert.ok(html.includes('class="auth-illustration-svg"'), 'auth-illustration-svg element exists');
+        assert.ok(html.includes('id="medication-capsule"'), '3D medication capsule SVG element exists');
+        assert.ok(html.includes('id="dose-tracker-tiles"'), 'Dose tracker tiles grid SVG element exists');
+        assert.ok(html.includes('id="cal-front-page"'), 'Calendar front page SVG element exists');
+        assert.ok(html.includes('class="auth-illustration-badge"'), 'Bookmark badge exists in illustration card');
     });
 
     it('HTML markup contains left brand panel and right authentication panel', () => {
@@ -25,7 +28,6 @@ describe('Auth Redesign - Split-Screen Experience & Design Tokens', () => {
         assert.ok(html.includes('class="auth-brand-badge"'), 'auth-brand-badge exists');
         assert.ok(html.includes('Your health routine, made simpler.'), 'Headline exists');
         assert.ok(html.includes('Stay consistent with your medication and take control of your daily health routine.'), 'Description exists');
-        assert.ok(html.includes('auth-illustration.png'), 'auth-illustration.png referenced');
         assert.ok(html.includes('Medication reminders · Health tracking · AI assistance'), 'Brand features line exists');
 
         // Right panel

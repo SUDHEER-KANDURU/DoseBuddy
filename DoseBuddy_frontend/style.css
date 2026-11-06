@@ -1609,7 +1609,8 @@ tr.due-now { animation: pulse-row 2s ease infinite; }
   justify-content: center;
 }
 
-.auth-illustration-img {
+.auth-illustration-img,
+.auth-illustration-svg {
   width: 100%;
   height: auto;
   display: block;

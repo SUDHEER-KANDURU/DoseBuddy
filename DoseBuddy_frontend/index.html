@@ -43,12 +43,132 @@
 
             <div class="auth-brand-illustration-wrap">
                 <div class="auth-illustration-card">
-                    <img src="auth-illustration.png" alt="DoseBuddy medication schedule and health tracker" class="auth-illustration-img">
                     <div class="auth-illustration-badge" aria-hidden="true" title="Healthcare Routine">
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" width="16" height="16">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z" />
                         </svg>
                     </div>
+                    <svg class="auth-illustration-svg" viewBox="0 0 380 340" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <defs>
+                            <filter id="cal-shadow" x="0" y="270" width="380" height="70" filterUnits="userSpaceOnUse">
+                                <feGaussianBlur stdDeviation="8" />
+                                <feColorMatrix type="matrix" values="0 0 0 0 0.08   0 0 0 0 0.22   0 0 0 0 0.22  0 0 0 0.25 0" />
+                            </filter>
+                            <filter id="capsule-shadow" x="30" y="30" width="220" height="200" filterUnits="userSpaceOnUse">
+                                <feDropShadow dx="-3" dy="10" stdDeviation="7" flood-color="#0f453f" flood-opacity="0.32" />
+                            </filter>
+                            <filter id="tile-bevel" x="-20%" y="-20%" width="140%" height="140%">
+                                <feDropShadow dx="0" dy="2" stdDeviation="1.5" flood-color="#000000" flood-opacity="0.08" />
+                            </filter>
+                            <linearGradient id="cal-frame-grad" x1="50" y1="90" x2="280" y2="310" gradientUnits="userSpaceOnUse">
+                                <stop offset="0%" stop-color="#91d8d1" />
+                                <stop offset="60%" stop-color="#73bdb5" />
+                                <stop offset="100%" stop-color="#5faea6" />
+                            </linearGradient>
+                            <linearGradient id="cal-kickstand-grad" x1="260" y1="120" x2="310" y2="300" gradientUnits="userSpaceOnUse">
+                                <stop offset="0%" stop-color="#1f6761" />
+                                <stop offset="100%" stop-color="#134944" />
+                            </linearGradient>
+                            <linearGradient id="cal-header-grad" x1="60" y1="110" x2="260" y2="135" gradientUnits="userSpaceOnUse">
+                                <stop offset="0%" stop-color="#9ddcd5" />
+                                <stop offset="100%" stop-color="#7fc4bc" />
+                            </linearGradient>
+                            <linearGradient id="ring-metal-1" x1="0" y1="0" x2="1" y2="1">
+                                <stop offset="0%" stop-color="#ffffff" />
+                                <stop offset="35%" stop-color="#b0bec5" />
+                                <stop offset="70%" stop-color="#546e7a" />
+                                <stop offset="100%" stop-color="#cfd8dc" />
+                            </linearGradient>
+                            <linearGradient id="capsule-teal-grad" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stop-color="#4ae3da" />
+                                <stop offset="25%" stop-color="#17a29b" />
+                                <stop offset="70%" stop-color="#0a706a" />
+                                <stop offset="100%" stop-color="#054c47" />
+                            </linearGradient>
+                            <linearGradient id="capsule-mint-grad" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stop-color="#f2fefc" />
+                                <stop offset="30%" stop-color="#b2ece4" />
+                                <stop offset="75%" stop-color="#76ccc3" />
+                                <stop offset="100%" stop-color="#4ea399" />
+                            </linearGradient>
+                            <linearGradient id="t-sage" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stop-color="#a9cbbf" /><stop offset="100%" stop-color="#80a79a" />
+                            </linearGradient>
+                            <linearGradient id="t-mint" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stop-color="#c1ebd9" /><stop offset="100%" stop-color="#9ad1bc" />
+                            </linearGradient>
+                            <linearGradient id="t-light-mint" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stop-color="#dff5ec" /><stop offset="100%" stop-color="#bae5d4" />
+                            </linearGradient>
+                            <linearGradient id="t-peach" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stop-color="#fba88f" /><stop offset="100%" stop-color="#e87858" />
+                            </linearGradient>
+                            <linearGradient id="t-purple" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stop-color="#bba2dd" /><stop offset="100%" stop-color="#9376bd" />
+                            </linearGradient>
+                            <linearGradient id="t-amber" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stop-color="#fed67c" /><stop offset="100%" stop-color="#f1ad36" />
+                            </linearGradient>
+                            <linearGradient id="t-coral" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stop-color="#f89d87" /><stop offset="100%" stop-color="#db674d" />
+                            </linearGradient>
+                            <linearGradient id="t-teal" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stop-color="#80b9ab" /><stop offset="100%" stop-color="#559384" />
+                            </linearGradient>
+                        </defs>
+                        <ellipse cx="180" cy="305" rx="130" ry="12" fill="#000" opacity="0.1" filter="url(#cal-shadow)" />
+                        <path d="M 248 150 L 290 282 L 268 284 L 236 170 Z" fill="url(#cal-kickstand-grad)" />
+                        <path d="M 268 284 L 290 282 L 283 290 L 262 288 Z" fill="#0d3632" />
+                        <path d="M 52 110 Q 50 96 66 94 L 244 94 Q 260 96 258 110 L 270 284 Q 271 294 258 295 L 46 295 Q 33 294 36 284 Z" fill="url(#cal-frame-grad)" />
+                        <path d="M 258 110 L 270 284 Q 271 294 258 295 L 250 295 L 244 115 Z" fill="#529b93" opacity="0.4" />
+                        <g id="cal-front-page">
+                            <rect x="48" y="115" width="204" height="172" rx="14" fill="#ffffff" />
+                            <path d="M 48 129 C 48 121 54 115 62 115 L 238 115 C 246 115 252 121 252 129 L 252 140 L 48 140 Z" fill="url(#cal-header-grad)" />
+                            <path d="M 48 274 Q 150 284 252 274 L 252 280 Q 150 291 48 280 Z" fill="#000" opacity="0.06" />
+                        </g>
+                        <g id="spiral-ring-left">
+                            <ellipse cx="88" cy="128" rx="6" ry="7" fill="#3f7d75" />
+                            <path d="M 83 134 C 77 114 77 78 88 78 C 99 78 99 114 93 134" stroke="url(#ring-metal-1)" stroke-width="6.5" stroke-linecap="round" fill="none" />
+                            <path d="M 85 130 C 81 114 81 83 88 83 C 95 83 95 114 91 130" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round" fill="none" opacity="0.9" />
+                        </g>
+                        <g id="spiral-ring-right">
+                            <ellipse cx="212" cy="128" rx="6" ry="7" fill="#3f7d75" />
+                            <path d="M 207 134 C 201 114 201 78 212 78 C 223 78 223 114 217 134" stroke="url(#ring-metal-1)" stroke-width="6.5" stroke-linecap="round" fill="none" />
+                            <path d="M 209 130 C 205 114 205 83 212 83 C 219 83 219 114 215 130" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round" fill="none" opacity="0.9" />
+                        </g>
+                        <g id="dose-tracker-tiles" filter="url(#tile-bevel)">
+                            <rect x="66" y="154" width="34" height="26" rx="9" fill="url(#t-sage)" />
+                            <rect x="108" y="154" width="34" height="26" rx="9" fill="url(#t-mint)" />
+                            <rect x="150" y="154" width="34" height="26" rx="9" fill="url(#t-light-mint)" />
+                            <rect x="192" y="154" width="34" height="26" rx="9" fill="url(#t-sage)" />
+
+                            <rect x="66" y="188" width="34" height="26" rx="9" fill="url(#t-teal)" />
+                            <rect x="108" y="188" width="34" height="26" rx="9" fill="url(#t-sage)" />
+                            <rect x="150" y="188" width="34" height="26" rx="9" fill="url(#t-peach)" />
+                            <rect x="192" y="188" width="34" height="26" rx="9" fill="url(#t-purple)" />
+
+                            <rect x="66" y="222" width="34" height="26" rx="9" fill="url(#t-light-mint)" />
+                            <rect x="108" y="222" width="34" height="26" rx="9" fill="url(#t-teal)" />
+                            <rect x="150" y="222" width="34" height="26" rx="9" fill="url(#t-amber)" />
+                            <rect x="192" y="222" width="34" height="26" rx="9" fill="url(#t-mint)" />
+
+                            <rect x="66" y="256" width="34" height="26" rx="9" fill="url(#t-coral)" />
+                            <rect x="108" y="256" width="34" height="26" rx="9" fill="url(#t-mint)" />
+                            <rect x="150" y="256" width="34" height="26" rx="9" fill="url(#t-teal)" />
+                            <rect x="192" y="256" width="34" height="26" rx="9" fill="url(#t-light-mint)" />
+                        </g>
+                        <g id="medication-capsule" filter="url(#capsule-shadow)" transform="translate(142, 94) rotate(-46)">
+                            <path d="M 0 -22 L -34 -22 C -48 -22 -60 -10 -60 4 C -60 18 -48 30 -34 30 L 0 30 Z" fill="url(#capsule-teal-grad)" />
+                            <path d="M 0 -22 L 34 -22 C 48 -22 60 -10 60 4 C 60 18 48 30 34 30 L 0 30 Z" fill="url(#capsule-mint-grad)" />
+                            <line x1="0" y1="-22" x2="0" y2="30" stroke="#167972" stroke-width="1.5" />
+                            <line x1="1" y1="-22" x2="1" y2="30" stroke="#ffffff" stroke-width="1.2" opacity="0.6" />
+                            <path d="M -8 -16 L -34 -16 C -44 -16 -52 -8 -52 2 C -52 4 -48 0 -42 -2 L -8 -2 Z" fill="#ffffff" opacity="0.65" />
+                            <ellipse cx="-44" cy="-5" rx="8" ry="4" transform="rotate(-15 -44 -5)" fill="#ffffff" opacity="0.75" />
+                            <path d="M 8 -16 L 34 -16 C 44 -16 52 -8 52 2 C 52 4 48 0 42 -2 L 8 -2 Z" fill="#ffffff" opacity="0.75" />
+                            <ellipse cx="38" cy="-6" rx="10" ry="5" transform="rotate(12 38 -6)" fill="#ffffff" opacity="0.9" />
+                            <path d="M -40 24 Q 0 32 40 24" stroke="#d5fbf6" stroke-width="2.5" stroke-linecap="round" opacity="0.5" fill="none" />
+                        </g>
+                    </svg>
                 </div>
             </div>
 
